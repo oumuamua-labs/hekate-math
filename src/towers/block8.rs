@@ -496,9 +496,7 @@ impl HardwareField for Block8 {
 
     #[inline(always)]
     fn tower_bit_from_hardware(self, bit_idx: usize) -> u8 {
-        assert!(bit_idx < 8, "bit index out of bounds for Block8");
-
-        let mask = unsafe { *FLAT_TO_TOWER_BIT_MASKS_8.get_unchecked(bit_idx) };
+        let mask = FLAT_TO_TOWER_BIT_MASKS_8[bit_idx];
 
         // Parity of (x & mask) without popcount
         let mut v = self.0 & mask;

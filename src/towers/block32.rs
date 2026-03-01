@@ -598,12 +598,11 @@ mod neon {
             let mut res = l ^ folded;
 
             // 3. Reduce carry
-            if carry != 0 {
-                let carry_red = vmull_p64(carry as u64, r_val);
-                let carry_res_vec: uint64x2_t = transmute(carry_red);
-                let carry_val = vgetq_lane_u64(carry_res_vec, 0);
-                res ^= carry_val as u32;
-            }
+            let carry_red = vmull_p64(carry as u64, r_val);
+            let carry_res_vec: uint64x2_t = transmute(carry_red);
+            let carry_val = vgetq_lane_u64(carry_res_vec, 0);
+
+            res ^= carry_val as u32;
 
             Block32(res)
         }

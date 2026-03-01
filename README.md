@@ -257,7 +257,7 @@ where βᵢ is the extension constant (`EXTENSION_TAU`) for that level.
 | h=6    | 𝔽(2^64)  | `Block64`      | 0x20000000 ∈ Block32         | Recursive / Karatsuba |
 | h=7    | 𝔽(2^128) | `Block128`     | 0x2000000000000000 ∈ Block64 | Recursive / Karatsuba |
 
-*Note: The tower is rooted at 𝔽(2^8) (AES Field) for hardware compatibility. Lower fields (Bit)
+*Note: The tower is rooted at F(2^8) (AES Field) for hardware compatibility. Lower fields (Bit)
 are subfields embedded via isomorphism, making this a Hybrid Tower construction.*
 
 ## The Isomorphic Basis Architecture
