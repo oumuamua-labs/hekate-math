@@ -1,12 +1,13 @@
 # hekate-math
 
-Copyright (c) Andrei Kochergin and Oumuamua Labs.
+**Hardware-Accelerated Binary Tower Fields for Zero-Knowledge Proofs.**
 
-> **Hardware-Accelerated Binary Tower Fields for Zero-Knowledge Proofs.**
+Copyright (c) Andrei Kochergin and Oumuamua Labs.
 
 > [!IMPORTANT]
 > This is the high-performance mathematical core of the Hekate ZK Engine.
->
+
+> [!WARNING]
 > SECURITY NOTICE: This implementation is currently UNAUDITED.
 >
 > It is provided "AS IS" with ABSOLUTELY NO WARRANTY under the terms
@@ -28,7 +29,7 @@ polynomial (flat/hardware) representations.
 
 ```toml
 [dependencies]
-hekate-groestl = { git = "https://github.com/oumuamua-labs/hekate-groestl" }
+hekate-math = { git = "https://github.com/oumuamua-labs/hekate-math" }
 ```
 
 ## Usage Examples
@@ -150,7 +151,7 @@ fn process_simd(data: &[Block128]) {
 
 fn example_simd() {
     let data: Vec<Block128> = (0..8).map(|i| Block128::from(i as u128 + 1)).collect();
-    example_simd(&data);
+    process_simd(&data);
 }
 ```
 
@@ -402,25 +403,27 @@ Benchmarks for `Block128` SpMV with fixed degree 16 (typical for Brakedown/Biniu
 
 ### Reproduce benchmarks
 
-Use the following commands:
-
-Secure (Default) / Uses constant-time bitsliced matrix multiplication for basis conversion and lifting:
-
-```bash
-cargo bench
-```
-
-Fast (table-math) / Uses precomputed lookup tables for basis conversion:
-
-```bash
-cargo bench --features table-math
-```
-
 > [!IMPORTANT]
 > Hardware arithmetic performance (e.g., mul_hardware, add_hardware) remains identical
 > regardless of the `table-math` feature. This feature specifically optimizes the Isomorphism
 > (basis conversion) and Lifting operations. The actual field arithmetic in the flat basis
 > always utilizes the fastest available hardware instructions (PMULL / PCLMULQDQ).
+
+#### Secure (Default)
+
+Uses constant-time bitsliced matrix multiplication for basis conversion and lifting:
+
+```bash
+cargo bench
+```
+
+#### Fast (table-math)
+
+Uses precomputed lookup tables for basis conversion:
+
+```bash
+cargo bench --features table-math
+```
 
 ## References
 
