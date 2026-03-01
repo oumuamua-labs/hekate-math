@@ -1,0 +1,416 @@
+// SPDX-License-Identifier: Apache-2.0
+// This file is part of the hekate-math project.
+// Copyright (C) 2026 Andrei Kochergin <zeek@tuta.com>
+// Copyright (C) 2026 Oumuamua Labs. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use hekate_math::{Bit, Block8, Block16, Block32, Block64, Block128, HardwareField, TowerField};
+use proptest::prelude::*;
+
+// Strategy:
+// Generate any valid Bit (0 or 1)
+fn any_bit() -> impl Strategy<Value = Bit> {
+    (0u8..=1).prop_map(Bit::new)
+}
+
+// Strategy:
+// Generate any Block8 from a random u8
+fn any_block8() -> impl Strategy<Value = Block8> {
+    any::<u8>().prop_map(Block8)
+}
+
+// Strategy:
+// Generate any Block16 from a random u16
+fn any_block16() -> impl Strategy<Value = Block16> {
+    any::<u16>().prop_map(Block16)
+}
+
+// Strategy:
+// Generate any Block64 from a random u64
+fn any_block64() -> impl Strategy<Value = Block64> {
+    any::<u64>().prop_map(Block64)
+}
+
+// Strategy:
+// Generate any Block32 from a random u32
+fn any_block32() -> impl Strategy<Value = Block32> {
+    any::<u32>().prop_map(Block32)
+}
+
+// Strategy: Generate any Block128 from a random u128
+fn any_block128() -> impl Strategy<Value = Block128> {
+    any::<u128>().prop_map(Block128)
+}
+
+proptest! {
+    // ==================================
+    // Bit
+    // ==================================
+
+    // 1. Associativity
+    #[test]
+    fn prop_bit_add_associativity(a in any_bit(), b in any_bit(), c in any_bit()) {
+        // (a + b) + c == a + (b + c)
+        prop_assert_eq!((a + b) + c, a + (b + c));
+    }
+
+    #[test]
+    fn prop_bit_mul_associativity(a in any_bit(), b in any_bit(), c in any_bit()) {
+        // (a * b) * c == a * (b * c)
+        prop_assert_eq!((a * b) * c, a * (b * c));
+    }
+
+    // 2. Distributivity
+    #[test]
+    fn prop_bit_distributivity(a in any_bit(), b in any_bit(), c in any_bit()) {
+        // a * (b + c) == a * b + a * c
+        prop_assert_eq!(a * (b + c), a * b + a * c);
+    }
+
+    // 3. Identity
+    #[test]
+    fn prop_bit_add_identity(a in any_bit()) {
+        // a + 0 == a
+        prop_assert_eq!(a + Bit::ZERO, a);
+        prop_assert_eq!(Bit::ZERO + a, a);
+    }
+
+    #[test]
+    fn prop_bit_mul_identity(a in any_bit()) {
+        // a * 1 == a
+        prop_assert_eq!(a * Bit::ONE, a);
+        prop_assert_eq!(Bit::ONE * a, a);
+    }
+
+    // 4. Inverse Properties (Field axioms)
+    #[test]
+    fn prop_bit_additive_inverse(a in any_bit()) {
+        // a + (-a) == 0.
+        // In GF(2^n), -a = a, so a + a == 0.
+        prop_assert_eq!(a + a, Bit::ZERO);
+    }
+
+    // 5. Annihilation
+     #[test]
+    fn prop_bit_mul_annihilation(a in any_bit()) {
+        // a * 0 == 0
+        prop_assert_eq!(a * Bit::ZERO, Bit::ZERO);
+        prop_assert_eq!(Bit::ZERO * a, Bit::ZERO);
+    }
+
+    // ==================================
+    // Block8
+    // ==================================
+
+    // 1. Associativity
+    #[test]
+    fn prop_block8_add_associativity(a in any_block8(), b in any_block8(), c in any_block8()) {
+        // (a + b) + c == a + (b + c)
+        prop_assert_eq!((a + b) + c, a + (b + c));
+    }
+
+    #[test]
+    fn prop_block8_mul_associativity(a in any_block8(), b in any_block8(), c in any_block8()) {
+        // (a * b) * c == a * (b * c)
+        prop_assert_eq!((a * b) * c, a * (b * c));
+    }
+
+    // 2. Distributivity
+    #[test]
+    fn prop_block8_distributivity(a in any_block8(), b in any_block8(), c in any_block8()) {
+        // a * (b + c) == a * b + a * c
+        prop_assert_eq!(a * (b + c), a * b + a * c);
+    }
+
+    // 3. Identity
+    #[test]
+    fn prop_block8_add_identity(a in any_block8()) {
+        // a + 0 == a
+        prop_assert_eq!(a + Block8::ZERO, a);
+        prop_assert_eq!(Block8::ZERO + a, a);
+    }
+
+    #[test]
+    fn prop_block8_mul_identity(a in any_block8()) {
+        // a * 1 == a
+        prop_assert_eq!(a * Block8::ONE, a);
+        prop_assert_eq!(Block8::ONE * a, a);
+    }
+
+    // 4. Additive Inverse (Characteristic 2)
+    #[test]
+    fn prop_block8_additive_inverse(a in any_block8()) {
+        // a + a == 0
+        prop_assert_eq!(a + a, Block8::ZERO);
+    }
+
+    // 5. Annihilation
+    #[test]
+    fn prop_block8_mul_annihilation(a in any_block8()) {
+        // a * 0 == 0
+        prop_assert_eq!(a * Block8::ZERO, Block8::ZERO);
+        prop_assert_eq!(Block8::ZERO * a, Block8::ZERO);
+    }
+
+    // 6. Hardware Isomorphism Roundtrip
+    #[test]
+    fn prop_block8_hardware_iso_roundtrip(a in any_block8()) {
+        // convert(to_hardware(a)) == a
+        prop_assert_eq!(a.to_hardware().convert_hardware(), a);
+    }
+
+    // ==================================
+    // Block16
+    // ==================================
+
+    // 1. Associativity
+    #[test]
+    fn prop_block16_add_associativity(a in any_block16(), b in any_block16(), c in any_block16()) {
+        // (a + b) + c == a + (b + c)
+        prop_assert_eq!((a + b) + c, a + (b + c));
+    }
+
+    #[test]
+    fn prop_block16_mul_associativity(a in any_block16(), b in any_block16(), c in any_block16()) {
+        // (a * b) * c == a * (b * c)
+        prop_assert_eq!((a * b) * c, a * (b * c));
+    }
+
+    // 2. Distributivity
+    #[test]
+    fn prop_block16_distributivity(a in any_block16(), b in any_block16(), c in any_block16()) {
+        // a * (b + c) == a * b + a * c
+        prop_assert_eq!(a * (b + c), a * b + a * c);
+    }
+
+    // 3. Identity
+    #[test]
+    fn prop_block16_add_identity(a in any_block16()) {
+        // a + 0 == a
+        prop_assert_eq!(a + Block16::ZERO, a);
+        prop_assert_eq!(Block16::ZERO + a, a);
+    }
+
+    #[test]
+    fn prop_block16_mul_identity(a in any_block16()) {
+        // a * 1 == a
+        prop_assert_eq!(a * Block16::ONE, a);
+        prop_assert_eq!(Block16::ONE * a, a);
+    }
+
+    // 4. Additive Inverse
+    #[test]
+    fn prop_block16_additive_inverse(a in any_block16()) {
+        // a + a == 0
+        prop_assert_eq!(a + a, Block16::ZERO);
+    }
+
+    // 5. Annihilation
+    #[test]
+    fn prop_block16_mul_annihilation(a in any_block16()) {
+        // a * 0 == 0
+        prop_assert_eq!(a * Block16::ZERO, Block16::ZERO);
+        prop_assert_eq!(Block16::ZERO * a, Block16::ZERO);
+    }
+
+    // 6. Hardware Isomorphism Roundtrip
+    #[test]
+    fn prop_block16_hardware_iso_roundtrip(a in any_block16()) {
+        // convert(to_hardware(a)) == a
+        prop_assert_eq!(a.to_hardware().convert_hardware(), a);
+    }
+
+    // ==================================
+    // Block32
+    // ==================================
+
+    // 1. Associativity
+    #[test]
+    fn prop_block32_add_associativity(a in any_block32(), b in any_block32(), c in any_block32()) {
+        // (a + b) + c == a + (b + c)
+        prop_assert_eq!((a + b) + c, a + (b + c));
+    }
+
+    #[test]
+    fn prop_block32_mul_associativity(a in any_block32(), b in any_block32(), c in any_block32()) {
+        // (a * b) * c == a * (b * c)
+        prop_assert_eq!((a * b) * c, a * (b * c));
+    }
+
+    // 2. Distributivity
+    #[test]
+    fn prop_block32_distributivity(a in any_block32(), b in any_block32(), c in any_block32()) {
+        // a * (b + c) == a * b + a * c
+        prop_assert_eq!(a * (b + c), a * b + a * c);
+    }
+
+    // 3. Identity
+    #[test]
+    fn prop_block32_add_identity(a in any_block32()) {
+        // a + 0 == a
+        prop_assert_eq!(a + Block32::ZERO, a);
+        prop_assert_eq!(Block32::ZERO + a, a);
+    }
+
+    #[test]
+    fn prop_block32_mul_identity(a in any_block32()) {
+        // a * 1 == a
+        prop_assert_eq!(a * Block32::ONE, a);
+        prop_assert_eq!(Block32::ONE * a, a);
+    }
+
+    // 4. Additive Inverse
+    #[test]
+    fn prop_block32_additive_inverse(a in any_block32()) {
+        // a + a == 0
+        prop_assert_eq!(a + a, Block32::ZERO);
+    }
+
+    // 5. Annihilation
+    #[test]
+    fn prop_block32_mul_annihilation(a in any_block32()) {
+        // a * 0 == 0
+        prop_assert_eq!(a * Block32::ZERO, Block32::ZERO);
+        prop_assert_eq!(Block32::ZERO * a, Block32::ZERO);
+    }
+
+    // 6. Hardware Isomorphism Roundtrip
+    #[test]
+    fn prop_block32_hardware_iso_roundtrip(a in any_block32()) {
+        // convert(to_hardware(a)) == a
+        prop_assert_eq!(a.to_hardware().convert_hardware(), a);
+    }
+
+    // ==================================
+    // Block64
+    // ==================================
+
+    // 1. Associativity
+    #[test]
+    fn prop_block64_add_associativity(a in any_block64(), b in any_block64(), c in any_block64()) {
+        // (a + b) + c == a + (b + c)
+        prop_assert_eq!((a + b) + c, a + (b + c));
+    }
+
+    #[test]
+    fn prop_block64_mul_associativity(a in any_block64(), b in any_block64(), c in any_block64()) {
+        // (a * b) * c == a * (b * c)
+        prop_assert_eq!((a * b) * c, a * (b * c));
+    }
+
+    // 2. Distributivity
+    #[test]
+    fn prop_block64_distributivity(a in any_block64(), b in any_block64(), c in any_block64()) {
+        // a * (b + c) == a * b + a * c
+        prop_assert_eq!(a * (b + c), a * b + a * c);
+    }
+
+    // 3. Identity
+    #[test]
+    fn prop_block64_add_identity(a in any_block64()) {
+        // a + 0 == a
+        prop_assert_eq!(a + Block64::ZERO, a);
+        prop_assert_eq!(Block64::ZERO + a, a);
+    }
+
+    #[test]
+    fn prop_block64_mul_identity(a in any_block64()) {
+        // a * 1 == a
+        prop_assert_eq!(a * Block64::ONE, a);
+        prop_assert_eq!(Block64::ONE * a, a);
+    }
+
+    // 4. Additive Inverse
+    #[test]
+    fn prop_block64_additive_inverse(a in any_block64()) {
+        // a + a == 0
+        prop_assert_eq!(a + a, Block64::ZERO);
+    }
+
+    // 5. Annihilation
+    #[test]
+    fn prop_block64_mul_annihilation(a in any_block64()) {
+        // a * 0 == 0
+        prop_assert_eq!(a * Block64::ZERO, Block64::ZERO);
+        prop_assert_eq!(Block64::ZERO * a, Block64::ZERO);
+    }
+
+    // 6. Hardware Isomorphism Roundtrip
+    #[test]
+    fn prop_block64_hardware_iso_roundtrip(a in any_block64()) {
+        // convert(to_hardware(a)) == a
+        prop_assert_eq!(a.to_hardware().convert_hardware(), a);
+    }
+
+    // ==================================
+    // Block128
+    // ==================================
+
+    // 1. Associativity
+    #[test]
+    fn prop_block128_add_associativity(a in any_block128(), b in any_block128(), c in any_block128()) {
+        // (a + b) + c == a + (b + c)
+        prop_assert_eq!((a + b) + c, a + (b + c));
+    }
+
+    #[test]
+    fn prop_block128_mul_associativity(a in any_block128(), b in any_block128(), c in any_block128()) {
+        // (a * b) * c == a * (b * c)
+        prop_assert_eq!((a * b) * c, a * (b * c));
+    }
+
+    // 2. Distributivity
+    #[test]
+    fn prop_block128_distributivity(a in any_block128(), b in any_block128(), c in any_block128()) {
+        // a * (b + c) == a * b + a * c
+        prop_assert_eq!(a * (b + c), a * b + a * c);
+    }
+
+    // 3. Identity
+    #[test]
+    fn prop_block128_add_identity(a in any_block128()) {
+        // a + 0 == a
+        prop_assert_eq!(a + Block128::ZERO, a);
+        prop_assert_eq!(Block128::ZERO + a, a);
+    }
+
+    #[test]
+    fn prop_block128_mul_identity(a in any_block128()) {
+        // a * 1 == a
+        prop_assert_eq!(a * Block128::ONE, a);
+        prop_assert_eq!(Block128::ONE * a, a);
+    }
+
+    // 4. Additive Inverse
+    #[test]
+    fn prop_block128_additive_inverse(a in any_block128()) {
+        // a + a == 0
+        prop_assert_eq!(a + a, Block128::ZERO);
+    }
+
+    // 5. Annihilation
+    #[test]
+    fn prop_block128_mul_annihilation(a in any_block128()) {
+        // a * 0 == 0
+        prop_assert_eq!(a * Block128::ZERO, Block128::ZERO);
+        prop_assert_eq!(Block128::ZERO * a, Block128::ZERO);
+    }
+
+    // 6. Hardware Isomorphism Roundtrip
+    #[test]
+    fn prop_block128_hardware_iso_roundtrip(a in any_block128()) {
+        // convert(to_hardware(a)) == a
+        prop_assert_eq!(a.to_hardware().convert_hardware(), a);
+    }
+}

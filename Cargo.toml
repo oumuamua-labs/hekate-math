@@ -1,0 +1,47 @@
+[package]
+name = "hekate-math"
+version = "0.1.0"
+edition = "2024"
+authors = ["Oumuamua Labs", "Andrei Kochergin <zeek@tuta.com>"]
+repository = "https://github.com/oumuamua-labs/hekate-math"
+description = "A high-performance, constant-time implementation of binary tower fields (F(2^k)) optimized for GKR-based provers, Virgo, and Binius protocols."
+keywords = ["cryptography", "zk", "binary-fields", "simd", "binius"]
+categories = ["cryptography", "no-std"]
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+default = ["std", "parallel"]
+std = []
+parallel = ["dep:rayon"]
+table-math = []
+
+[dependencies]
+rand = { version = "0.10", default-features = false }
+chacha20 = { version = "0.10", default-features = false, features = ["rng"] }
+rayon = { version = "1.11", optional = true }
+serde = { version = "1.0", default-features = false, features = ["alloc", "derive"] }
+zeroize = { version = "1.8", default-features = false, features = ["derive"] }
+
+[dev-dependencies]
+rand = "0.10"
+proptest = "1.9"
+criterion = "0.8"
+
+[[bench]]
+name = "field_ops"
+harness = false
+
+[[bench]]
+name = "basis_conversion"
+harness = false
+
+[[bench]]
+name = "poly_arithmetic"
+harness = false
+
+[[bench]]
+name = "spmv"
+harness = false
