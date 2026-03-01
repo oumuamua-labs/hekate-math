@@ -77,7 +77,7 @@ impl<F: Copy + Sync> VectorSource<F> for [F] {
         let base_ptr = self.as_ptr();
         for &idx in indices {
             unsafe {
-                let ptr = base_ptr.add(idx) as *const u8;
+                let ptr = base_ptr.wrapping_add(idx) as *const u8;
 
                 // Apple Silicon (M1/M2/M3) & ARM64
                 #[cfg(target_arch = "aarch64")]
@@ -127,6 +127,7 @@ impl ByteSparseMatrix {
         col_indices: Vec<u32>,
     ) -> Self {
         let expected_len = rows.checked_mul(degree).expect("Matrix size overflow");
+
         assert_eq!(
             weights.len(),
             expected_len,
@@ -137,6 +138,15 @@ impl ByteSparseMatrix {
             expected_len,
             "Column indices vector length mismatch"
         );
+
+        for &idx in &col_indices {
+            assert!(
+                (idx as usize) < cols,
+                "Column index {} exceeds matrix columns count {}",
+                idx,
+                cols
+            );
+        }
 
         Self {
             rows,

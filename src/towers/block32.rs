@@ -442,7 +442,7 @@ impl HardwareField for Block32 {
             Self::unpack(rhs, &mut r);
 
             for i in 0..<Self as PackableField>::WIDTH {
-                res[i] = l[i].mul_flat(r[i]);
+                res[i] = l[i].mul_hardware(r[i]);
             }
 
             Self::pack(&res)
