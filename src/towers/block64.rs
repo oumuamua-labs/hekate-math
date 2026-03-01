@@ -494,12 +494,12 @@ impl HardwarePromote<Block8> for Block64 {
 // UTILS
 // ===========================================
 
+#[cfg(target_arch = "aarch64")]
 #[inline(always)]
 pub fn mul_iso_64(a: Block64, b: Block64) -> Block64 {
     let a_flat = a.to_hardware();
     let b_flat = b.to_hardware();
 
-    #[cfg(target_arch = "aarch64")]
     let c_flat = neon::mul_flat_64(a_flat, b_flat);
 
     c_flat.convert_hardware()

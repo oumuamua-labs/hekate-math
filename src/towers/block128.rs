@@ -560,9 +560,6 @@ impl HardwarePromote<Block64> for Block128 {
 impl HardwarePromote<Block8> for Block128 {
     #[inline(always)]
     fn from_partial_hardware(val: Block8) -> Self {
-        // Input is assumed to be in hardware/flat basis
-        // (as stored in Trace). Convert flat byte -> tower byte,
-        // then lift tower byte -> Block128 flat.
         let idx_flat = val.0 as usize;
         let tower_byte = unsafe { *constants::FLAT_TO_TOWER_8.get_unchecked(idx_flat) };
         let idx_tower = tower_byte as usize;
