@@ -258,8 +258,8 @@ impl Add for PackedBit {
         #[cfg(not(target_arch = "aarch64"))]
         {
             let mut res = [Bit::ZERO; PACKED_WIDTH_BIT];
-            for i in 0..PACKED_WIDTH_BIT {
-                res[i] = self.0[i] + rhs.0[i];
+            for ((out, l), r) in res.iter_mut().zip(self.0.iter()).zip(rhs.0.iter()) {
+                *out = *l + *r;
             }
 
             Self(res)
@@ -305,8 +305,8 @@ impl Mul for PackedBit {
         #[cfg(not(target_arch = "aarch64"))]
         {
             let mut res = [Bit::ZERO; PACKED_WIDTH_BIT];
-            for i in 0..PACKED_WIDTH_BIT {
-                res[i] = self.0[i] * rhs.0[i];
+            for ((out, l), r) in res.iter_mut().zip(self.0.iter()).zip(rhs.0.iter()) {
+                *out = *l * *r;
             }
 
             Self(res)
