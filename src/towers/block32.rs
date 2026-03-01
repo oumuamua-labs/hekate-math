@@ -19,7 +19,7 @@
 use crate::towers::bit::Bit;
 use crate::towers::block8::Block8;
 use crate::towers::block16::Block16;
-use crate::{CanonicalDeserialize, constants};
+use crate::{CanonicalDeserialize, HardwarePromote, constants};
 use crate::{CanonicalSerialize, HardwareField, PackableField, TowerField};
 use core::ops::{Add, AddAssign, BitXor, BitXorAssign, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
@@ -31,11 +31,11 @@ struct CtConvertBasisU32<const N: usize>([u32; N]);
 
 #[cfg(not(feature = "table-math"))]
 static TOWER_TO_FLAT_BASIS_32: CtConvertBasisU32<32> =
-    CtConvertBasisU32(gen_basis_32(&constants::TOWER_TO_FLAT_32));
+    CtConvertBasisU32(constants::RAW_TOWER_TO_FLAT_32);
 
 #[cfg(not(feature = "table-math"))]
 static FLAT_TO_TOWER_BASIS_32: CtConvertBasisU32<32> =
-    CtConvertBasisU32(gen_basis_32(&constants::FLAT_TO_TOWER_32));
+    CtConvertBasisU32(constants::RAW_FLAT_TO_TOWER_32);
 
 #[derive(Copy, Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Zeroize)]
 #[repr(transparent)]
@@ -467,6 +467,28 @@ impl HardwareField for Block32 {
     }
 }
 
+impl HardwarePromote<Block8> for Block32 {
+    #[inline(always)]
+    fn from_partial_hardware(val: Block8) -> Self {
+        #[cfg(not(feature = "table-math"))]
+        {
+            let mut acc = 0u32;
+            for i in 0..8 {
+                let bit = (val.0 >> i) & 1;
+                let mask = 0u32.wrapping_sub(bit as u32);
+                acc ^= constants::LIFT_BASIS_8_TO_32[i] & mask;
+            }
+
+            Block32(acc)
+        }
+
+        #[cfg(feature = "table-math")]
+        {
+            Block32(constants::LIFT_TABLE_8_TO_32[val.0 as usize])
+        }
+    }
+}
+
 // ===========================================
 // UTILS
 // ===========================================
@@ -499,20 +521,6 @@ pub fn apply_matrix_32(val: Block32, table: &[u32; 1024]) -> Block32 {
 }
 
 #[cfg(not(feature = "table-math"))]
-const fn apply_matrix_32_const(v: u32, table: &[u32; 1024]) -> u32 {
-    let mut res = 0u32;
-    let mut i = 0usize;
-
-    while i < 4 {
-        let idx = (i * 256) + ((v >> (i * 8)) & 0xFF) as usize;
-        res ^= table[idx];
-        i += 1;
-    }
-
-    res
-}
-
-#[cfg(not(feature = "table-math"))]
 #[inline(always)]
 fn map_ct_32(x: u32, basis: &[u32; 32]) -> u32 {
     let mut acc = 0u32;
@@ -526,19 +534,6 @@ fn map_ct_32(x: u32, basis: &[u32; 32]) -> u32 {
     }
 
     acc
-}
-
-#[cfg(not(feature = "table-math"))]
-const fn gen_basis_32(table: &[u32; 1024]) -> [u32; 32] {
-    let mut out = [0u32; 32];
-    let mut i = 0usize;
-
-    while i < 32 {
-        out[i] = apply_matrix_32_const(1u32 << i, table);
-        i += 1;
-    }
-
-    out
 }
 
 // ===========================================

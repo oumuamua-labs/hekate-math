@@ -21,7 +21,7 @@ use crate::towers::bit::Bit;
 use crate::towers::block8::Block8;
 use crate::towers::block16::Block16;
 use crate::towers::block32::Block32;
-use crate::{CanonicalDeserialize, constants};
+use crate::{CanonicalDeserialize, HardwarePromote, constants};
 use crate::{CanonicalSerialize, HardwareField, PackableField, TowerField};
 use core::ops::{Add, AddAssign, BitXor, BitXorAssign, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
@@ -33,11 +33,11 @@ struct CtConvertBasisU64<const N: usize>([u64; N]);
 
 #[cfg(not(feature = "table-math"))]
 static TOWER_TO_FLAT_BASIS_64: CtConvertBasisU64<64> =
-    CtConvertBasisU64(gen_basis_64(&constants::TOWER_TO_FLAT_64));
+    CtConvertBasisU64(constants::RAW_TOWER_TO_FLAT_64);
 
 #[cfg(not(feature = "table-math"))]
 static FLAT_TO_TOWER_BASIS_64: CtConvertBasisU64<64> =
-    CtConvertBasisU64(gen_basis_64(&constants::FLAT_TO_TOWER_64));
+    CtConvertBasisU64(constants::RAW_FLAT_TO_TOWER_64);
 
 #[derive(Copy, Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Zeroize)]
 #[repr(transparent)]
@@ -468,6 +468,28 @@ impl HardwareField for Block64 {
     }
 }
 
+impl HardwarePromote<Block8> for Block64 {
+    #[inline(always)]
+    fn from_partial_hardware(val: Block8) -> Self {
+        #[cfg(not(feature = "table-math"))]
+        {
+            let mut acc = 0u64;
+            for i in 0..8 {
+                let bit = (val.0 >> i) & 1;
+                let mask = 0u64.wrapping_sub(bit as u64);
+                acc ^= constants::LIFT_BASIS_8_TO_64[i] & mask;
+            }
+
+            Block64(acc)
+        }
+
+        #[cfg(feature = "table-math")]
+        {
+            Block64(constants::LIFT_TABLE_8_TO_64[val.0 as usize])
+        }
+    }
+}
+
 // ===========================================
 // UTILS
 // ===========================================
@@ -500,20 +522,6 @@ pub fn apply_matrix_64(val: Block64, table: &[u64; 2048]) -> Block64 {
 }
 
 #[cfg(not(feature = "table-math"))]
-const fn apply_matrix_64_const(v: u64, table: &[u64; 2048]) -> u64 {
-    let mut res = 0u64;
-    let mut i = 0usize;
-
-    while i < 8 {
-        let idx = (i * 256) + ((v >> (i * 8)) & 0xFF) as usize;
-        res ^= table[idx];
-        i += 1;
-    }
-
-    res
-}
-
-#[cfg(not(feature = "table-math"))]
 #[inline(always)]
 fn map_ct_64(x: u64, basis: &[u64; 64]) -> u64 {
     let mut acc = 0u64;
@@ -527,19 +535,6 @@ fn map_ct_64(x: u64, basis: &[u64; 64]) -> u64 {
     }
 
     acc
-}
-
-#[cfg(not(feature = "table-math"))]
-const fn gen_basis_64(table: &[u64; 2048]) -> [u64; 64] {
-    let mut out = [0u64; 64];
-    let mut i = 0usize;
-
-    while i < 64 {
-        out[i] = apply_matrix_64_const(1u64 << i, table);
-        i += 1;
-    }
-
-    out
 }
 
 // ===========================================

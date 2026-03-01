@@ -18,7 +18,7 @@
 //! BLOCK 8 (GF(2^8))
 use crate::constants::FLAT_TO_TOWER_BIT_MASKS_8;
 use crate::towers::bit::Bit;
-use crate::{CanonicalDeserialize, constants};
+use crate::{CanonicalDeserialize, HardwarePromote, constants};
 use crate::{CanonicalSerialize, HardwareField, PackableField, TowerField};
 use core::ops::{Add, AddAssign, BitXor, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
@@ -30,11 +30,11 @@ struct CtConvertBasisU8<const N: usize>([u8; N]);
 
 #[cfg(not(feature = "table-math"))]
 static TOWER_TO_FLAT_BASIS_8: CtConvertBasisU8<8> =
-    CtConvertBasisU8(gen_basis_8(&constants::TOWER_TO_FLAT_8));
+    CtConvertBasisU8(constants::RAW_TOWER_TO_FLAT_8);
 
 #[cfg(not(feature = "table-math"))]
 static FLAT_TO_TOWER_BASIS_8: CtConvertBasisU8<8> =
-    CtConvertBasisU8(gen_basis_8(&constants::FLAT_TO_TOWER_8));
+    CtConvertBasisU8(constants::RAW_FLAT_TO_TOWER_8);
 
 // ============================================================
 // Precomputed Lookup Tables for GF(2^8) arithmetic.
@@ -510,6 +510,13 @@ impl HardwareField for Block8 {
     }
 }
 
+impl HardwarePromote<Block8> for Block8 {
+    #[inline(always)]
+    fn from_partial_hardware(val: Block8) -> Self {
+        val
+    }
+}
+
 // ===========================================
 // UTILS
 // ===========================================
@@ -528,14 +535,8 @@ fn mul_iso_8(a: Block8, b: Block8) -> Block8 {
 #[cfg(feature = "table-math")]
 #[inline(always)]
 fn apply_matrix_8(val: Block8, table: &[u8; 256]) -> Block8 {
-    // Single lookup
     let idx = val.0 as usize;
     Block8(unsafe { *table.get_unchecked(idx) })
-}
-
-#[cfg(not(feature = "table-math"))]
-const fn apply_matrix_8_const(val: u8, table: &[u8; 256]) -> u8 {
-    table[val as usize]
 }
 
 #[cfg(not(feature = "table-math"))]
@@ -552,19 +553,6 @@ fn map_ct_8(x: u8, basis: &[u8; 8]) -> u8 {
     }
 
     acc
-}
-
-#[cfg(not(feature = "table-math"))]
-const fn gen_basis_8(table: &[u8; 256]) -> [u8; 8] {
-    let mut out = [0u8; 8];
-    let mut i = 0usize;
-
-    while i < 8 {
-        out[i] = apply_matrix_8_const(1u8 << i, table);
-        i += 1;
-    }
-
-    out
 }
 
 #[cfg(feature = "table-math")]

@@ -21,6 +21,7 @@ use std::fmt;
 use std::ops::{Add, Mul};
 
 // --- RANDOM GENERATION TRAIT ---
+
 trait GenerateRand: TowerField {
     fn rand(rng: &mut StdRng) -> Self;
 }
@@ -56,6 +57,7 @@ impl GenerateRand for Block128 {
 }
 
 // --- GENERIC POLYNOMIAL HELPER ---
+
 #[derive(Clone, PartialEq)]
 struct Poly<F: TowerField> {
     coeffs: Vec<F>,
@@ -292,76 +294,34 @@ impl_invert_matrix!(invert_matrix_32, u32, 32);
 impl_invert_matrix!(invert_matrix_64, u64, 64);
 impl_invert_matrix!(invert_matrix_128, u128, 128);
 
-// --- PRINTING TABLES (8-bit window) ---
+// --- PRINTING BASE MATRICES ---
 
-macro_rules! impl_print_table {
-    ($func_name:ident, $type:ty, $windows:expr, $hex_fmt:literal) => {
-        fn $func_name(name: &str, cols: &[$type]) {
-            // Print the array definition header
+macro_rules! impl_print_base {
+    ($func_name:ident, $type:ty, $size:expr, $width:expr) => {
+        fn $func_name(name: &str, mat: &[$type; $size]) {
             println!(
-                "    pub const {}: [{}; {}] = [",
-                name,
+                "const {}: [{}; {}] = [",
+                name.to_uppercase(),
                 stringify!($type),
-                $windows * 256
+                $size
             );
 
-            // Iterate over 8-bit windows
-            for w in 0..$windows {
-                for val in 0..=255u8 {
-                    let mut res = 0 as $type;
-
-                    // Slice the specific window of 8 columns
-                    let window = &cols[(w * 8)..((w + 1) * 8)];
-                    for (bit, &col) in window.iter().enumerate() {
-                        if (val >> bit) & 1 == 1 {
-                            res ^= col;
-                        }
-                    }
-
-                    println!($hex_fmt, res);
-                }
+            for v in mat.iter() {
+                println!("    0x{:0width$x},", v, width = $width);
             }
 
-            println!("    ];");
+            println!("];\n");
         }
     };
 }
 
-impl_print_table!(print_table_8, u8, 1, "        0x{:02x},");
-impl_print_table!(print_table_16, u16, 2, "        0x{:04x},");
-impl_print_table!(print_table_32, u32, 4, "        0x{:08x},");
-impl_print_table!(print_table_64, u64, 8, "        0x{:016x},");
-impl_print_table!(print_table_128, u128, 16, "        0x{:032x},");
+impl_print_base!(print_base_8, u8, 8, 2);
+impl_print_base!(print_base_16, u16, 16, 4);
+impl_print_base!(print_base_32, u32, 32, 8);
+impl_print_base!(print_base_64, u64, 64, 16);
+impl_print_base!(print_base_128, u128, 128, 32);
 
 // --- MAIN GENERATORS ---
-
-fn gen_tables_16() {
-    println!("\n// === 16 BIT CONSTANTS ===");
-    // P(x) = x^16 + x^5 + x^3 + x + 1 (Sparse)
-    // Coeffs: 16, 5, 3, 1, 0
-    let mut c = vec![Block16::ZERO; 17];
-    c[16] = Block16::ONE;
-    c[5] = Block16::ONE;
-    c[3] = Block16::ONE;
-    c[1] = Block16::ONE;
-    c[0] = Block16::ONE;
-
-    let gen_val = find_root(Poly::new(c));
-    println!("// Generator 16: {:?}", gen_val);
-
-    let mut flat = [0u16; 16];
-    let mut curr = Block16::ONE;
-
-    for v in flat.iter_mut() {
-        *v = curr.0;
-        curr *= gen_val;
-    }
-
-    let inv = invert_matrix_16(flat);
-
-    print_table_16("FLAT_TO_TOWER_16", &flat);
-    print_table_16("TOWER_TO_FLAT_16", &inv);
-}
 
 fn gen_tables_8() {
     println!("\n// === 8 BIT CONSTANTS ===");
@@ -388,60 +348,36 @@ fn gen_tables_8() {
 
     let inv = invert_matrix_8(flat);
 
-    print_table_8("FLAT_TO_TOWER_8", &flat);
-    print_table_8("TOWER_TO_FLAT_8", &inv);
+    print_base_8("flat_to_tower_8", &flat);
+    print_base_8("tower_to_flat_8", &inv);
 }
 
-fn gen_tables_128() {
-    println!("\n// === 128 BIT CONSTANTS ===");
-    let mut c = vec![Block128::ZERO; 129];
-    c[128] = Block128::ONE;
-    c[7] = Block128::ONE;
-    c[2] = Block128::ONE;
-    c[1] = Block128::ONE;
-    c[0] = Block128::ONE;
+fn gen_tables_16() {
+    println!("\n// === 16 BIT CONSTANTS ===");
+    // P(x) = x^16 + x^5 + x^3 + x + 1 (Sparse)
+    // Coeffs: 16, 5, 3, 1, 0
+    let mut c = vec![Block16::ZERO; 17];
+    c[16] = Block16::ONE;
+    c[5] = Block16::ONE;
+    c[3] = Block16::ONE;
+    c[1] = Block16::ONE;
+    c[0] = Block16::ONE;
 
     let gen_val = find_root(Poly::new(c));
-    println!("// Generator 128: {:?}", gen_val);
+    println!("// Generator 16: {:?}", gen_val);
 
-    let mut flat = [0u128; 128];
-    let mut curr = Block128::ONE;
+    let mut flat = [0u16; 16];
+    let mut curr = Block16::ONE;
 
     for v in flat.iter_mut() {
         *v = curr.0;
         curr *= gen_val;
     }
 
-    let inv = invert_matrix_128(flat);
+    let inv = invert_matrix_16(flat);
 
-    print_table_128("FLAT_TO_TOWER_128", &flat);
-    print_table_128("TOWER_TO_FLAT_128", &inv);
-}
-
-fn gen_tables_64() {
-    println!("\n// === 64 BIT CONSTANTS ===");
-    let mut c = vec![Block64::ZERO; 65];
-    c[64] = Block64::ONE;
-    c[4] = Block64::ONE;
-    c[3] = Block64::ONE;
-    c[1] = Block64::ONE;
-    c[0] = Block64::ONE;
-
-    let gen_val = find_root(Poly::new(c));
-    println!("// Generator 64: {:?}", gen_val);
-
-    let mut flat = [0u64; 64];
-    let mut curr = Block64::ONE;
-
-    for v in flat.iter_mut() {
-        *v = curr.0;
-        curr *= gen_val;
-    }
-
-    let inv = invert_matrix_64(flat);
-
-    print_table_64("FLAT_TO_TOWER_64", &flat);
-    print_table_64("TOWER_TO_FLAT_64", &inv);
+    print_base_16("flat_to_tower_16", &flat);
+    print_base_16("tower_to_flat_16", &inv);
 }
 
 fn gen_tables_32() {
@@ -466,45 +402,70 @@ fn gen_tables_32() {
 
     let inv = invert_matrix_32(flat);
 
-    print_table_32("FLAT_TO_TOWER_32", &flat);
-    print_table_32("TOWER_TO_FLAT_32", &inv);
+    print_base_32("flat_to_tower_32", &flat);
+    print_base_32("tower_to_flat_32", &inv);
+}
+
+fn gen_tables_64() {
+    println!("\n// === 64 BIT CONSTANTS ===");
+    let mut c = vec![Block64::ZERO; 65];
+    c[64] = Block64::ONE;
+    c[4] = Block64::ONE;
+    c[3] = Block64::ONE;
+    c[1] = Block64::ONE;
+    c[0] = Block64::ONE;
+
+    let gen_val = find_root(Poly::new(c));
+    println!("// Generator 64: {:?}", gen_val);
+
+    let mut flat = [0u64; 64];
+    let mut curr = Block64::ONE;
+
+    for v in flat.iter_mut() {
+        *v = curr.0;
+        curr *= gen_val;
+    }
+
+    let inv = invert_matrix_64(flat);
+
+    print_base_64("flat_to_tower_64", &flat);
+    print_base_64("tower_to_flat_64", &inv);
+}
+
+fn gen_tables_128() {
+    println!("\n// === 128 BIT CONSTANTS ===");
+    let mut c = vec![Block128::ZERO; 129];
+    c[128] = Block128::ONE;
+    c[7] = Block128::ONE;
+    c[2] = Block128::ONE;
+    c[1] = Block128::ONE;
+    c[0] = Block128::ONE;
+
+    let gen_val = find_root(Poly::new(c));
+    println!("// Generator 128: {:?}", gen_val);
+
+    let mut flat = [0u128; 128];
+    let mut curr = Block128::ONE;
+
+    for v in flat.iter_mut() {
+        *v = curr.0;
+        curr *= gen_val;
+    }
+
+    let inv = invert_matrix_128(flat);
+
+    print_base_128("flat_to_tower_128", &flat);
+    print_base_128("tower_to_flat_128", &inv);
 }
 
 #[ignore]
 #[test]
 fn generate_all_iso_tables() {
-    println!("pub mod constants {{");
+    println!("// Generated for build.rs:\\n");
 
-    // 8
-    println!(
-        "    pub const POLY_8: u8 = 0x{:02x};",
-        (1 << 4) | (1 << 3) | (1 << 1) | 1
-    );
     gen_tables_8();
-
-    println!(
-        "    pub const POLY_16: u16 = 0x{:04x};",
-        (1 << 5) | (1 << 3) | (1 << 1) | 1
-    );
     gen_tables_16();
-
-    println!(
-        "    pub const POLY_32: u32 = 0x{:08x};",
-        (1 << 7) | (1 << 3) | (1 << 2) | 1
-    );
     gen_tables_32();
-
-    println!(
-        "    pub const POLY_64: u64 = 0x{:016x};",
-        (1 << 4) | (1 << 3) | (1 << 1) | 1
-    );
     gen_tables_64();
-
-    println!(
-        "    pub const POLY_128: u128 = 0x{:032x};",
-        (1 << 7) | (1 << 2) | (1 << 1) | 1
-    );
     gen_tables_128();
-
-    println!("}}");
 }

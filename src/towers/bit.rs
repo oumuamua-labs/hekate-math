@@ -15,7 +15,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{CanonicalDeserialize, CanonicalSerialize, HardwareField, PackableField, TowerField};
+use crate::{
+    Block8, CanonicalDeserialize, CanonicalSerialize, HardwareField, HardwarePromote,
+    PackableField, TowerField,
+};
 use core::ops::{Add, AddAssign, BitAnd, BitXor, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
@@ -371,11 +374,19 @@ impl HardwareField for Bit {
 
     #[inline(always)]
     fn tower_bit_from_hardware(self, bit_idx: usize) -> u8 {
-        assert!(bit_idx == 0, "bit index out of bounds for Bit");
+        assert_eq!(bit_idx, 0, "bit index out of bounds for Bit");
 
         // In GF(2), Tower and Flat
         // bases are identical.
         self.0
+    }
+}
+
+impl HardwarePromote<Block8> for Bit {
+    #[inline(always)]
+    fn from_partial_hardware(val: Block8) -> Self {
+        // Take LSB
+        Bit(val.0 & 1)
     }
 }
 

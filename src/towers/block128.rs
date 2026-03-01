@@ -33,11 +33,11 @@ struct CtConvertBasisU128<const N: usize>([u128; N]);
 
 #[cfg(not(feature = "table-math"))]
 static TOWER_TO_FLAT_BASIS_128: CtConvertBasisU128<128> =
-    CtConvertBasisU128(gen_basis_128(&constants::TOWER_TO_FLAT_128));
+    CtConvertBasisU128(constants::RAW_TOWER_TO_FLAT_128);
 
 #[cfg(not(feature = "table-math"))]
 static FLAT_TO_TOWER_BASIS_128: CtConvertBasisU128<128> =
-    CtConvertBasisU128(gen_basis_128(&constants::FLAT_TO_TOWER_128));
+    CtConvertBasisU128(constants::RAW_FLAT_TO_TOWER_128);
 
 #[derive(Copy, Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Zeroize)]
 #[repr(transparent)]
@@ -666,20 +666,6 @@ pub fn apply_matrix_128(val: Block128, table: &[u128; 4096]) -> Block128 {
 }
 
 #[cfg(not(feature = "table-math"))]
-const fn apply_matrix_128_const(v: u128, table: &[u128; 4096]) -> u128 {
-    let mut res = 0u128;
-    let mut i = 0usize;
-
-    while i < 16 {
-        let idx = (i * 256) + ((v >> (i * 8)) & 0xFF) as usize;
-        res ^= table[idx];
-        i += 1;
-    }
-
-    res
-}
-
-#[cfg(not(feature = "table-math"))]
 #[inline(always)]
 fn map_ct_128_split(x: u128, basis: &[u128; 128]) -> u128 {
     let mut acc_lo = 0u64;
@@ -698,19 +684,6 @@ fn map_ct_128_split(x: u128, basis: &[u128; 128]) -> u128 {
     }
 
     (acc_lo as u128) | ((acc_hi as u128) << 64)
-}
-
-#[cfg(not(feature = "table-math"))]
-const fn gen_basis_128(table: &[u128; 4096]) -> [u128; 128] {
-    let mut out = [0u128; 128];
-    let mut i = 0usize;
-
-    while i < 128 {
-        out[i] = apply_matrix_128_const(1u128 << i, table);
-        i += 1;
-    }
-
-    out
 }
 
 #[cfg(not(feature = "table-math"))]
@@ -1154,6 +1127,129 @@ mod tests {
             }
 
             assert_eq!(c_packed.0, c_expected, "SIMD multiplication mismatch!");
+        }
+    }
+
+    // ==================================
+    // CT LIFTING BASIS
+    // ==================================
+
+    #[inline(always)]
+    fn promote_block8_tables(val: Block8) -> Block128 {
+        // Current (table) lifting: flat/hardware byte -> tower byte -> Block128 flat.
+        let idx_flat = val.0 as usize;
+        let tower_byte = unsafe { *constants::FLAT_TO_TOWER_8.get_unchecked(idx_flat) };
+        let idx_tower = tower_byte as usize;
+
+        Block128(unsafe { *constants::TOWER_TO_FLAT_128.get_unchecked(idx_tower) })
+    }
+
+    #[inline(always)]
+    fn promote_block16_tables(val: Block16) -> Block128 {
+        let v_flat = val.0;
+
+        let mut v_tower = 0u16;
+        for i in 0..2 {
+            let byte = ((v_flat >> (i * 8)) & 0xFF) as usize;
+            let idx = (i * 256) + byte;
+            v_tower ^= unsafe { *constants::FLAT_TO_TOWER_16.get_unchecked(idx) };
+        }
+
+        let mut res = 0u128;
+        for i in 0..2 {
+            let byte = ((v_tower >> (i * 8)) & 0xFF) as usize;
+            let idx = (i * 256) + byte;
+            res ^= unsafe { *constants::TOWER_TO_FLAT_128.get_unchecked(idx) };
+        }
+
+        Block128(res)
+    }
+
+    #[inline(always)]
+    fn promote_block32_tables(val: Block32) -> Block128 {
+        let v_flat = val.0;
+
+        let mut v_tower = 0u32;
+        for i in 0..4 {
+            let byte = ((v_flat >> (i * 8)) & 0xFF) as usize;
+            let idx = (i * 256) + byte;
+            v_tower ^= unsafe { *constants::FLAT_TO_TOWER_32.get_unchecked(idx) };
+        }
+
+        let mut res = 0u128;
+        for i in 0..4 {
+            let byte = ((v_tower >> (i * 8)) & 0xFF) as usize;
+            let idx = (i * 256) + byte;
+            res ^= unsafe { *constants::TOWER_TO_FLAT_128.get_unchecked(idx) };
+        }
+
+        Block128(res)
+    }
+
+    #[inline(always)]
+    fn promote_block64_tables(val: Block64) -> Block128 {
+        let v_flat = val.0;
+
+        let mut v_tower = 0u64;
+        for i in 0..8 {
+            let byte = ((v_flat >> (i * 8)) & 0xFF) as usize;
+            let idx = (i * 256) + byte;
+            v_tower ^= unsafe { *constants::FLAT_TO_TOWER_64.get_unchecked(idx) };
+        }
+
+        let mut res = 0u128;
+        for i in 0..8 {
+            let byte = ((v_tower >> (i * 8)) & 0xFF) as usize;
+            let idx = (i * 256) + byte;
+            res ^= unsafe { *constants::TOWER_TO_FLAT_128.get_unchecked(idx) };
+        }
+
+        Block128(res)
+    }
+
+    #[test]
+    fn lift_from_partial_hardware_matches_tables_block8_exhaustive() {
+        for x in 0u16..=u8::MAX as u16 {
+            let v = Block8(x as u8);
+            let got = Block128::from_partial_hardware(v);
+            let expected = promote_block8_tables(v);
+
+            assert_eq!(got, expected);
+        }
+    }
+
+    #[test]
+    fn lift_from_partial_hardware_matches_tables_block16_exhaustive() {
+        for x in 0..=u16::MAX {
+            let v = Block16(x);
+            let got = Block128::from_partial_hardware(v);
+            let expected = promote_block16_tables(v);
+
+            assert_eq!(got, expected);
+        }
+    }
+
+    #[test]
+    fn lift_from_partial_hardware_matches_tables_block32_random() {
+        let mut rng = rng();
+        for _ in 0..10_000 {
+            let v = Block32(rng.random::<u32>());
+            let got = Block128::from_partial_hardware(v);
+            let expected = promote_block32_tables(v);
+
+            assert_eq!(got, expected);
+        }
+    }
+
+    #[test]
+    fn lift_from_partial_hardware_matches_tables_block64_random() {
+        let mut rng = rng();
+        for _ in 0..10_000 {
+            let v = Block64(rng.random::<u64>());
+            let got = Block128::from_partial_hardware(v);
+            let expected = promote_block64_tables(v);
+
+            assert_eq!(got, expected);
         }
     }
 

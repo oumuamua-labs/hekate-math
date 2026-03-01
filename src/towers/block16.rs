@@ -18,7 +18,7 @@
 //! BLOCK 16 (GF(2^16))
 use crate::towers::bit::Bit;
 use crate::towers::block8::Block8;
-use crate::{CanonicalDeserialize, constants};
+use crate::{CanonicalDeserialize, HardwarePromote, constants};
 use crate::{CanonicalSerialize, HardwareField, PackableField, TowerField};
 use core::ops::{Add, AddAssign, BitXor, BitXorAssign, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
@@ -30,11 +30,11 @@ struct CtConvertBasisU16<const N: usize>([u16; N]);
 
 #[cfg(not(feature = "table-math"))]
 static TOWER_TO_FLAT_BASIS_16: CtConvertBasisU16<16> =
-    CtConvertBasisU16(gen_basis_16(&constants::TOWER_TO_FLAT_16));
+    CtConvertBasisU16(constants::RAW_TOWER_TO_FLAT_16);
 
 #[cfg(not(feature = "table-math"))]
 static FLAT_TO_TOWER_BASIS_16: CtConvertBasisU16<16> =
-    CtConvertBasisU16(gen_basis_16(&constants::FLAT_TO_TOWER_16));
+    CtConvertBasisU16(constants::RAW_FLAT_TO_TOWER_16);
 
 #[derive(Copy, Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Zeroize)]
 #[repr(transparent)]
@@ -463,6 +463,28 @@ impl HardwareField for Block16 {
     }
 }
 
+impl HardwarePromote<Block8> for Block16 {
+    #[inline(always)]
+    fn from_partial_hardware(val: Block8) -> Self {
+        #[cfg(not(feature = "table-math"))]
+        {
+            let mut acc = 0u16;
+            for i in 0..8 {
+                let bit = (val.0 >> i) & 1;
+                let mask = 0u16.wrapping_sub(bit as u16);
+                acc ^= constants::LIFT_BASIS_8_TO_16[i] & mask;
+            }
+
+            Block16(acc)
+        }
+
+        #[cfg(feature = "table-math")]
+        {
+            Block16(constants::LIFT_TABLE_8_TO_16[val.0 as usize])
+        }
+    }
+}
+
 // ===========================================
 // UTILS
 // ===========================================
@@ -494,20 +516,6 @@ pub fn apply_matrix_16(val: Block16, table: &[u16; 512]) -> Block16 {
 }
 
 #[cfg(not(feature = "table-math"))]
-const fn apply_matrix_16_const(v: u16, table: &[u16; 512]) -> u16 {
-    let mut res = 0u16;
-    let mut i = 0usize;
-
-    while i < 2 {
-        let idx = (i * 256) + ((v >> (i * 8)) & 0xFF) as usize;
-        res ^= table[idx];
-        i += 1;
-    }
-
-    res
-}
-
-#[cfg(not(feature = "table-math"))]
 #[inline(always)]
 fn map_ct_16(x: u16, basis: &[u16; 16]) -> u16 {
     let mut acc = 0u16;
@@ -521,19 +529,6 @@ fn map_ct_16(x: u16, basis: &[u16; 16]) -> u16 {
     }
 
     acc
-}
-
-#[cfg(not(feature = "table-math"))]
-const fn gen_basis_16(table: &[u16; 512]) -> [u16; 16] {
-    let mut out = [0u16; 16];
-    let mut i = 0usize;
-
-    while i < 16 {
-        out[i] = apply_matrix_16_const(1u16 << i, table);
-        i += 1;
-    }
-
-    out
 }
 
 // ===========================================

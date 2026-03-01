@@ -15,7 +15,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{Bit, Block8, Block16, Block32, Block64, HardwareField, HardwarePromote};
+use crate::{HardwareField, HardwarePromote};
 use alloc::vec::Vec;
 use chacha20::ChaCha20Rng;
 use core::arch::asm;
@@ -439,46 +439,6 @@ unsafe fn assume_init_vec<T>(mut v: Vec<MaybeUninit<T>>) -> Vec<T> {
     core::mem::forget(v);
 
     unsafe { Vec::from_raw_parts(ptr, len, cap) }
-}
-
-// =================================================
-// HardwarePromote for ByteMatrix
-// =================================================
-
-impl HardwarePromote<Block8> for Bit {
-    #[inline(always)]
-    fn from_partial_hardware(val: Block8) -> Self {
-        // Take LSB
-        Bit(val.0 & 1)
-    }
-}
-
-impl HardwarePromote<Block8> for Block8 {
-    #[inline(always)]
-    fn from_partial_hardware(val: Block8) -> Self {
-        val
-    }
-}
-
-impl HardwarePromote<Block8> for Block16 {
-    #[inline(always)]
-    fn from_partial_hardware(val: Block8) -> Self {
-        Block16::from(val.0 as u16)
-    }
-}
-
-impl HardwarePromote<Block8> for Block32 {
-    #[inline(always)]
-    fn from_partial_hardware(val: Block8) -> Self {
-        Block32::from(val.0 as u32)
-    }
-}
-
-impl HardwarePromote<Block8> for Block64 {
-    #[inline(always)]
-    fn from_partial_hardware(val: Block8) -> Self {
-        Block64::from(val.0 as u64)
-    }
 }
 
 #[cfg(test)]
