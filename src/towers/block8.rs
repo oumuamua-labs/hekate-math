@@ -82,7 +82,7 @@ impl TowerField for Block8 {
             }
 
             let i = LOG_TABLE[self.0 as usize] as usize;
-            return Block8(EXP_TABLE[255 - i]);
+            Block8(EXP_TABLE[255 - i])
         }
 
         #[cfg(not(feature = "table-math"))]
