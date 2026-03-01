@@ -267,34 +267,25 @@ impl PackableField for Block128 {
 
     #[inline(always)]
     fn pack(chunk: &[Self]) -> Self::Packed {
-        debug_assert!(
+        assert!(
             chunk.len() >= PACKED_WIDTH_128,
             "PackableField::pack: input slice too short",
         );
 
-        unsafe {
-            let mut arr = core::mem::MaybeUninit::<[Self; PACKED_WIDTH_128]>::uninit();
-            let dst = arr.as_mut_ptr() as *mut Self;
-            core::ptr::copy_nonoverlapping(chunk.as_ptr(), dst, PACKED_WIDTH_128);
+        let mut arr = [Self::ZERO; PACKED_WIDTH_128];
+        arr.copy_from_slice(&chunk[..PACKED_WIDTH_128]);
 
-            PackedBlock128(arr.assume_init())
-        }
+        PackedBlock128(arr)
     }
 
     #[inline(always)]
     fn unpack(packed: Self::Packed, output: &mut [Self]) {
-        debug_assert!(
+        assert!(
             output.len() >= PACKED_WIDTH_128,
             "PackableField::unpack: output slice too short",
         );
 
-        unsafe {
-            core::ptr::copy_nonoverlapping(
-                packed.0.as_ptr(),
-                output.as_mut_ptr(),
-                PACKED_WIDTH_128,
-            );
-        }
+        output[..PACKED_WIDTH_128].copy_from_slice(&packed.0);
     }
 }
 
@@ -506,9 +497,7 @@ impl HardwareField for Block128 {
 
     #[inline(always)]
     fn tower_bit_from_hardware(self, bit_idx: usize) -> u8 {
-        debug_assert!(bit_idx < 128, "bit index out of bounds for Block128");
-
-        let mask = unsafe { *constants::FLAT_TO_TOWER_BIT_MASKS_128.get_unchecked(bit_idx) };
+        let mask = constants::FLAT_TO_TOWER_BIT_MASKS_128[bit_idx];
 
         // Parity of (x & mask) without popcount.
         // Folds 128 bits down to 1

@@ -220,38 +220,25 @@ impl PackableField for Bit {
 
     #[inline(always)]
     fn pack(chunk: &[Self]) -> Self::Packed {
-        debug_assert!(
+        assert!(
             chunk.len() >= PACKED_WIDTH_BIT,
             "PackableField::pack: input slice too short",
         );
 
-        unsafe {
-            // Copy directly from slice
-            // into the packed array.
-            let mut arr = core::mem::MaybeUninit::<[Self; PACKED_WIDTH_BIT]>::uninit();
-            let dst = arr.as_mut_ptr() as *mut Self;
-            core::ptr::copy_nonoverlapping(chunk.as_ptr(), dst, PACKED_WIDTH_BIT);
+        let mut arr = [Self::ZERO; PACKED_WIDTH_BIT];
+        arr.copy_from_slice(&chunk[..PACKED_WIDTH_BIT]);
 
-            PackedBit(arr.assume_init())
-        }
+        PackedBit(arr)
     }
 
     #[inline(always)]
     fn unpack(packed: Self::Packed, output: &mut [Self]) {
-        debug_assert!(
+        assert!(
             output.len() >= PACKED_WIDTH_BIT,
             "PackableField::unpack: output slice too short",
         );
 
-        unsafe {
-            // Stream packed data back into
-            // the caller's buffer in one pass.
-            core::ptr::copy_nonoverlapping(
-                packed.0.as_ptr(),
-                output.as_mut_ptr(),
-                PACKED_WIDTH_BIT,
-            );
-        }
+        output[..PACKED_WIDTH_BIT].copy_from_slice(&packed.0);
     }
 }
 
@@ -384,7 +371,7 @@ impl HardwareField for Bit {
 
     #[inline(always)]
     fn tower_bit_from_hardware(self, bit_idx: usize) -> u8 {
-        debug_assert!(bit_idx == 0, "bit index out of bounds for Bit");
+        assert!(bit_idx == 0, "bit index out of bounds for Bit");
 
         // In GF(2), Tower and Flat
         // bases are identical.

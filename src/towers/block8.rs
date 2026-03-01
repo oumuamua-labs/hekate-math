@@ -297,32 +297,25 @@ impl PackableField for Block8 {
 
     #[inline(always)]
     fn pack(chunk: &[Self]) -> Self::Packed {
-        debug_assert!(
+        assert!(
             chunk.len() >= PACKED_WIDTH_8,
             "PackableField::pack: input slice too short",
         );
 
-        unsafe {
-            // Copy directly from slice
-            // into the packed array.
-            let mut arr = core::mem::MaybeUninit::<[Self; PACKED_WIDTH_8]>::uninit();
-            let dst = arr.as_mut_ptr() as *mut Self;
-            core::ptr::copy_nonoverlapping(chunk.as_ptr(), dst, PACKED_WIDTH_8);
+        let mut arr = [Self::ZERO; PACKED_WIDTH_8];
+        arr.copy_from_slice(&chunk[..PACKED_WIDTH_8]);
 
-            PackedBlock8(arr.assume_init())
-        }
+        PackedBlock8(arr)
     }
 
     #[inline(always)]
     fn unpack(packed: Self::Packed, output: &mut [Self]) {
-        debug_assert!(
+        assert!(
             output.len() >= PACKED_WIDTH_8,
             "PackableField::unpack: output slice too short",
         );
 
-        unsafe {
-            core::ptr::copy_nonoverlapping(packed.0.as_ptr(), output.as_mut_ptr(), PACKED_WIDTH_8);
-        }
+        output[..PACKED_WIDTH_8].copy_from_slice(&packed.0);
     }
 }
 
@@ -503,7 +496,7 @@ impl HardwareField for Block8 {
 
     #[inline(always)]
     fn tower_bit_from_hardware(self, bit_idx: usize) -> u8 {
-        debug_assert!(bit_idx < 8, "bit index out of bounds for Block8");
+        assert!(bit_idx < 8, "bit index out of bounds for Block8");
 
         let mask = unsafe { *FLAT_TO_TOWER_BIT_MASKS_8.get_unchecked(bit_idx) };
 
