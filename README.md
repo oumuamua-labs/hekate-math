@@ -32,7 +32,7 @@ polynomial (flat/hardware) representations.
 hekate-math = { git = "https://github.com/oumuamua-labs/hekate-math" }
 ```
 
-## Usage Examples
+## Examples
 
 ### Basics: Field Arithmetic
 
@@ -191,11 +191,6 @@ fn example_spmv() {
     let output = matrix.spmv(input.as_slice());
 
     assert_eq!(output.len(), rows);
-
-    println!(
-        "SpMV: Successfully processed matrix {}x{} with degree {}.",
-        rows, cols, degree
-    );
 }
 ```
 

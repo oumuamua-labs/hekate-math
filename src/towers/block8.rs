@@ -18,8 +18,10 @@
 //! BLOCK 8 (GF(2^8))
 use crate::constants::FLAT_TO_TOWER_BIT_MASKS_8;
 use crate::towers::bit::Bit;
-use crate::{CanonicalDeserialize, HardwarePromote, constants};
-use crate::{CanonicalSerialize, HardwareField, PackableField, TowerField};
+use crate::{
+    CanonicalDeserialize, CanonicalSerialize, HardwareField, HardwarePromote, PackableField,
+    TowerField, constants,
+};
 use core::ops::{Add, AddAssign, BitXor, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;

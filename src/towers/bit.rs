@@ -252,7 +252,7 @@ impl Add for PackedBit {
     fn add(self, rhs: Self) -> Self {
         #[cfg(target_arch = "aarch64")]
         {
-            aarch64_simd::add_packed_bit(self, rhs)
+            neon::add_packed_bit(self, rhs)
         }
 
         #[cfg(not(target_arch = "aarch64"))]
@@ -299,7 +299,7 @@ impl Mul for PackedBit {
     fn mul(self, rhs: Self) -> Self {
         #[cfg(target_arch = "aarch64")]
         {
-            aarch64_simd::mul_packed_bit(self, rhs)
+            neon::mul_packed_bit(self, rhs)
         }
 
         #[cfg(not(target_arch = "aarch64"))]
@@ -395,7 +395,7 @@ impl HardwarePromote<Block8> for Bit {
 // ===========================================
 
 #[cfg(target_arch = "aarch64")]
-mod aarch64_simd {
+mod neon {
     use super::*;
     use core::arch::aarch64::*;
     use core::mem::transmute;

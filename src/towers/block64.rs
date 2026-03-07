@@ -21,8 +21,10 @@ use crate::towers::bit::Bit;
 use crate::towers::block8::Block8;
 use crate::towers::block16::Block16;
 use crate::towers::block32::Block32;
-use crate::{CanonicalDeserialize, HardwarePromote, constants};
-use crate::{CanonicalSerialize, HardwareField, PackableField, TowerField};
+use crate::{
+    CanonicalDeserialize, CanonicalSerialize, HardwareField, HardwarePromote, PackableField,
+    TowerField, constants,
+};
 use core::ops::{Add, AddAssign, BitXor, BitXorAssign, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
@@ -168,27 +170,28 @@ impl CanonicalDeserialize for Block64 {
 }
 
 impl From<u8> for Block64 {
+    #[inline(always)]
     fn from(val: u8) -> Self {
         Self(val as u64)
     }
 }
 
 impl From<u32> for Block64 {
-    #[inline]
+    #[inline(always)]
     fn from(val: u32) -> Self {
         Self::from(val as u64)
     }
 }
 
 impl From<u64> for Block64 {
-    #[inline]
+    #[inline(always)]
     fn from(val: u64) -> Self {
         Self(val)
     }
 }
 
 impl From<u128> for Block64 {
-    #[inline]
+    #[inline(always)]
     fn from(val: u128) -> Self {
         Self(val as u64)
     }

@@ -21,8 +21,10 @@ use crate::towers::block8::Block8;
 use crate::towers::block16::Block16;
 use crate::towers::block32::Block32;
 use crate::towers::block64::Block64;
-use crate::{CanonicalDeserialize, constants};
-use crate::{CanonicalSerialize, HardwareField, HardwarePromote, PackableField, TowerField};
+use crate::{
+    CanonicalDeserialize, CanonicalSerialize, HardwareField, HardwarePromote, PackableField,
+    TowerField, constants,
+};
 use core::ops::{Add, AddAssign, BitXor, BitXorAssign, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;

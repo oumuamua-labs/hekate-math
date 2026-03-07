@@ -21,13 +21,15 @@ use std::io::Write;
 use std::path::Path;
 
 // === 8 BIT CONSTANTS ===
-// Generator 8: Block8(27)
+// Generator 8:
+// Block8(27)
 const FLAT_TO_TOWER_8: [u8; 8] = [0x01, 0x1b, 0x5e, 0xb3, 0xe4, 0x94, 0xe8, 0x20];
 
 const TOWER_TO_FLAT_8: [u8; 8] = [0x01, 0xe4, 0x4d, 0x1d, 0xfa, 0x80, 0x4a, 0x97];
 
 // === 16 BIT CONSTANTS ===
-// Generator 16: Block16(4394)
+// Generator 16:
+// Block16(4394)
 const FLAT_TO_TOWER_16: [u16; 16] = [
     0x0001, 0x112a, 0x1a45, 0x510b, 0x5faf, 0x0c28, 0xb194, 0x148c, 0xe51c, 0xf7cf, 0x50c2, 0x896a,
     0xec15, 0x9608, 0x0bb1, 0xdadd,
@@ -39,7 +41,8 @@ const TOWER_TO_FLAT_16: [u16; 16] = [
 ];
 
 // === 32 BIT CONSTANTS ===
-// Generator 32: Block32(4030672443)
+// Generator 32:
+// Block32(4030672443)
 const FLAT_TO_TOWER_32: [u32; 32] = [
     0x00000001, 0xf03f2e3b, 0x463a215e, 0x5196f37d, 0xbf3906b0, 0xf6d11f50, 0xb144ca50, 0xb09fe505,
     0xb8dc201f, 0x0c73831e, 0x5285ebaf, 0x0e7151e2, 0xec3f50b9, 0xa8fd07be, 0xed706a15, 0x19b8cb86,
@@ -55,7 +58,8 @@ const TOWER_TO_FLAT_32: [u32; 32] = [
 ];
 
 // === 64 BIT CONSTANTS ===
-// Generator 64: Block64(388695496543108587)
+// Generator 64:
+// Block64(388695496543108587)
 const FLAT_TO_TOWER_64: [u64; 64] = [
     0x0000000000000001,
     0x0564ec7ea53efdeb,
@@ -191,7 +195,8 @@ const TOWER_TO_FLAT_64: [u64; 64] = [
 ];
 
 // === 128 BIT CONSTANTS ===
-// Generator 128: Block128(13209536707042023373099634195482672186)
+// Generator 128:
+// Block128(13209536707042023373099634195482672186)
 const FLAT_TO_TOWER_128: [u128; 128] = [
     0x00000000000000000000000000000001,
     0x09f010715928b997f12f19f0e44dfc3a,
