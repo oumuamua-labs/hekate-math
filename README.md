@@ -2,19 +2,10 @@
 
 Copyright (c) Andrei Kochergin and Oumuamua Labs.
 
-**Hardware-Accelerated Binary Tower Fields for Zero-Knowledge Proofs.**
+Hardware-accelerated binary tower fields for zero-knowledge proofs.
+This is the high-performance mathematical core of the Hekate ZK Engine.
 
-> [!IMPORTANT]
-> This is the high-performance mathematical core of the Hekate ZK Engine.
-
-> [!WARNING]
-> **SECURITY NOTICE:** This implementation is currently UNAUDITED.
->
-> It is provided "AS IS" with ABSOLUTELY NO WARRANTY under the terms
-> of the Apache 2.0 License. The authors assume zero liability for
-> any damages arising from its use in production environments.
-
-### Abstract
+### Architecture
 
 `hekate-math` provides a high-performance, constant-time implementation of binary tower fields (𝔽(2^k))
 optimized for GKR-based provers, Sumcheck, and Binius protocols. The library implements a rigorous algebraic tower
@@ -22,8 +13,56 @@ construction up to 𝔽(2^128), leveraging basis isomorphism to utilize native C
 **PMULL** (ARMv8 NEON) and **PCLMULQDQ** (x86_64 AVX2).
 
 Designed for low-level cryptographic engineering, the crate is `no-std` compatible and defaults to constant-time
-execution paths to mitigate side-channel attacks. It enforces (soon) strict type safety between canonical (tower) and
+execution paths to mitigate side-channel attacks. It enforces strict type safety between canonical (tower) and
 polynomial (flat/hardware) representations.
+
+## Performance Metrics
+
+> [!NOTE]
+> Current benchmarks are reported with the `table-math` feature enabled
+> to reflect peak performance for public-data scenarios. For private-key
+> operations, use the default constant-time backend.
+
+Benchmarks executed on **Apple M3 Max** (aarch64). The library achieves near-native memory
+bandwidth saturation and single-cycle throughput for hardware-accelerated operations.
+
+### Micro-Benchmarks (Block128)
+
+| Operation                | Basis             | Latency     | Implementation                      |
+|:-------------------------|:------------------|:------------|:------------------------------------|
+| **Multiplication**       | Polynomial (Flat) | **1.08 ns** | `PMULL` (Pipelined)                 |
+| **Multiplication**       | Tower (Canonical) | 122.0 ns    | Recursive Karatsuba                 |
+| **Addition**             | Any               | 1.14 ns     | Vectorized XOR                      |
+| **Inversion** (Single)   | Tower             | 283.0 ns    | Itoh-Tsujii / Fermat Little Theorem |
+| **Inversion** (Batch)    | Tower             | ~16.7 ns    | Montgomery's Trick (SIMD)           |
+| **Basis Conv** (Default) | Tower ↔ Flat      | ~90.0 ns    | Bit-Slicing (Constant-Time)         |
+| **Basis Conv** (Fast)    | Tower ↔ Flat      | 3.80 ns     | Look-Up Table (Variable-Time)       |
+
+*Impact: Flat basis multiplication is approximately **100x faster** than the canonical recursive implementation.*
+
+### Polynomial Arithmetic (Poly ALU)
+
+Efficiency of polynomial operations in 𝔽(2^128).
+
+| Operation                 | Scenario / Size | Time        | Throughput     |
+|:--------------------------|:----------------|:------------|:---------------|
+| **Dense Eval (Tower)**    | 2²⁰ coeffs      | 91.93 ms    | 174 MiB/s      |
+| **Dense Eval (Hardware)** | 2²⁰ coeffs      | **8.34 ms** | **1.87 GiB/s** |
+| **Batch Eval (SIMD)**     | 256 × 16384     | 5.43 ms     | 772 Melem/s    |
+| **FFT Layer (RAM)**       | 2²⁰ elements    | 909 µs      | 1.15 Gelem/s   |
+| **FFT Layer (L1)**        | 256 elements    | 241 ns      | 1.06 Gelem/s   |
+| **Interpolate MSM**       | 65536 points    | 77.12 µs    | 850 Melem/s    |
+| **MLE Evaluation**        | 20 variables    | 1.27 ms     | 822 Melem/s    |
+
+### Sparse Matrix-Vector Multiplication (SpMV)
+
+Benchmarks for `Block128` SpMV with fixed degree 16 (typical for Brakedown/Binius).
+
+| Matrix Size   | Time (M3 Max) | Throughput   | Memory Bandwidth (est.) |
+|:--------------|:--------------|:-------------|:------------------------|
+| **64K Rows**  | ~284 µs       | 3.69 Gelem/s | ~59 GB/s                |
+| **256K Rows** | ~912 µs       | 4.60 Gelem/s | ~73 GB/s                |
+| **1M Rows**   | ~5.16 ms      | 3.25 Gelem/s | ~52 GB/s                |
 
 ## Installation
 
@@ -191,12 +230,12 @@ fn example_spmv() {
 
 ## Roadmap
 
-The immediate engineering focus is on achieving architectural parity
-between ARM and x86 backends and enforcing strict type-level guarantees.
+The immediate engineering focus is establishing absolute
+hardware supremacy across both ARM and x86 backends.
 
 - [ ] **x86_64 Hardware Acceleration (Beta → Prod)**
     - Replace software fallbacks with hand-tuned assembly/intrinsics for AVX2 and PCLMULQDQ.
-    - **Goal**: Achieve performance parity with the ARMv8 NEON backend.
+    - **Goal**: Path to x86_64 Supremacy.
 
 - [ ] **Formal Verification & Execution Path Auditing**
     - Mathematical modeling of execution boundaries and DoS-resistant state transitions.
@@ -340,54 +379,6 @@ execution time is catastrophic.
 
 *Note: Native AVX2/PCLMULQDQ implementation for x86_64 is on the roadmap.*
 
-## Performance Metrics
-
-> [!NOTE]
-> Current benchmarks are reported with the `table-math` feature enabled
-> to reflect peak performance for public-data scenarios. For private-key
-> operations, use the default constant-time backend.
-
-Benchmarks executed on **Apple M3 Max** (aarch64). The library achieves near-native memory
-bandwidth saturation and single-cycle throughput for hardware-accelerated operations.
-
-### Micro-Benchmarks (Block128)
-
-| Operation                | Basis             | Latency     | Implementation                      |
-|:-------------------------|:------------------|:------------|:------------------------------------|
-| **Multiplication**       | Polynomial (Flat) | **1.08 ns** | `PMULL` (Pipelined)                 |
-| **Multiplication**       | Tower (Canonical) | 122.0 ns    | Recursive Karatsuba                 |
-| **Addition**             | Any               | 1.14 ns     | Vectorized XOR                      |
-| **Inversion** (Single)   | Tower             | 283.0 ns    | Itoh-Tsujii / Fermat Little Theorem |
-| **Inversion** (Batch)    | Tower             | ~16.7 ns    | Montgomery's Trick (SIMD)           |
-| **Basis Conv** (Default) | Tower ↔ Flat      | ~90.0 ns    | Bit-Slicing (Constant-Time)         |
-| **Basis Conv** (Fast)    | Tower ↔ Flat      | 3.80 ns     | Look-Up Table (Variable-Time)       |
-
-*Impact: Flat basis multiplication is approximately **100x faster** than the canonical recursive implementation.*
-
-### Polynomial Arithmetic (Poly ALU)
-
-Efficiency of polynomial operations in 𝔽(2^128).
-
-| Operation                 | Scenario / Size | Time        | Throughput     |
-|:--------------------------|:----------------|:------------|:---------------|
-| **Dense Eval (Tower)**    | 2²⁰ coeffs      | 91.93 ms    | 174 MiB/s      |
-| **Dense Eval (Hardware)** | 2²⁰ coeffs      | **8.34 ms** | **1.87 GiB/s** |
-| **Batch Eval (SIMD)**     | 256 × 16384     | 5.43 ms     | 772 Melem/s    |
-| **FFT Layer (RAM)**       | 2²⁰ elements    | 909 µs      | 1.15 Gelem/s   |
-| **FFT Layer (L1)**        | 256 elements    | 241 ns      | 1.06 Gelem/s   |
-| **Interpolate MSM**       | 65536 points    | 77.12 µs    | 850 Melem/s    |
-| **MLE Evaluation**        | 20 variables    | 1.27 ms     | 822 Melem/s    |
-
-### Sparse Matrix-Vector Multiplication (SpMV)
-
-Benchmarks for `Block128` SpMV with fixed degree 16 (typical for Brakedown/Binius).
-
-| Matrix Size   | Time (M3 Max) | Throughput   | Memory Bandwidth (est.) |
-|:--------------|:--------------|:-------------|:------------------------|
-| **64K Rows**  | ~284 µs       | 3.69 Gelem/s | ~59 GB/s                |
-| **256K Rows** | ~912 µs       | 4.60 Gelem/s | ~73 GB/s                |
-| **1M Rows**   | ~5.16 ms      | 3.25 Gelem/s | ~52 GB/s                |
-
 ### Reproduce benchmarks
 
 > [!IMPORTANT]
@@ -427,6 +418,15 @@ The architecture and algorithms of `hekate-math` are grounded in the following a
     * Algorithmic basis for the carry-less multiplication strategies employed in `Block64` and `Block128`.
 * **Grabbe, J.** *"Towers of Field Extensions."*
     * Analysis of the X² + X + β construction for binary towers.
+
+## Security & Audits
+
+> [!WARNING]
+> This implementation is currently UNAUDITED.
+>
+> It is provided "AS IS" with ABSOLUTELY NO WARRANTY under the terms
+> of the Apache 2.0 License. The authors assume zero liability for
+> any damages arising from its use in production environments.
 
 ## License
 
