@@ -76,7 +76,7 @@ Most ZK protocols require transitioning between the **Canonical Basis** (for rec
 folding/sumcheck) and the **Polynomial Basis** (for heavy arithmetic).
 
 ```rust
-use hekate_math::{Block128, HardwareField, TowerField};
+use hekate_math::{Block128, HardwareField};
 
 fn example_isomorphism() {
     // 1. Canonical Basis (Tower)
@@ -88,17 +88,12 @@ fn example_isomorphism() {
     let b_flat = b_tower.to_hardware();
 
     // 3. Hardware-Accelerated Arithmetic
-    // WARNING:
-    // Multiplying flat elements using standard `*`
-    // (Tower trait) produces algebraically incorrect
-    // results relative to the Tower field.
-    // Always use `mul_hardware`.
-    let c_flat = a_flat.mul_hardware(b_flat);
-    let d_flat = a_flat.add_hardware(b_flat); // XOR works seamlessly in both
+    let c_flat = a_flat * b_flat;
+    let d_flat = a_flat + b_flat;
 
     // 4. Return to Canonical Basis
-    let c_tower = c_flat.convert_hardware();
-    let d_tower = d_flat.convert_hardware();
+    let c_tower = c_flat.to_tower();
+    let d_tower = d_flat.to_tower();
 
     // 5. Verify Homomorphism
     assert_eq!(
@@ -115,35 +110,35 @@ fn example_isomorphism() {
 For throughput-critical paths, `hekate-math` provides explicit SIMD packing via the `PackableField` trait.
 
 ```rust
-use hekate_math::{Block32, HardwareField, PackableField, TowerField};
+use hekate_math::{Block32, Flat, HardwareField, PackableField};
 
-fn process_simd(data: &[Block32]) {
+fn process_simd(data: &[Flat<Block32>]) {
     // 1. Pack hardware-basis scalars into SIMD registers
     // PackedBlock32 holds 4 elements (128 bits total).
     // The data must already be in the Flat/Hardware
     // basis for hardware-accelerated operations
     // to be algebraically correct.
-    let chunk_a = Block32::pack(&data[0..4]);
-    let chunk_b = Block32::pack(&data[4..8]);
+    let chunk_a = Flat::<Block32>::pack(&data[0..4]);
+    let chunk_b = Flat::<Block32>::pack(&data[4..8]);
 
     // 2. Vectorized Arithmetic
     // Performs 4 parallel field
     // multiplications in the hardware basis.
-    let result_packed = Block32::mul_hardware_packed(chunk_a, chunk_b);
+    let result_packed = chunk_a * chunk_b;
 
     // 3. Unpack back to scalars
-    let mut out_flat = [Block32::ZERO; 4];
-    Block32::unpack(result_packed, &mut out_flat);
+    let mut out_flat = [Block32::ZERO.to_hardware(); 4];
+    Flat::<Block32>::unpack(result_packed, &mut out_flat);
 
     // 4. Verification
     for i in 0..4 {
         // Convert back to verify
         // against standard multiplication.
-        let res_tower = out_flat[i].convert_hardware();
+        let res_tower = out_flat[i].to_tower();
 
         // Manual tower multiplication for comparison
-        let a_tower = data[i].convert_hardware();
-        let b_tower = data[4 + i].convert_hardware();
+        let a_tower = data[i].to_tower();
+        let b_tower = data[4 + i].to_tower();
 
         assert_eq!(res_tower, a_tower * b_tower, "SIMD multiplication mismatch");
     }
@@ -152,7 +147,7 @@ fn process_simd(data: &[Block32]) {
 fn example_simd() {
     // Initialize data and immediately
     // transform to Hardware Basis.
-    let data: Vec<Block32> = (0..8)
+    let data: Vec<Flat<Block32>> = (0..8)
         .map(|i| Block32::from(i as u32 + 1).to_hardware())
         .collect();
 
@@ -163,11 +158,11 @@ fn example_simd() {
 ### Sparse Matrix-Vector Multiplication (SpMV)
 
 A core primitive for Brakedown, Binius, and linear-code based commitments. The engine efficiently
-promotes `u8` matrix weights to `Block128` on the fly using `HardwarePromote`.
+promotes `u8` matrix weights to `Block128` on the fly using typed flat promotion (`FlatPromote`).
 
 ```rust
 use hekate_math::matrix::ByteSparseMatrix;
-use hekate_math::{Block128, HardwareField, TowerField};
+use hekate_math::{Block128, Flat, HardwareField};
 
 fn example_spmv() {
     let rows = 1 << 20; // 1 Million Rows
@@ -183,7 +178,7 @@ fn example_spmv() {
     // 2. Prepare Input Vector (Hardware Basis)
     // Input must be in the flat basis
     // for hardware acceleration.
-    let input: Vec<Block128> = vec![Block128::ZERO.to_hardware(); cols];
+    let input: Vec<Flat<Block128>> = vec![Block128::ZERO.to_hardware(); cols];
 
     // 3. Execute SpMV
     // The engine handles lifting
@@ -202,12 +197,6 @@ between ARM and x86 backends and enforcing strict type-level guarantees.
 - [ ] **x86_64 Hardware Acceleration (Beta → Prod)**
     - Replace software fallbacks with hand-tuned assembly/intrinsics for AVX2 and PCLMULQDQ.
     - **Goal**: Achieve performance parity with the ARMv8 NEON backend.
-
-- [ ] **Strict Basis Isolation (`Flat<F>`)**
-    - Introduce a `Flat<F>` newtype wrapper (Zero-Cost Abstraction).
-    - Update `HardwareField` trait signatures to return `Flat<Self>` instead of `Self`.
-    - **Why**: This will make multiplying a Canonical element by a Hardware element
-      a compile-time error, eliminating a class of silent logical bugs.
 
 - [ ] **Formal Verification & Execution Path Auditing**
     - Mathematical modeling of execution boundaries and DoS-resistant state transitions.
@@ -258,8 +247,7 @@ are subfields embedded via isomorphism, making this a Hybrid Tower construction.
 ## The Isomorphic Basis Architecture
 
 To bridge the gap between algebraic recursion and CPU pipeline efficiency, `hekate-math` implements a hybrid basis
-system. Every field element exists in two isomorphic representations, togglable at runtime via the `HardwareField`
-trait.
+system. Canonical values stay in `F`, while hardware/polynomial values are represented explicitly as `Flat<F>`.
 
 ### Canonical Basis (Tower)
 
@@ -286,24 +274,24 @@ The library strictly enforces basis separation through the type system to preven
 The Isomorphism φ is defined as: φ: 𝔽(Tower) ↔ 𝔽(Hardware)
 
 ```rust
-pub trait HardwareField: TowerField {
+pub trait HardwareField: TowerField + PackableField {
     /// Transform Canonical -> Flat
-    fn to_hardware(self) -> Self;
+    fn to_hardware(self) -> Flat<Self>;
 
     /// Transform Flat -> Canonical
-    fn convert_hardware(self) -> Self;
+    fn from_hardware(value: Flat<Self>) -> Self;
 
     /// Sum two elements assuming they
     /// are already in hardware basis.
-    fn add_hardware(self, rhs: Self) -> Self;
+    fn add_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self>;
 
     /// Multiply two elements assuming
     /// they are already in hardware basis.
-    fn mul_hardware(self, rhs: Self) -> Self;
+    fn mul_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self>;
 
     /// Extract a bit of the Tower representation
     /// directly from the Hardware basis.
-    fn tower_bit_from_hardware(self, bit_idx: usize) -> u8;
+    fn tower_bit_from_hardware(value: Flat<Self>, bit_idx: usize) -> u8;
 }
 ```
 

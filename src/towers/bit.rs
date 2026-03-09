@@ -16,8 +16,8 @@
 // limitations under the License.
 
 use crate::{
-    Block8, CanonicalDeserialize, CanonicalSerialize, HardwareField, HardwarePromote,
-    PackableField, TowerField,
+    Block8, CanonicalDeserialize, CanonicalSerialize, Flat, FlatPromote, HardwareField,
+    PackableField, PackedFlat, TowerField,
 };
 use core::ops::{Add, AddAssign, BitAnd, BitXor, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
@@ -341,52 +341,63 @@ impl Mul<Bit> for PackedBit {
 
 impl HardwareField for Bit {
     #[inline(always)]
-    fn to_hardware(self) -> Self {
-        self
+    fn to_hardware(self) -> Flat<Self> {
+        Flat::from_raw(self)
     }
 
     #[inline(always)]
-    fn convert_hardware(self) -> Self {
-        self
+    fn from_hardware(value: Flat<Self>) -> Self {
+        value.into_raw()
     }
 
     #[inline(always)]
-    fn add_hardware(self, rhs: Self) -> Self {
+    fn add_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self> {
+        let lhs = lhs.into_raw();
+        let rhs = rhs.into_raw();
+
         // Hardware addition for bits is XOR
-        Self(self.0 ^ rhs.0)
+        Flat::from_raw(Self(lhs.0 ^ rhs.0))
     }
 
     #[inline(always)]
-    fn add_hardware_packed(lhs: Self::Packed, rhs: Self::Packed) -> Self::Packed {
-        lhs + rhs
+    fn add_hardware_packed(lhs: PackedFlat<Self>, rhs: PackedFlat<Self>) -> PackedFlat<Self> {
+        PackedFlat::from_raw(lhs.into_raw() + rhs.into_raw())
     }
 
     #[inline(always)]
-    fn mul_hardware(self, rhs: Self) -> Self {
+    fn mul_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self> {
+        let lhs = lhs.into_raw();
+        let rhs = rhs.into_raw();
+
         // Hardware multiplication for bits is AND
-        Self(self.0 & rhs.0)
+        Flat::from_raw(Self(lhs.0 & rhs.0))
     }
 
     #[inline(always)]
-    fn mul_hardware_packed(lhs: Self::Packed, rhs: Self::Packed) -> Self::Packed {
-        lhs * rhs
+    fn mul_hardware_packed(lhs: PackedFlat<Self>, rhs: PackedFlat<Self>) -> PackedFlat<Self> {
+        PackedFlat::from_raw(lhs.into_raw() * rhs.into_raw())
     }
 
     #[inline(always)]
-    fn tower_bit_from_hardware(self, bit_idx: usize) -> u8 {
+    fn mul_hardware_scalar_packed(lhs: PackedFlat<Self>, rhs: Flat<Self>) -> PackedFlat<Self> {
+        PackedFlat::from_raw(lhs.into_raw() * rhs.into_raw())
+    }
+
+    #[inline(always)]
+    fn tower_bit_from_hardware(value: Flat<Self>, bit_idx: usize) -> u8 {
         assert_eq!(bit_idx, 0, "bit index out of bounds for Bit");
 
         // In GF(2), Tower and Flat
         // bases are identical.
-        self.0
+        value.into_raw().0
     }
 }
 
-impl HardwarePromote<Block8> for Bit {
+impl FlatPromote<Block8> for Bit {
     #[inline(always)]
-    fn from_partial_hardware(val: Block8) -> Self {
+    fn promote_flat(val: Flat<Block8>) -> Flat<Self> {
         // Take LSB
-        Bit(val.0 & 1)
+        Flat::from_raw(Bit(val.into_raw().0 & 1))
     }
 }
 
@@ -512,7 +523,7 @@ mod tests {
             // For Bit, this is trivial (identity),
             // but we verify the trait contract.
             assert_eq!(
-                val.to_hardware().convert_hardware(),
+                val.to_hardware().to_tower(),
                 val,
                 "Bit isomorphism roundtrip failed"
             );
@@ -527,7 +538,7 @@ mod tests {
             let b = Bit::new(rng.random::<u8>());
 
             let expected_flat = (a * b).to_hardware();
-            let actual_flat = a.to_hardware().mul_hardware(b.to_hardware());
+            let actual_flat = a.to_hardware() * b.to_hardware();
 
             // Check if multiplication in Flat basis matches Tower
             assert_eq!(
@@ -550,31 +561,31 @@ mod tests {
                 b_vals[i] = Bit::new(rng.random::<u8>());
             }
 
-            let a_packed = Bit::pack(&a_vals);
-            let b_packed = Bit::pack(&b_vals);
+            let a_flat_vals = a_vals.map(|x| x.to_hardware());
+            let b_flat_vals = b_vals.map(|x| x.to_hardware());
+            let a_packed = Flat::<Bit>::pack(&a_flat_vals);
+            let b_packed = Flat::<Bit>::pack(&b_flat_vals);
 
             // 1. Test SIMD Add (XOR)
             let add_res = Bit::add_hardware_packed(a_packed, b_packed);
 
-            let mut add_out = [Bit::ZERO; 64];
-            Bit::unpack(add_res, &mut add_out);
+            let mut add_out = [Bit::ZERO.to_hardware(); 64];
+            Flat::<Bit>::unpack(add_res, &mut add_out);
 
             for i in 0..64 {
                 assert_eq!(
                     add_out[i],
-                    a_vals[i] + b_vals[i],
+                    (a_vals[i] + b_vals[i]).to_hardware(),
                     "Bit packed add mismatch at index {}",
                     i
                 );
             }
 
             // 2. Test SIMD Mul (AND)
-            let a_flat_p = Bit::pack(&a_vals.map(|x| x.to_hardware()));
-            let b_flat_p = Bit::pack(&b_vals.map(|x| x.to_hardware()));
-            let mul_res = Bit::mul_hardware_packed(a_flat_p, b_flat_p);
+            let mul_res = Bit::mul_hardware_packed(a_packed, b_packed);
 
-            let mut mul_out = [Bit::ZERO; 64];
-            Bit::unpack(mul_res, &mut mul_out);
+            let mut mul_out = [Bit::ZERO.to_hardware(); 64];
+            Flat::<Bit>::unpack(mul_res, &mut mul_out);
 
             for i in 0..64 {
                 assert_eq!(

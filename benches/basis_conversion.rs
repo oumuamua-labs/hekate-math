@@ -19,7 +19,8 @@ use criterion::{
     BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main, measurement::WallTime,
 };
 use hekate_math::{
-    Bit, Block8, Block16, Block32, Block64, Block128, CanonicalSerialize, HardwareField, TowerField,
+    Bit, Block8, Block16, Block32, Block64, Block128, CanonicalSerialize, Flat, HardwareField,
+    PackableField, PackedFlat, TowerField,
 };
 use rand::{RngExt, rng};
 
@@ -54,7 +55,7 @@ where
     // Tower -> Flat
     // The baseline conversion cost per element.
     group.bench_function(format!("{}/scalar_pack", name), |bencher| {
-        let mut output = vec![F::ZERO; size];
+        let mut output = vec![F::ZERO.to_hardware(); size];
         bencher.iter(|| {
             for (out, &val) in output.iter_mut().zip(input.iter()) {
                 *out = val.to_hardware();
@@ -65,12 +66,12 @@ where
     // 2. Scalar:
     // Flat -> Tower
     // Inverse operation.
-    let input_flat: Vec<F> = input.iter().map(|x| x.to_hardware()).collect();
+    let input_flat: Vec<Flat<F>> = input.iter().map(|x| x.to_hardware()).collect();
     group.bench_function(format!("{}/scalar_unpack", name), |bencher| {
         let mut output = vec![F::ZERO; size];
         bencher.iter(|| {
             for (out, &val) in output.iter_mut().zip(input_flat.iter()) {
-                *out = val.convert_hardware();
+                *out = val.to_tower();
             }
         })
     });
@@ -83,8 +84,8 @@ where
         let width = F::WIDTH;
         let chunks_count = input.len() / width;
 
-        let mut output = vec![F::Packed::default(); chunks_count];
-        let mut scratch = vec![F::ZERO; width];
+        let mut output = vec![PackedFlat::<F>::default(); chunks_count];
+        let mut scratch = vec![F::ZERO.to_hardware(); width];
 
         bencher.iter(|| {
             for (out_packed, chunk) in output.iter_mut().zip(input.chunks(width)) {
@@ -94,7 +95,7 @@ where
                 }
 
                 // Pack from scratch and write to output
-                *out_packed = F::pack(&scratch);
+                *out_packed = Flat::<F>::pack(&scratch);
             }
         })
     });
@@ -102,15 +103,15 @@ where
     // 4. Packed:
     // Packed<Flat> -> Tower (Egest)
     // Measures extracting results back to standard form.
-    let packed_input: Vec<F::Packed> = input_flat
+    let packed_input: Vec<PackedFlat<F>> = input_flat
         .chunks(F::WIDTH)
         .map(|c| {
-            let mut buf = vec![F::ZERO; F::WIDTH];
+            let mut buf = vec![F::ZERO.to_hardware(); F::WIDTH];
             for (i, v) in c.iter().enumerate() {
                 buf[i] = *v;
             }
 
-            F::pack(&buf)
+            Flat::<F>::pack(&buf)
         })
         .collect();
 
@@ -118,16 +119,16 @@ where
         let width = F::WIDTH;
 
         let mut output = vec![F::ZERO; size];
-        let mut scratch = vec![F::ZERO; width];
+        let mut scratch = vec![F::ZERO.to_hardware(); width];
 
         bencher.iter(|| {
             for (packed_val, out_chunk) in packed_input.iter().zip(output.chunks_mut(width)) {
                 // Unpack to scratch
-                F::unpack(*packed_val, &mut scratch);
+                Flat::<F>::unpack(*packed_val, &mut scratch);
 
                 // Convert back to tower and write to output
                 for (out, &val_flat) in out_chunk.iter_mut().zip(scratch.iter()) {
-                    *out = val_flat.convert_hardware();
+                    *out = val_flat.to_tower();
                 }
             }
         })

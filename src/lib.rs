@@ -29,6 +29,6 @@ mod packable;
 pub mod matrix;
 
 pub use field::*;
-pub use hardware::{HardwareField, HardwarePromote};
-pub use packable::PackableField;
+pub use hardware::{Flat, FlatPromote, HardwareField};
+pub use packable::{PackableField, PackedFlat};
 pub use towers::*;

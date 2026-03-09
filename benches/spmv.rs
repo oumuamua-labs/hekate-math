@@ -18,7 +18,7 @@
 use core::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use hekate_math::matrix::ByteSparseMatrix;
-use hekate_math::{Block128, HardwareField};
+use hekate_math::{Block128, Flat, HardwareField};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 /// Benchmark for Sparse Matrix-Vector Multiplication (SpMV).
@@ -46,7 +46,7 @@ fn bench_spmv_block128(c: &mut Criterion) {
 
         // Pre-generate input vector
         let mut rng = StdRng::seed_from_u64(42);
-        let input: Vec<Block128> = (0..size)
+        let input: Vec<Flat<Block128>> = (0..size)
             .map(|_| {
                 let val = Block128::from(rng.random::<u8>());
                 val.to_hardware()
@@ -99,7 +99,7 @@ fn bench_spmv_sparsity(c: &mut Criterion) {
         let matrix = ByteSparseMatrix::generate_random(size, size, degree, seed);
 
         let mut rng = StdRng::seed_from_u64(42);
-        let input: Vec<Block128> = (0..size)
+        let input: Vec<Flat<Block128>> = (0..size)
             .map(|_| Block128::from(rng.random::<u8>()).to_hardware())
             .collect();
 
@@ -137,7 +137,8 @@ fn bench_spmv_conversion_overhead(c: &mut Criterion) {
 
     group.bench_function("tower_to_hardware_inline", |b| {
         b.iter(|| {
-            let input_hw: Vec<Block128> = input_tower.iter().map(|x| x.to_hardware()).collect();
+            let input_hw: Vec<Flat<Block128>> =
+                input_tower.iter().map(|x| x.to_hardware()).collect();
             let output = matrix.spmv(black_box(input_hw.as_slice()));
 
             black_box(output)
@@ -146,7 +147,7 @@ fn bench_spmv_conversion_overhead(c: &mut Criterion) {
 
     // Scenario B:
     // Input already in Hardware basis (target)
-    let input_hardware: Vec<Block128> = input_tower.iter().map(|x| x.to_hardware()).collect();
+    let input_hardware: Vec<Flat<Block128>> = input_tower.iter().map(|x| x.to_hardware()).collect();
 
     group.bench_function("hardware_direct", |b| {
         b.iter(|| {
@@ -174,7 +175,7 @@ fn bench_spmv_parallel(c: &mut Criterion) {
     group.throughput(Throughput::Elements(ops));
 
     let mut rng = StdRng::seed_from_u64(42);
-    let input: Vec<Block128> = (0..size)
+    let input: Vec<Flat<Block128>> = (0..size)
         .map(|_| Block128::from(rng.random::<u8>()).to_hardware())
         .collect();
 

@@ -22,8 +22,8 @@ use crate::towers::block16::Block16;
 use crate::towers::block32::Block32;
 use crate::towers::block64::Block64;
 use crate::{
-    CanonicalDeserialize, CanonicalSerialize, HardwareField, HardwarePromote, PackableField,
-    TowerField, constants,
+    CanonicalDeserialize, CanonicalSerialize, Flat, FlatPromote, HardwareField, PackableField,
+    PackedFlat, TowerField, constants,
 };
 use core::ops::{Add, AddAssign, BitXor, BitXorAssign, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
@@ -349,9 +349,10 @@ impl Mul for PackedBlock128 {
             for ((out, l), r) in res.iter_mut().zip(self.0.iter()).zip(rhs.0.iter()) {
                 let a_flat = l.to_hardware();
                 let b_flat = r.to_hardware();
-                let c_flat = neon::mul_flat_128(a_flat, b_flat);
+                let c_flat =
+                    Flat::from_raw(neon::mul_flat_128(a_flat.into_raw(), b_flat.into_raw()));
 
-                *out = c_flat.convert_hardware();
+                *out = c_flat.to_tower();
             }
 
             Self(res)
@@ -410,66 +411,81 @@ impl MulAssign<Block128> for PackedBlock128 {
 
 impl HardwareField for Block128 {
     #[inline(always)]
-    fn to_hardware(self) -> Self {
+    fn to_hardware(self) -> Flat<Self> {
         #[cfg(feature = "table-math")]
         {
-            apply_matrix_128(self, &constants::TOWER_TO_FLAT_128)
+            Flat::from_raw(apply_matrix_128(self, &constants::TOWER_TO_FLAT_128))
         }
 
         #[cfg(not(feature = "table-math"))]
         {
-            Block128(map_ct_128_split(self.0, &TOWER_TO_FLAT_BASIS_128.0))
+            Flat::from_raw(Block128(map_ct_128_split(
+                self.0,
+                &TOWER_TO_FLAT_BASIS_128.0,
+            )))
         }
     }
 
     #[inline(always)]
-    fn convert_hardware(self) -> Self {
+    fn from_hardware(value: Flat<Self>) -> Self {
+        let value = value.into_raw();
+
         #[cfg(feature = "table-math")]
         {
-            apply_matrix_128(self, &constants::FLAT_TO_TOWER_128)
+            apply_matrix_128(value, &constants::FLAT_TO_TOWER_128)
         }
 
         #[cfg(not(feature = "table-math"))]
         {
-            Block128(map_ct_128_split(self.0, &FLAT_TO_TOWER_BASIS_128.0))
+            Block128(map_ct_128_split(value.0, &FLAT_TO_TOWER_BASIS_128.0))
         }
     }
 
     #[inline(always)]
-    fn add_hardware(self, rhs: Self) -> Self {
-        self + rhs
+    fn add_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self> {
+        Flat::from_raw(lhs.into_raw() + rhs.into_raw())
     }
 
     #[inline(always)]
-    fn add_hardware_packed(lhs: Self::Packed, rhs: Self::Packed) -> Self::Packed {
+    fn add_hardware_packed(lhs: PackedFlat<Self>, rhs: PackedFlat<Self>) -> PackedFlat<Self> {
+        let lhs = lhs.into_raw();
+        let rhs = rhs.into_raw();
+
         #[cfg(target_arch = "aarch64")]
         {
-            neon::add_packed_128(lhs, rhs)
+            PackedFlat::from_raw(neon::add_packed_128(lhs, rhs))
         }
 
         #[cfg(not(target_arch = "aarch64"))]
         {
-            lhs + rhs
+            PackedFlat::from_raw(lhs + rhs)
         }
     }
 
     #[inline(always)]
-    fn mul_hardware(self, rhs: Self) -> Self {
+    fn mul_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self> {
+        let lhs = lhs.into_raw();
+        let rhs = rhs.into_raw();
+
         #[cfg(target_arch = "aarch64")]
         {
-            neon::mul_flat_128(self, rhs)
+            Flat::from_raw(neon::mul_flat_128(lhs, rhs))
         }
 
         #[cfg(not(target_arch = "aarch64"))]
         {
-            let a_tower = self.convert_hardware();
-            let b_tower = rhs.convert_hardware();
+            let a_tower = Self::from_hardware(Flat::from_raw(lhs));
+            let b_tower = Self::from_hardware(Flat::from_raw(rhs));
+
             (a_tower * b_tower).to_hardware()
         }
     }
 
     #[inline(always)]
-    fn mul_hardware_packed(lhs: Self::Packed, rhs: Self::Packed) -> Self::Packed {
+    fn mul_hardware_packed(lhs: PackedFlat<Self>, rhs: PackedFlat<Self>) -> PackedFlat<Self> {
+        let lhs = lhs.into_raw();
+        let rhs = rhs.into_raw();
+
         #[cfg(target_arch = "aarch64")]
         {
             let mut res = [Block128::ZERO; PACKED_WIDTH_128];
@@ -477,7 +493,7 @@ impl HardwareField for Block128 {
                 *out = neon::mul_flat_128(*l, *r);
             }
 
-            PackedBlock128(res)
+            PackedFlat::from_raw(PackedBlock128(res))
         }
 
         #[cfg(not(target_arch = "aarch64"))]
@@ -490,21 +506,21 @@ impl HardwareField for Block128 {
             Self::unpack(rhs, &mut r);
 
             for i in 0..<Self as PackableField>::WIDTH {
-                res[i] = l[i].mul_hardware(r[i]);
+                res[i] = Self::mul_hardware(Flat::from_raw(l[i]), Flat::from_raw(r[i])).into_raw();
             }
 
-            Self::pack(&res)
+            PackedFlat::from_raw(Self::pack(&res))
         }
     }
 
     #[inline(always)]
-    fn tower_bit_from_hardware(self, bit_idx: usize) -> u8 {
+    fn tower_bit_from_hardware(value: Flat<Self>, bit_idx: usize) -> u8 {
         let mask = constants::FLAT_TO_TOWER_BIT_MASKS_128[bit_idx];
 
         // Parity of (x & mask) without popcount.
         // Folds 128 bits down to 1
         // using a binary XOR tree.
-        let mut v = self.0 & mask;
+        let mut v = value.into_raw().0 & mask;
         v ^= v >> 64;
         v ^= v >> 32;
         v ^= v >> 16;
@@ -518,7 +534,7 @@ impl HardwareField for Block128 {
 }
 
 // ========================================
-// FIELD LIFTING (HardwarePromote)
+// FIELD LIFTING (FlatPromote)
 // ========================================
 //
 // SECURITY:
@@ -526,54 +542,71 @@ impl HardwareField for Block128 {
 // no secret-dependent memory access.
 
 #[cfg(not(feature = "table-math"))]
-impl HardwarePromote<Block8> for Block128 {
+impl FlatPromote<Block8> for Block128 {
     #[inline(always)]
-    fn from_partial_hardware(val: Block8) -> Self {
-        Block128(lift_ct::<8>(val.0 as u64, &constants::LIFT_BASIS_8.0))
+    fn promote_flat(val: Flat<Block8>) -> Flat<Self> {
+        let val = val.into_raw();
+        Flat::from_raw(Block128(lift_ct::<8>(
+            val.0 as u64,
+            &constants::LIFT_BASIS_8.0,
+        )))
     }
 }
 
 #[cfg(not(feature = "table-math"))]
-impl HardwarePromote<Block16> for Block128 {
+impl FlatPromote<Block16> for Block128 {
     #[inline(always)]
-    fn from_partial_hardware(val: Block16) -> Self {
-        Block128(lift_ct::<16>(val.0 as u64, &constants::LIFT_BASIS_16.0))
+    fn promote_flat(val: Flat<Block16>) -> Flat<Self> {
+        Flat::from_raw(Block128(lift_ct::<16>(
+            val.into_raw().0 as u64,
+            &constants::LIFT_BASIS_16.0,
+        )))
     }
 }
 
 #[cfg(not(feature = "table-math"))]
-impl HardwarePromote<Block32> for Block128 {
+impl FlatPromote<Block32> for Block128 {
     #[inline(always)]
-    fn from_partial_hardware(val: Block32) -> Self {
-        Block128(lift_ct::<32>(val.0 as u64, &constants::LIFT_BASIS_32.0))
+    fn promote_flat(val: Flat<Block32>) -> Flat<Self> {
+        Flat::from_raw(Block128(lift_ct::<32>(
+            val.into_raw().0 as u64,
+            &constants::LIFT_BASIS_32.0,
+        )))
     }
 }
 
 #[cfg(not(feature = "table-math"))]
-impl HardwarePromote<Block64> for Block128 {
+impl FlatPromote<Block64> for Block128 {
     #[inline(always)]
-    fn from_partial_hardware(val: Block64) -> Self {
-        Block128(lift_ct::<64>(val.0, &constants::LIFT_BASIS_64.0))
+    fn promote_flat(val: Flat<Block64>) -> Flat<Self> {
+        Flat::from_raw(Block128(lift_ct::<64>(
+            val.into_raw().0,
+            &constants::LIFT_BASIS_64.0,
+        )))
     }
 }
 
 // Insecure (secret-dependent table indexing) lifting path
 #[cfg(feature = "table-math")]
-impl HardwarePromote<Block8> for Block128 {
+impl FlatPromote<Block8> for Block128 {
     #[inline(always)]
-    fn from_partial_hardware(val: Block8) -> Self {
+    fn promote_flat(val: Flat<Block8>) -> Flat<Self> {
+        let val = val.into_raw();
         let idx_flat = val.0 as usize;
         let tower_byte = unsafe { *constants::FLAT_TO_TOWER_8.get_unchecked(idx_flat) };
         let idx_tower = tower_byte as usize;
 
-        Block128(unsafe { *constants::TOWER_TO_FLAT_128.get_unchecked(idx_tower) })
+        Flat::from_raw(Block128(unsafe {
+            *constants::TOWER_TO_FLAT_128.get_unchecked(idx_tower)
+        }))
     }
 }
 
 #[cfg(feature = "table-math")]
-impl HardwarePromote<Block16> for Block128 {
+impl FlatPromote<Block16> for Block128 {
     #[inline(always)]
-    fn from_partial_hardware(val: Block16) -> Self {
+    fn promote_flat(val: Flat<Block16>) -> Flat<Self> {
+        let val = val.into_raw();
         let v_flat = val.0;
 
         let mut v_tower = 0u16;
@@ -590,14 +623,15 @@ impl HardwarePromote<Block16> for Block128 {
             res ^= unsafe { *constants::TOWER_TO_FLAT_128.get_unchecked(idx) };
         }
 
-        Block128(res)
+        Flat::from_raw(Block128(res))
     }
 }
 
 #[cfg(feature = "table-math")]
-impl HardwarePromote<Block32> for Block128 {
+impl FlatPromote<Block32> for Block128 {
     #[inline(always)]
-    fn from_partial_hardware(val: Block32) -> Self {
+    fn promote_flat(val: Flat<Block32>) -> Flat<Self> {
+        let val = val.into_raw();
         let v_flat = val.0;
 
         let mut v_tower = 0u32;
@@ -614,14 +648,15 @@ impl HardwarePromote<Block32> for Block128 {
             res ^= unsafe { *constants::TOWER_TO_FLAT_128.get_unchecked(idx) };
         }
 
-        Block128(res)
+        Flat::from_raw(Block128(res))
     }
 }
 
 #[cfg(feature = "table-math")]
-impl HardwarePromote<Block64> for Block128 {
+impl FlatPromote<Block64> for Block128 {
     #[inline(always)]
-    fn from_partial_hardware(val: Block64) -> Self {
+    fn promote_flat(val: Flat<Block64>) -> Flat<Self> {
+        let val = val.into_raw();
         let v_flat = val.0;
 
         let mut v_tower = 0u64;
@@ -638,7 +673,7 @@ impl HardwarePromote<Block64> for Block128 {
             res ^= unsafe { *constants::TOWER_TO_FLAT_128.get_unchecked(idx) };
         }
 
-        Block128(res)
+        Flat::from_raw(Block128(res))
     }
 }
 
@@ -987,7 +1022,7 @@ mod tests {
         let mut rng = rng();
         for _ in 0..1000 {
             let val = Block128(rng.random::<u128>());
-            assert_eq!(val.to_hardware().convert_hardware(), val);
+            assert_eq!(val.to_hardware().to_tower(), val);
         }
     }
 
@@ -999,7 +1034,7 @@ mod tests {
             let b = Block128(rng.random());
 
             let expected_flat = (a * b).to_hardware();
-            let actual_flat = a.to_hardware().mul_hardware(b.to_hardware());
+            let actual_flat = a.to_hardware() * b.to_hardware();
 
             assert_eq!(
                 actual_flat, expected_flat,
@@ -1020,31 +1055,31 @@ mod tests {
                 b_vals[i] = Block128(rng.random::<u128>());
             }
 
-            let a_packed = Block128::pack(&a_vals);
-            let b_packed = Block128::pack(&b_vals);
+            let a_flat_vals = a_vals.map(|x| x.to_hardware());
+            let b_flat_vals = b_vals.map(|x| x.to_hardware());
+            let a_packed = Flat::<Block128>::pack(&a_flat_vals);
+            let b_packed = Flat::<Block128>::pack(&b_flat_vals);
 
             // 1. Test SIMD Add (Check 512-bit / 4-register XOR)
             let add_res = Block128::add_hardware_packed(a_packed, b_packed);
 
-            let mut add_out = [Block128::ZERO; 4];
-            Block128::unpack(add_res, &mut add_out);
+            let mut add_out = [Block128::ZERO.to_hardware(); 4];
+            Flat::<Block128>::unpack(add_res, &mut add_out);
 
             for i in 0..4 {
                 assert_eq!(
                     add_out[i],
-                    a_vals[i] + b_vals[i],
+                    (a_vals[i] + b_vals[i]).to_hardware(),
                     "Block128 SIMD add mismatch at index {}",
                     i
                 );
             }
 
             // 2. Test SIMD Mul (Flat basis)
-            let a_flat_p = Block128::pack(&a_vals.map(|x| x.to_hardware()));
-            let b_flat_p = Block128::pack(&b_vals.map(|x| x.to_hardware()));
-            let mul_res = Block128::mul_hardware_packed(a_flat_p, b_flat_p);
+            let mul_res = Block128::mul_hardware_packed(a_packed, b_packed);
 
-            let mut mul_out = [Block128::ZERO; 4];
-            Block128::unpack(mul_res, &mut mul_out);
+            let mut mul_out = [Block128::ZERO.to_hardware(); 4];
+            Flat::<Block128>::unpack(mul_res, &mut mul_out);
 
             for i in 0..4 {
                 let expected_flat = (a_vals[i] * b_vals[i]).to_hardware();
@@ -1210,7 +1245,7 @@ mod tests {
     fn lift_from_partial_hardware_matches_tables_block8_exhaustive() {
         for x in 0u16..=u8::MAX as u16 {
             let v = Block8(x as u8);
-            let got = Block128::from_partial_hardware(v);
+            let got = Block128::promote_flat(Flat::from_raw(v)).into_raw();
             let expected = promote_block8_tables(v);
 
             assert_eq!(got, expected);
@@ -1221,7 +1256,7 @@ mod tests {
     fn lift_from_partial_hardware_matches_tables_block16_exhaustive() {
         for x in 0..=u16::MAX {
             let v = Block16(x);
-            let got = Block128::from_partial_hardware(v);
+            let got = Block128::promote_flat(Flat::from_raw(v)).into_raw();
             let expected = promote_block16_tables(v);
 
             assert_eq!(got, expected);
@@ -1233,7 +1268,7 @@ mod tests {
         let mut rng = rng();
         for _ in 0..10_000 {
             let v = Block32(rng.random::<u32>());
-            let got = Block128::from_partial_hardware(v);
+            let got = Block128::promote_flat(Flat::from_raw(v)).into_raw();
             let expected = promote_block32_tables(v);
 
             assert_eq!(got, expected);
@@ -1245,7 +1280,7 @@ mod tests {
         let mut rng = rng();
         for _ in 0..10_000 {
             let v = Block64(rng.random::<u64>());
-            let got = Block128::from_partial_hardware(v);
+            let got = Block128::promote_flat(Flat::from_raw(v)).into_raw();
             let expected = promote_block64_tables(v);
 
             assert_eq!(got, expected);
@@ -1254,12 +1289,12 @@ mod tests {
 
     proptest! {
         #[test]
-        fn parity_masks_match_convert_hardware(x_flat in any::<u128>()) {
-            let tower = Block128(x_flat).convert_hardware().0;
+        fn parity_masks_match_from_hardware(x_flat in any::<u128>()) {
+            let tower = Block128::from_hardware(Flat::from_raw(Block128(x_flat))).0;
 
             for k in 0..128 {
                 let bit = ((tower >> k) & 1) as u8;
-                let via_api = Block128(x_flat).tower_bit_from_hardware(k);
+                let via_api = Flat::from_raw(Block128(x_flat)).tower_bit(k);
 
                 prop_assert_eq!(
                     via_api, bit,

@@ -16,10 +16,11 @@
 // limitations under the License.
 
 use core::hint::black_box;
+use core::mem::size_of;
 use criterion::{
     BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main, measurement::WallTime,
 };
-use hekate_math::{Block128, HardwareField, PackedBlock128};
+use hekate_math::{Block128, Flat, HardwareField, PackableField, PackedBlock128, PackedFlat};
 use rand::{RngExt, rng};
 use std::time::Duration;
 
@@ -61,7 +62,7 @@ fn bench_poly_arithmetic(c: &mut Criterion) {
     group.finish();
 }
 
-/// 1. Dense Horner Evaluation
+// 1. Dense Horner Evaluation
 fn bench_eval_dense<F>(group: &mut BenchmarkGroup<WallTime>, name: &str, degree: usize)
 where
     F: HardwareField,
@@ -88,16 +89,16 @@ where
 
     // Target:
     // Hardware Basis
-    let coeffs_hw: Vec<F> = coeffs.iter().map(|x| x.to_hardware()).collect();
+    let coeffs_hw: Vec<Flat<F>> = coeffs.iter().map(|x| x.to_hardware()).collect();
     let z_hw = z.to_hardware();
 
     group.bench_function(
         format!("{}/eval_dense/hardware_{}", name, degree),
         |bencher| {
             bencher.iter(|| {
-                let mut acc = F::ZERO;
+                let mut acc = F::ZERO.to_hardware();
                 for &c in coeffs_hw.iter().rev() {
-                    acc = acc.mul_hardware(z_hw) + c;
+                    acc = acc * z_hw + c;
                 }
 
                 black_box(acc)
@@ -106,9 +107,9 @@ where
     );
 }
 
-/// 2. Batch Evaluation (SIMD Optimized)
-/// Optimized using "Strip Mining" to minimize broadcast overhead.
-/// Loop order: Coefficients (Outer) -> Points (Inner).
+// 2. Batch Evaluation (SIMD Optimized)
+// Optimized using "Strip Mining" to minimize broadcast overhead.
+// Loop order: Coefficients (Outer) -> Points (Inner).
 fn bench_eval_batch_block128(
     group: &mut BenchmarkGroup<WallTime>,
     degree: usize,
@@ -117,13 +118,13 @@ fn bench_eval_batch_block128(
     let mut rng = rng();
 
     // Polynomial coefficients (Hardware Basis)
-    let coeffs: Vec<Block128> = (0..degree)
+    let coeffs: Vec<Flat<Block128>> = (0..degree)
         .map(|_| Block128::from(rng.random::<u128>()).to_hardware())
         .collect();
 
     // Points to evaluate at (Hardware Basis), packed
     let packed_count = num_points / 4;
-    let points: Vec<PackedBlock128> = (0..packed_count)
+    let points: Vec<PackedFlat<Block128>> = (0..packed_count)
         .map(|_| {
             let chunk = [
                 Block128::from(rng.random::<u128>()).to_hardware(),
@@ -131,7 +132,7 @@ fn bench_eval_batch_block128(
                 Block128::from(rng.random::<u128>()).to_hardware(),
                 Block128::from(rng.random::<u128>()).to_hardware(),
             ];
-            PackedBlock128(chunk)
+            Flat::<Block128>::pack(&chunk)
         })
         .collect();
 
@@ -139,7 +140,7 @@ fn bench_eval_batch_block128(
     // Size:
     // 16k points * 16 bytes = 256 KB.
     // Fits in L2 Cache.
-    let mut results = vec![PackedBlock128::zero(); packed_count];
+    let mut results = vec![PackedFlat::<Block128>::default(); packed_count];
 
     group.throughput(Throughput::Elements((degree * num_points) as u64));
     group.bench_function(
@@ -148,13 +149,13 @@ fn bench_eval_batch_block128(
             bencher.iter(|| {
                 // Initialize accumulators to zero
                 for acc in results.iter_mut() {
-                    *acc = PackedBlock128::zero();
+                    *acc = PackedFlat::from_raw(PackedBlock128::zero());
                 }
 
                 // Outer loop:
                 // Coefficients
                 for &c in coeffs.iter().rev() {
-                    let c_vec = PackedBlock128::broadcast(c);
+                    let c_vec = PackedFlat::from_raw(PackedBlock128::broadcast(c.into_raw()));
 
                     // Inner loop:
                     // Points (Stream through L1/L2)
@@ -171,7 +172,7 @@ fn bench_eval_batch_block128(
     );
 }
 
-/// 3. Additive FFT (Mock Butterfly)
+// 3. Additive FFT (Mock Butterfly)
 fn bench_fft_additive<F>(
     group: &mut BenchmarkGroup<WallTime>,
     name: &str,
@@ -181,7 +182,7 @@ fn bench_fft_additive<F>(
     F: HardwareField,
 {
     let mut rng = rng();
-    let mut data: Vec<F> = (0..size)
+    let mut data: Vec<Flat<F>> = (0..size)
         .map(|_| F::from(rng.random::<u128>()).to_hardware())
         .collect();
     let twiddle = F::from(rng.random::<u128>()).to_hardware();
@@ -204,7 +205,7 @@ fn bench_fft_additive<F>(
 
                         // Butterfly operations
                         let sum = u + v;
-                        let twisted = u.add_hardware(v.mul_hardware(twiddle));
+                        let twisted = u + v * twiddle;
 
                         unsafe {
                             *data.get_unchecked_mut(i + j) = sum;
@@ -221,25 +222,25 @@ fn bench_fft_additive<F>(
     );
 }
 
-/// 4. Interpolate (Linear Combination subset)
+// 4. Interpolate (Linear Combination subset)
 fn bench_interpolate<F>(group: &mut BenchmarkGroup<WallTime>, name: &str, size: usize)
 where
     F: HardwareField,
 {
     let mut rng = rng();
-    let coeffs: Vec<F> = (0..size)
+    let coeffs: Vec<Flat<F>> = (0..size)
         .map(|_| F::from(rng.random::<u128>()).to_hardware())
         .collect();
-    let y_vals: Vec<F> = (0..size)
+    let y_vals: Vec<Flat<F>> = (0..size)
         .map(|_| F::from(rng.random::<u128>()).to_hardware())
         .collect();
 
     group.throughput(Throughput::Elements(size as u64));
     group.bench_function(format!("{}/interpolate_msm_{}", name, size), |bencher| {
         bencher.iter(|| {
-            let mut acc = F::ZERO;
+            let mut acc = F::ZERO.to_hardware();
             for (c, y) in coeffs.iter().zip(y_vals.iter()) {
-                acc = acc.add_hardware(c.mul_hardware(*y));
+                acc += *c * *y;
             }
 
             black_box(acc)
@@ -247,11 +248,11 @@ where
     });
 }
 
-/// 5. Multilinear Evaluation (Folding).
-///    Simulates the core operation of Binius:
-///    folding a hypercube in all directions.
-///    Formula for binary fields:
-///    result = A + r * (A + B)
+// 5. Multilinear Evaluation (Folding).
+// Simulates the core operation of Binius:
+// folding a hypercube in all directions.
+// Formula for binary fields:
+// result = A + r * (A + B)
 fn bench_eval_multilinear<F>(group: &mut BenchmarkGroup<WallTime>, name: &str, num_vars: usize)
 where
     F: HardwareField,
@@ -260,12 +261,12 @@ where
     let mut rng = rng();
 
     // Random multilinear polynomial coefficients
-    let mut data: Vec<F> = (0..size)
+    let mut data: Vec<Flat<F>> = (0..size)
         .map(|_| F::from(rng.random::<u128>()).to_hardware())
         .collect();
 
     // Evaluation point (r_0, ..., r_k-1)
-    let point: Vec<F> = (0..num_vars)
+    let point: Vec<Flat<F>> = (0..num_vars)
         .map(|_| F::from(rng.random::<u128>()).to_hardware())
         .collect();
 
@@ -293,7 +294,7 @@ where
                         // Fold logic:
                         // u' = u + r * (u + v)
                         let sum = u + v;
-                        let folded = u + sum.mul_hardware(r);
+                        let folded = u + sum * r;
 
                         *data.get_unchecked_mut(i) = folded;
                     }

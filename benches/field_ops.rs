@@ -19,7 +19,7 @@ use core::hint::black_box;
 use criterion::{
     BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main, measurement::WallTime,
 };
-use hekate_math::{Bit, Block8, Block16, Block32, Block64, Block128, HardwareField};
+use hekate_math::{Bit, Block8, Block16, Block32, Block64, Block128, Flat, HardwareField};
 use rand::{RngExt, rng};
 
 fn bench_mul_latency(c: &mut Criterion) {
@@ -59,7 +59,7 @@ where
 
     // Using explicit hardware multiply function
     group.bench_function(format!("{}/hardware_basis", name), |bencher| {
-        bencher.iter(|| a_hw.mul_hardware(black_box(b_hw)))
+        bencher.iter(|| a_hw * black_box(b_hw))
     });
 }
 
@@ -92,7 +92,7 @@ where
     // 2. Hardware Basis Squaring
     let a_hw = a.to_hardware();
     group.bench_function(format!("{}/hardware_basis", name), |bencher| {
-        bencher.iter(|| a_hw.mul_hardware(black_box(a_hw)))
+        bencher.iter(|| a_hw * black_box(a_hw))
     });
 }
 
@@ -140,10 +140,10 @@ where
     // 2. Batch Inversion (Baseline - Tower Basis)
     // Measures amortized cost:
     // Total Time / Batch Size
-    let inputs_hw: Vec<F> = inputs.iter().map(|&x| x.to_hardware()).collect();
+    let inputs_hw: Vec<Flat<F>> = inputs.iter().map(|&x| x.to_hardware()).collect();
 
-    let mut results = vec![F::ZERO; batch_size];
-    let mut scratch = vec![F::ZERO; batch_size];
+    let mut results = vec![F::ZERO.to_hardware(); batch_size];
+    let mut scratch = vec![F::ZERO.to_hardware(); batch_size];
 
     group.throughput(Throughput::Elements(batch_size as u64));
     group.bench_function(format!("{}/batch", name), |bencher| {
@@ -198,32 +198,32 @@ where
 }
 
 fn batch_invert_hardware<F: HardwareField>(
-    inputs: &[F],
-    results: &mut [F],
-    scratch_products: &mut [F],
+    inputs: &[Flat<F>],
+    results: &mut [Flat<F>],
+    scratch_products: &mut [Flat<F>],
 ) {
     let n = inputs.len();
-    let one_hw = F::ONE;
+    let one_hw = F::ONE.to_hardware();
 
     let mut acc = one_hw;
 
     // 1. Prefix products
     for (p, &x) in scratch_products.iter_mut().zip(inputs) {
         *p = acc;
-        acc = acc.mul_hardware(x);
+        acc *= x;
     }
 
     // 2. Global Inversion
     // Must convert to tower to invert, then back.
-    let acc_tower = acc.convert_hardware();
+    let acc_tower = acc.to_tower();
     let inv_tower = acc_tower.invert();
 
     let mut acc_inv = inv_tower.to_hardware();
 
     // 3. Backtrack
     for i in (0..n).rev() {
-        results[i] = acc_inv.mul_hardware(scratch_products[i]);
-        acc_inv = acc_inv.mul_hardware(inputs[i]);
+        results[i] = acc_inv * scratch_products[i];
+        acc_inv *= inputs[i];
     }
 }
 

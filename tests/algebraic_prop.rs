@@ -167,7 +167,7 @@ proptest! {
     #[test]
     fn prop_block8_hardware_iso_roundtrip(a in any_block8()) {
         // convert(to_hardware(a)) == a
-        prop_assert_eq!(a.to_hardware().convert_hardware(), a);
+        prop_assert_eq!(a.to_hardware().to_tower(), a);
     }
 
     // ==================================
@@ -228,7 +228,7 @@ proptest! {
     #[test]
     fn prop_block16_hardware_iso_roundtrip(a in any_block16()) {
         // convert(to_hardware(a)) == a
-        prop_assert_eq!(a.to_hardware().convert_hardware(), a);
+        prop_assert_eq!(a.to_hardware().to_tower(), a);
     }
 
     // ==================================
@@ -289,7 +289,7 @@ proptest! {
     #[test]
     fn prop_block32_hardware_iso_roundtrip(a in any_block32()) {
         // convert(to_hardware(a)) == a
-        prop_assert_eq!(a.to_hardware().convert_hardware(), a);
+        prop_assert_eq!(a.to_hardware().to_tower(), a);
     }
 
     // ==================================
@@ -350,7 +350,7 @@ proptest! {
     #[test]
     fn prop_block64_hardware_iso_roundtrip(a in any_block64()) {
         // convert(to_hardware(a)) == a
-        prop_assert_eq!(a.to_hardware().convert_hardware(), a);
+        prop_assert_eq!(a.to_hardware().to_tower(), a);
     }
 
     // ==================================
@@ -411,6 +411,6 @@ proptest! {
     #[test]
     fn prop_block128_hardware_iso_roundtrip(a in any_block128()) {
         // convert(to_hardware(a)) == a
-        prop_assert_eq!(a.to_hardware().convert_hardware(), a);
+        prop_assert_eq!(a.to_hardware().to_tower(), a);
     }
 }

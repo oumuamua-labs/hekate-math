@@ -570,7 +570,7 @@ impl_write_masks!(write_masks_64, u64, 64, apply_64, 16);
 impl_write_masks!(write_masks_128, u128, 128, apply_128, 32);
 
 // ==========================================
-// 4. LIFT BASIS GENERATORS (HardwarePromote)
+// 4. LIFT BASIS GENERATORS (FlatPromote)
 // ==========================================
 
 macro_rules! impl_write_lift {
@@ -805,7 +805,7 @@ fn main() {
     write_raw_128(&mut file, "RAW_TOWER_TO_FLAT_128", &TOWER_TO_FLAT_128);
 
     // Extra lifting bases for
-    // HardwarePromote in Block128.
+    // FlatPromote in Block128.
     write_lift_basis_16_to_128(
         &mut file,
         "LIFT_BASIS_16_TO_128",

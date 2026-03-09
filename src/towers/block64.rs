@@ -22,8 +22,8 @@ use crate::towers::block8::Block8;
 use crate::towers::block16::Block16;
 use crate::towers::block32::Block32;
 use crate::{
-    CanonicalDeserialize, CanonicalSerialize, HardwareField, HardwarePromote, PackableField,
-    TowerField, constants,
+    CanonicalDeserialize, CanonicalSerialize, Flat, FlatPromote, HardwareField, PackableField,
+    PackedFlat, TowerField, constants,
 };
 use core::ops::{Add, AddAssign, BitXor, BitXorAssign, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
@@ -368,69 +368,81 @@ impl Mul<Block64> for PackedBlock64 {
 
 impl HardwareField for Block64 {
     #[inline(always)]
-    fn to_hardware(self) -> Self {
+    fn to_hardware(self) -> Flat<Self> {
         #[cfg(feature = "table-math")]
         {
-            apply_matrix_64(self, &constants::TOWER_TO_FLAT_64)
+            Flat::from_raw(apply_matrix_64(self, &constants::TOWER_TO_FLAT_64))
         }
 
         #[cfg(not(feature = "table-math"))]
         {
-            Block64(map_ct_64(self.0, &TOWER_TO_FLAT_BASIS_64.0))
+            Flat::from_raw(Block64(map_ct_64(self.0, &TOWER_TO_FLAT_BASIS_64.0)))
         }
     }
 
     #[inline(always)]
-    fn convert_hardware(self) -> Self {
+    fn from_hardware(value: Flat<Self>) -> Self {
+        let value = value.into_raw();
+
         #[cfg(feature = "table-math")]
         {
-            apply_matrix_64(self, &constants::FLAT_TO_TOWER_64)
+            apply_matrix_64(value, &constants::FLAT_TO_TOWER_64)
         }
 
         #[cfg(not(feature = "table-math"))]
         {
-            Block64(map_ct_64(self.0, &FLAT_TO_TOWER_BASIS_64.0))
+            Block64(map_ct_64(value.0, &FLAT_TO_TOWER_BASIS_64.0))
         }
     }
 
     #[inline(always)]
-    fn add_hardware(self, rhs: Self) -> Self {
-        self + rhs
+    fn add_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self> {
+        Flat::from_raw(lhs.into_raw() + rhs.into_raw())
     }
 
     #[inline(always)]
-    fn add_hardware_packed(lhs: Self::Packed, rhs: Self::Packed) -> Self::Packed {
+    fn add_hardware_packed(lhs: PackedFlat<Self>, rhs: PackedFlat<Self>) -> PackedFlat<Self> {
+        let lhs = lhs.into_raw();
+        let rhs = rhs.into_raw();
+
         #[cfg(target_arch = "aarch64")]
         {
-            neon::add_packed_64(lhs, rhs)
+            PackedFlat::from_raw(neon::add_packed_64(lhs, rhs))
         }
 
         #[cfg(not(target_arch = "aarch64"))]
         {
-            lhs + rhs
+            PackedFlat::from_raw(lhs + rhs)
         }
     }
 
     #[inline(always)]
-    fn mul_hardware(self, rhs: Self) -> Self {
+    fn mul_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self> {
+        let lhs = lhs.into_raw();
+        let rhs = rhs.into_raw();
+
         #[cfg(target_arch = "aarch64")]
         {
-            neon::mul_flat_64(self, rhs)
+            Flat::from_raw(neon::mul_flat_64(lhs, rhs))
         }
 
         #[cfg(not(target_arch = "aarch64"))]
         {
-            let a_tower = self.convert_hardware();
-            let b_tower = rhs.convert_hardware();
+            let a_tower = Self::from_hardware(Flat::from_raw(lhs));
+            let b_tower = Self::from_hardware(Flat::from_raw(rhs));
+
             (a_tower * b_tower).to_hardware()
         }
     }
 
     #[inline(always)]
-    fn mul_hardware_packed(lhs: Self::Packed, rhs: Self::Packed) -> Self::Packed {
+    fn mul_hardware_packed(lhs: PackedFlat<Self>, rhs: PackedFlat<Self>) -> PackedFlat<Self> {
+        let lhs = lhs.into_raw();
+        let rhs = rhs.into_raw();
+
         #[cfg(target_arch = "aarch64")]
         {
-            neon::mul_flat_packed_64(lhs, rhs)
+            PackedFlat::from_raw(neon::mul_flat_packed_64(lhs, rhs))
         }
 
         #[cfg(not(target_arch = "aarch64"))]
@@ -443,21 +455,21 @@ impl HardwareField for Block64 {
             Self::unpack(rhs, &mut r);
 
             for i in 0..<Self as PackableField>::WIDTH {
-                res[i] = l[i].mul_hardware(r[i]);
+                res[i] = Self::mul_hardware(Flat::from_raw(l[i]), Flat::from_raw(r[i])).into_raw();
             }
 
-            Self::pack(&res)
+            PackedFlat::from_raw(Self::pack(&res))
         }
     }
 
     #[inline(always)]
-    fn tower_bit_from_hardware(self, bit_idx: usize) -> u8 {
+    fn tower_bit_from_hardware(value: Flat<Self>, bit_idx: usize) -> u8 {
         let mask = FLAT_TO_TOWER_BIT_MASKS_64[bit_idx];
 
         // Parity of (x & mask) without popcount
         // Folds 64 bits down to 4,
         // then uses a lookup table.
-        let mut v = self.0 & mask;
+        let mut v = value.into_raw().0 & mask;
         v ^= v >> 32;
         v ^= v >> 16;
         v ^= v >> 8;
@@ -471,9 +483,11 @@ impl HardwareField for Block64 {
     }
 }
 
-impl HardwarePromote<Block8> for Block64 {
+impl FlatPromote<Block8> for Block64 {
     #[inline(always)]
-    fn from_partial_hardware(val: Block8) -> Self {
+    fn promote_flat(val: Flat<Block8>) -> Flat<Self> {
+        let val = val.into_raw();
+
         #[cfg(not(feature = "table-math"))]
         {
             let mut acc = 0u64;
@@ -483,12 +497,12 @@ impl HardwarePromote<Block8> for Block64 {
                 acc ^= constants::LIFT_BASIS_8_TO_64[i] & mask;
             }
 
-            Block64(acc)
+            Flat::from_raw(Block64(acc))
         }
 
         #[cfg(feature = "table-math")]
         {
-            Block64(constants::LIFT_TABLE_8_TO_64[val.0 as usize])
+            Flat::from_raw(Block64(constants::LIFT_TABLE_8_TO_64[val.0 as usize]))
         }
     }
 }
@@ -503,9 +517,9 @@ pub fn mul_iso_64(a: Block64, b: Block64) -> Block64 {
     let a_flat = a.to_hardware();
     let b_flat = b.to_hardware();
 
-    let c_flat = neon::mul_flat_64(a_flat, b_flat);
+    let c_flat = Flat::from_raw(neon::mul_flat_64(a_flat.into_raw(), b_flat.into_raw()));
 
-    c_flat.convert_hardware()
+    c_flat.to_tower()
 }
 
 #[cfg(feature = "table-math")]
@@ -817,7 +831,7 @@ mod tests {
         let mut rng = rng();
         for _ in 0..1000 {
             let val = Block64(rng.random::<u64>());
-            assert_eq!(val.to_hardware().convert_hardware(), val);
+            assert_eq!(val.to_hardware().to_tower(), val);
         }
     }
 
@@ -829,7 +843,7 @@ mod tests {
             let b = Block64(rng.random());
 
             let expected_flat = (a * b).to_hardware();
-            let actual_flat = a.to_hardware().mul_hardware(b.to_hardware());
+            let actual_flat = a.to_hardware() * b.to_hardware();
 
             assert_eq!(
                 actual_flat, expected_flat,
@@ -845,25 +859,25 @@ mod tests {
             let a_vals = [Block64(rng.random()), Block64(rng.random())];
             let b_vals = [Block64(rng.random()), Block64(rng.random())];
 
-            let a_packed = Block64::pack(&a_vals);
-            let b_packed = Block64::pack(&b_vals);
+            let a_flat_vals = a_vals.map(|x| x.to_hardware());
+            let b_flat_vals = b_vals.map(|x| x.to_hardware());
+            let a_packed = Flat::<Block64>::pack(&a_flat_vals);
+            let b_packed = Flat::<Block64>::pack(&b_flat_vals);
 
             // 1. Test SIMD Add (XOR)
             let add_res = Block64::add_hardware_packed(a_packed, b_packed);
 
-            let mut add_out = [Block64::ZERO; 2];
-            Block64::unpack(add_res, &mut add_out);
+            let mut add_out = [Block64::ZERO.to_hardware(); 2];
+            Flat::<Block64>::unpack(add_res, &mut add_out);
 
-            assert_eq!(add_out[0], a_vals[0] + b_vals[0]);
-            assert_eq!(add_out[1], a_vals[1] + b_vals[1]);
+            assert_eq!(add_out[0], (a_vals[0] + b_vals[0]).to_hardware());
+            assert_eq!(add_out[1], (a_vals[1] + b_vals[1]).to_hardware());
 
             // 2. Test SIMD Mul (Isomorphic/Flat basis)
-            let a_flat_p = Block64::pack(&a_vals.map(|x| x.to_hardware()));
-            let b_flat_p = Block64::pack(&b_vals.map(|x| x.to_hardware()));
-            let mul_res = Block64::mul_hardware_packed(a_flat_p, b_flat_p);
+            let mul_res = Block64::mul_hardware_packed(a_packed, b_packed);
 
-            let mut mul_out = [Block64::ZERO; 2];
-            Block64::unpack(mul_res, &mut mul_out);
+            let mut mul_out = [Block64::ZERO.to_hardware(); 2];
+            Flat::<Block64>::unpack(mul_res, &mut mul_out);
 
             assert_eq!(
                 mul_out[0],
@@ -941,8 +955,8 @@ mod tests {
 
     proptest! {
         #[test]
-        fn parity_masks_match_convert_hardware(x_flat in any::<u64>()) {
-            let tower = Block64(x_flat).convert_hardware().0;
+        fn parity_masks_match_from_hardware(x_flat in any::<u64>()) {
+            let tower = Block64::from_hardware(Flat::from_raw(Block64(x_flat))).0;
 
             for (k, &mask) in FLAT_TO_TOWER_BIT_MASKS_64.iter().enumerate() {
                 // Ensure the static masks
@@ -952,7 +966,7 @@ mod tests {
                 prop_assert_eq!(parity, bit, "Block64 static mask mismatch at k={}", k);
 
                 // Ensure XOR-tree implementation matches.
-                let via_api = Block64(x_flat).tower_bit_from_hardware(k);
+                let via_api = Flat::from_raw(Block64(x_flat)).tower_bit(k);
                 prop_assert_eq!(
                     via_api, bit,
                     "Block64 tower_bit_from_hardware mismatch at x_flat={:#018x}, bit_idx={}",

@@ -15,7 +15,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{HardwareField, HardwarePromote};
+use crate::{Flat, FlatPromote, HardwareField};
 use alloc::vec::Vec;
 use chacha20::ChaCha20Rng;
 use core::arch::asm;
@@ -102,7 +102,7 @@ impl<F: Copy + Sync> VectorSource<F> for [F] {
 /// A Field-Agnostic Sparse Matrix.
 /// Stores weights as `u8` to save memory.
 /// Can be applied to ANY field that
-/// implements `HardwarePromote<Block8>`.
+/// implements `FlatPromote<Block8>`.
 #[derive(Clone, Debug)]
 pub struct ByteSparseMatrix {
     rows: usize,
@@ -320,17 +320,17 @@ impl ByteSparseMatrix {
     }
 
     /// Generic SpMV that promotes u8 weights to
-    /// Field F on the fly. Uses the HardwarePromote
+    /// Field F on the fly. Uses the FlatPromote
     /// trait for max speed (partial lookups).
     /// Accepts any source implementing `VectorSource`.
-    pub fn spmv<F, V>(&self, x: &V) -> Vec<F>
+    pub fn spmv<F, V>(&self, x: &V) -> Vec<Flat<F>>
     where
-        F: HardwareField + HardwarePromote<crate::Block8>,
-        V: VectorSource<F> + ?Sized,
+        F: HardwareField + FlatPromote<crate::Block8>,
+        V: VectorSource<Flat<F>> + ?Sized,
     {
         assert_eq!(x.len(), self.cols);
 
-        let mut y: Vec<MaybeUninit<F>> = Vec::with_capacity(self.rows);
+        let mut y: Vec<MaybeUninit<Flat<F>>> = Vec::with_capacity(self.rows);
 
         // SAFETY:
         // Every output slot is written
@@ -364,10 +364,10 @@ impl ByteSparseMatrix {
 
     /// Process a chunk of rows with lookahead prefetching.
     #[inline(always)]
-    fn process_chunk<F, V>(&self, start_row: usize, out_chunk: &mut [MaybeUninit<F>], x: &V)
+    fn process_chunk<F, V>(&self, start_row: usize, out_chunk: &mut [MaybeUninit<Flat<F>>], x: &V)
     where
-        F: HardwareField + HardwarePromote<crate::Block8> + Default + Copy,
-        V: VectorSource<F> + ?Sized,
+        F: HardwareField + FlatPromote<crate::Block8> + Default + Copy,
+        V: VectorSource<Flat<F>> + ?Sized,
     {
         // Strategy:
         // Iterate rows. For row i, prefetch indices
@@ -394,14 +394,14 @@ impl ByteSparseMatrix {
 
             // B. COMPUTE CURRENT ROW
             let row_offset = row_idx * self.degree;
-            let mut acc = F::ZERO;
+            let mut acc = F::ZERO.to_hardware();
             let mut j = 0;
 
             const B: usize = 8; // Inner loop unroll factor
 
             while j + B <= self.degree {
                 let mut col_idxs = [0usize; B];
-                let mut weights = [F::ZERO; B];
+                let mut weights = [F::ZERO.to_hardware(); B];
 
                 unsafe {
                     for k in 0..B {
@@ -409,13 +409,13 @@ impl ByteSparseMatrix {
                         col_idxs[k] = *self.col_indices.get_unchecked(curr) as usize;
 
                         let w = *self.weights.get_unchecked(curr);
-                        weights[k] = F::from_partial_hardware(crate::Block8(w).to_hardware());
+                        weights[k] = F::promote_flat(crate::Block8(w).to_hardware());
                     }
                 }
 
                 let values = x.get_batch::<B>(&col_idxs);
                 for k in 0..B {
-                    acc = acc.add_hardware(weights[k].mul_hardware(values[k]));
+                    acc += weights[k] * values[k];
                 }
 
                 j += B;
@@ -425,11 +425,11 @@ impl ByteSparseMatrix {
                 unsafe {
                     let curr = row_offset + j;
                     let w = *self.weights.get_unchecked(curr);
-                    let w_field = F::from_partial_hardware(crate::Block8(w).to_hardware());
+                    let w_field = F::promote_flat(crate::Block8(w).to_hardware());
                     let col_idx = *self.col_indices.get_unchecked(curr) as usize;
                     let val = x.get_at(col_idx);
 
-                    acc = acc.add_hardware(w_field.mul_hardware(val));
+                    acc += w_field * val;
                 }
 
                 j += 1;
@@ -463,18 +463,19 @@ mod tests {
         multiplier: u128,
     }
 
-    impl VectorSource<Block128> for VirtualLinearSource {
-        fn get_at(&self, index: usize) -> Block128 {
-            // Generates value: index * multiplier
-            Block128::from((index as u128) * self.multiplier).to_hardware()
-        }
-
+    impl VectorSource<Flat<Block128>> for VirtualLinearSource {
         fn len(&self) -> usize {
             self.size
         }
 
         fn is_empty(&self) -> bool {
             unimplemented!()
+        }
+
+        fn get_at(&self, index: usize) -> Flat<Block128> {
+            // Generates value:
+            // index * multiplier
+            Block128::from((index as u128) * self.multiplier).to_hardware()
         }
     }
 
@@ -601,7 +602,7 @@ mod tests {
 
         // Helper to count Hamming weight (non-zero elements)
         // Verify properties using the Hardware Field representation.
-        let hamming_weight = |vec: &[Block128]| -> usize {
+        let hamming_weight = |vec: &[Flat<Block128>]| -> usize {
             vec.iter()
                 .filter(|&&x| x != Block128::from(0u128).to_hardware())
                 .count()
@@ -666,8 +667,8 @@ mod tests {
         let input_w = 10;
         let mut x = vec![Block128::from(0u128).to_hardware(); cols];
 
-        for k in 0..input_w {
-            x[k] = Block128::from(1u128).to_hardware();
+        for val in x.iter_mut().take(input_w) {
+            *val = Block128::from(1u128).to_hardware();
         }
 
         let y = matrix.spmv(x.as_slice());
@@ -790,7 +791,7 @@ mod tests {
             let degree = 16;
             let matrix = ByteSparseMatrix::generate_random(rows, cols, degree, seed);
 
-            let mut x = vec![Block128::from(0u128); cols];
+            let mut x = vec![Block128::from(0u128).to_hardware(); cols];
             x[random_col] = Block128::from(val_raw).to_hardware();
 
             let y = matrix.spmv(x.as_slice());

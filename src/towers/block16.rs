@@ -19,8 +19,8 @@
 use crate::towers::bit::Bit;
 use crate::towers::block8::Block8;
 use crate::{
-    CanonicalDeserialize, CanonicalSerialize, HardwareField, HardwarePromote, PackableField,
-    TowerField, constants,
+    CanonicalDeserialize, CanonicalSerialize, Flat, FlatPromote, HardwareField, PackableField,
+    PackedFlat, TowerField, constants,
 };
 use core::ops::{Add, AddAssign, BitXor, BitXorAssign, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
@@ -366,69 +366,81 @@ impl Mul<Block16> for PackedBlock16 {
 
 impl HardwareField for Block16 {
     #[inline(always)]
-    fn to_hardware(self) -> Self {
+    fn to_hardware(self) -> Flat<Self> {
         #[cfg(feature = "table-math")]
         {
-            apply_matrix_16(self, &constants::TOWER_TO_FLAT_16)
+            Flat::from_raw(apply_matrix_16(self, &constants::TOWER_TO_FLAT_16))
         }
 
         #[cfg(not(feature = "table-math"))]
         {
-            Block16(map_ct_16(self.0, &TOWER_TO_FLAT_BASIS_16.0))
+            Flat::from_raw(Block16(map_ct_16(self.0, &TOWER_TO_FLAT_BASIS_16.0)))
         }
     }
 
     #[inline(always)]
-    fn convert_hardware(self) -> Self {
+    fn from_hardware(value: Flat<Self>) -> Self {
+        let value = value.into_raw();
+
         #[cfg(feature = "table-math")]
         {
-            apply_matrix_16(self, &constants::FLAT_TO_TOWER_16)
+            apply_matrix_16(value, &constants::FLAT_TO_TOWER_16)
         }
 
         #[cfg(not(feature = "table-math"))]
         {
-            Block16(map_ct_16(self.0, &FLAT_TO_TOWER_BASIS_16.0))
+            Block16(map_ct_16(value.0, &FLAT_TO_TOWER_BASIS_16.0))
         }
     }
 
     #[inline(always)]
-    fn add_hardware(self, rhs: Self) -> Self {
-        self + rhs
+    fn add_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self> {
+        Flat::from_raw(lhs.into_raw() + rhs.into_raw())
     }
 
     #[inline(always)]
-    fn add_hardware_packed(lhs: Self::Packed, rhs: Self::Packed) -> Self::Packed {
+    fn add_hardware_packed(lhs: PackedFlat<Self>, rhs: PackedFlat<Self>) -> PackedFlat<Self> {
+        let lhs = lhs.into_raw();
+        let rhs = rhs.into_raw();
+
         #[cfg(target_arch = "aarch64")]
         {
-            neon::add_packed_16(lhs, rhs)
+            PackedFlat::from_raw(neon::add_packed_16(lhs, rhs))
         }
 
         #[cfg(not(target_arch = "aarch64"))]
         {
-            lhs + rhs
+            PackedFlat::from_raw(lhs + rhs)
         }
     }
 
     #[inline(always)]
-    fn mul_hardware(self, rhs: Self) -> Self {
+    fn mul_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self> {
+        let lhs = lhs.into_raw();
+        let rhs = rhs.into_raw();
+
         #[cfg(target_arch = "aarch64")]
         {
-            neon::mul_flat_16(self, rhs)
+            Flat::from_raw(neon::mul_flat_16(lhs, rhs))
         }
 
         #[cfg(not(target_arch = "aarch64"))]
         {
-            let a_tower = self.convert_hardware();
-            let b_tower = rhs.convert_hardware();
+            let a_tower = Self::from_hardware(Flat::from_raw(lhs));
+            let b_tower = Self::from_hardware(Flat::from_raw(rhs));
+
             (a_tower * b_tower).to_hardware()
         }
     }
 
     #[inline(always)]
-    fn mul_hardware_packed(lhs: Self::Packed, rhs: Self::Packed) -> Self::Packed {
+    fn mul_hardware_packed(lhs: PackedFlat<Self>, rhs: PackedFlat<Self>) -> PackedFlat<Self> {
+        let lhs = lhs.into_raw();
+        let rhs = rhs.into_raw();
+
         #[cfg(target_arch = "aarch64")]
         {
-            neon::mul_flat_packed_16(lhs, rhs)
+            PackedFlat::from_raw(neon::mul_flat_packed_16(lhs, rhs))
         }
 
         #[cfg(not(target_arch = "aarch64"))]
@@ -441,21 +453,21 @@ impl HardwareField for Block16 {
             Self::unpack(rhs, &mut r);
 
             for i in 0..<Self as PackableField>::WIDTH {
-                res[i] = l[i].mul_hardware(r[i]);
+                res[i] = Self::mul_hardware(Flat::from_raw(l[i]), Flat::from_raw(r[i])).into_raw();
             }
 
-            Self::pack(&res)
+            PackedFlat::from_raw(Self::pack(&res))
         }
     }
 
     #[inline(always)]
-    fn tower_bit_from_hardware(self, bit_idx: usize) -> u8 {
+    fn tower_bit_from_hardware(value: Flat<Self>, bit_idx: usize) -> u8 {
         let mask = constants::FLAT_TO_TOWER_BIT_MASKS_16[bit_idx];
 
         // Parity of (x & mask) without
         // popcount. Folds 16 bits down
         // to 1 using a binary XOR tree.
-        let mut v = self.0 & mask;
+        let mut v = value.into_raw().0 & mask;
         v ^= v >> 8;
         v ^= v >> 4;
         v ^= v >> 2;
@@ -465,9 +477,11 @@ impl HardwareField for Block16 {
     }
 }
 
-impl HardwarePromote<Block8> for Block16 {
+impl FlatPromote<Block8> for Block16 {
     #[inline(always)]
-    fn from_partial_hardware(val: Block8) -> Self {
+    fn promote_flat(val: Flat<Block8>) -> Flat<Self> {
+        let val = val.into_raw();
+
         #[cfg(not(feature = "table-math"))]
         {
             let mut acc = 0u16;
@@ -477,12 +491,12 @@ impl HardwarePromote<Block8> for Block16 {
                 acc ^= constants::LIFT_BASIS_8_TO_16[i] & mask;
             }
 
-            Block16(acc)
+            Flat::from_raw(Block16(acc))
         }
 
         #[cfg(feature = "table-math")]
         {
-            Block16(constants::LIFT_TABLE_8_TO_16[val.0 as usize])
+            Flat::from_raw(Block16(constants::LIFT_TABLE_8_TO_16[val.0 as usize]))
         }
     }
 }
@@ -496,10 +510,9 @@ impl HardwarePromote<Block8> for Block16 {
 pub fn mul_iso_16(a: Block16, b: Block16) -> Block16 {
     let a_f = a.to_hardware();
     let b_f = b.to_hardware();
+    let c_f = Flat::from_raw(neon::mul_flat_16(a_f.into_raw(), b_f.into_raw()));
 
-    let c_f = neon::mul_flat_16(a_f, b_f);
-
-    c_f.convert_hardware()
+    c_f.to_tower()
 }
 
 #[cfg(feature = "table-math")]
@@ -797,7 +810,7 @@ mod tests {
         for _ in 0..1000 {
             let val = Block16(rng.random::<u16>());
             assert_eq!(
-                val.to_hardware().convert_hardware(),
+                val.to_hardware().to_tower(),
                 val,
                 "Block16 isomorphism roundtrip failed"
             );
@@ -812,7 +825,7 @@ mod tests {
             let b = Block16(rng.random::<u16>());
 
             let expected_flat = (a * b).to_hardware();
-            let actual_flat = a.to_hardware().mul_hardware(b.to_hardware());
+            let actual_flat = a.to_hardware() * b.to_hardware();
 
             assert_eq!(
                 actual_flat, expected_flat,
@@ -833,30 +846,30 @@ mod tests {
                 b_vals[i] = Block16(rng.random::<u16>());
             }
 
-            let a_packed = Block16::pack(&a_vals);
-            let b_packed = Block16::pack(&b_vals);
+            let a_flat_vals = a_vals.map(|x| x.to_hardware());
+            let b_flat_vals = b_vals.map(|x| x.to_hardware());
+            let a_packed = Flat::<Block16>::pack(&a_flat_vals);
+            let b_packed = Flat::<Block16>::pack(&b_flat_vals);
 
             // Test SIMD Add
             let add_res = Block16::add_hardware_packed(a_packed, b_packed);
 
-            let mut add_out = [Block16::ZERO; 8];
-            Block16::unpack(add_res, &mut add_out);
+            let mut add_out = [Block16::ZERO.to_hardware(); 8];
+            Flat::<Block16>::unpack(add_res, &mut add_out);
 
             for i in 0..8 {
                 assert_eq!(
                     add_out[i],
-                    a_vals[i] + b_vals[i],
+                    (a_vals[i] + b_vals[i]).to_hardware(),
                     "Block16 packed add mismatch"
                 );
             }
 
             // Test SIMD Mul
-            let a_flat_p = Block16::pack(&a_vals.map(|x| x.to_hardware()));
-            let b_flat_p = Block16::pack(&b_vals.map(|x| x.to_hardware()));
-            let mul_res = Block16::mul_hardware_packed(a_flat_p, b_flat_p);
+            let mul_res = Block16::mul_hardware_packed(a_packed, b_packed);
 
-            let mut mul_out = [Block16::ZERO; 8];
-            Block16::unpack(mul_res, &mut mul_out);
+            let mut mul_out = [Block16::ZERO.to_hardware(); 8];
+            Flat::<Block16>::unpack(mul_res, &mut mul_out);
 
             for i in 0..8 {
                 assert_eq!(
@@ -942,15 +955,15 @@ mod tests {
     }
 
     #[test]
-    fn parity_masks_match_convert_hardware() {
+    fn parity_masks_match_from_hardware() {
         // Exhaustive for Block16:
         // 65536 values * 16 bits.
         for x_flat in 0u16..=u16::MAX {
-            let tower = Block16(x_flat).convert_hardware().0;
+            let tower = Block16::from_hardware(Flat::from_raw(Block16(x_flat))).0;
 
             for k in 0..16 {
                 let bit = ((tower >> k) & 1) as u8;
-                let via_api = Block16(x_flat).tower_bit_from_hardware(k);
+                let via_api = Flat::from_raw(Block16(x_flat)).tower_bit(k);
 
                 assert_eq!(
                     via_api, bit,
