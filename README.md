@@ -1,6 +1,6 @@
 # hekate-math
 
-Copyright (c) Andrei Kochergin and Oumuamua Labs.
+*Copyright (c) Andrei Kochergin and Oumuamua Labs.*
 
 Hardware-accelerated binary tower fields for zero-knowledge proofs.
 This is the high-performance mathematical core of the Hekate ZK Engine.
