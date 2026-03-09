@@ -4,9 +4,10 @@ version = "0.3.0"
 edition = "2024"
 authors = ["Oumuamua Labs", "Andrei Kochergin <zeek@tuta.com>"]
 repository = "https://github.com/oumuamua-labs/hekate-math"
+homepage = "https://github.com/oumuamua-labs/hekate-math"
 description = "A high-performance, constant-time implementation of binary tower fields (F(2^k)) optimized for GKR-based provers, Virgo, and Binius protocols."
 keywords = ["cryptography", "zk", "binary-fields", "simd", "binius"]
-categories = ["cryptography", "no-std"]
+categories = ["cryptography", "no-std", "mathematics", "algorithms", "science"]
 license = "Apache-2.0"
 
 [lib]
