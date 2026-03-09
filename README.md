@@ -378,7 +378,7 @@ execution time is catastrophic.
 
 *Note: Native AVX2/PCLMULQDQ implementation for x86_64 is on the roadmap.*
 
-### Reproduce benchmarks
+## Reproduce benchmarks
 
 > [!IMPORTANT]
 > Hardware arithmetic performance (e.g., mul_hardware, add_hardware) remains identical
@@ -386,7 +386,7 @@ execution time is catastrophic.
 > (basis conversion) and Lifting operations. The actual field arithmetic in the flat basis
 > always utilizes the fastest available hardware instructions (PMULL / PCLMULQDQ).
 
-#### Secure (Default)
+### Secure (Default)
 
 Uses constant-time bitsliced matrix multiplication for basis conversion and lifting:
 
@@ -394,20 +394,13 @@ Uses constant-time bitsliced matrix multiplication for basis conversion and lift
 cargo bench
 ```
 
-#### Fast (table-math)
+### Fast (table-math)
 
 Uses precomputed lookup tables for basis conversion:
 
 ```bash
 cargo bench --features table-math
 ```
-
-## Acknowledgements
-
-`hekate-math` is built from a systems engineering perspective. While the underlying cryptography relies
-on binary field theory (Cantor's recursive towers, carry-less multiplication), this library focuses
-strictly on bare-metal hardware mapping, CPU cache alignment, and SIMD pipeline optimization to make
-these mathematical concepts practical for modern ZK provers.
 
 ## Security & Audits
 
