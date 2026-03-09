@@ -10,9 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Rustfmt
         run: cargo fmt --all --check
@@ -23,14 +27,13 @@ jobs:
       - name: Run Tests
         run: cargo test --all-features --release
 
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+      - name: Install cargo-audit and cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit, cargo-deny
 
       - name: Cargo audit
         run: cargo audit
-
-      - name: Install cargo-deny
-        run: cargo install cargo-deny --locked
 
       - name: Cargo deny check
         run: cargo deny check
