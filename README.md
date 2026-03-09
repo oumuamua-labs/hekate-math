@@ -114,7 +114,7 @@ Most ZK protocols require transitioning between the **Canonical Basis** (for rec
 folding/sumcheck) and the **Polynomial Basis** (for heavy arithmetic).
 
 ```rust
-use hekate_math::{Block128, HardwareField};
+use hekate_math::{Block128, HardwareField, TowerField};
 
 fn example_isomorphism() {
     // 1. Canonical Basis (Tower)
@@ -148,7 +148,7 @@ fn example_isomorphism() {
 For throughput-critical paths, `hekate-math` provides explicit SIMD packing via the `PackableField` trait.
 
 ```rust
-use hekate_math::{Block32, Flat, HardwareField, PackableField};
+use hekate_math::{Block32, Flat, HardwareField, PackableField, TowerField};
 
 fn process_simd(data: &[Flat<Block32>]) {
     // 1. Pack hardware-basis scalars into SIMD registers
@@ -200,7 +200,7 @@ promotes `u8` matrix weights to `Block128` on the fly using typed flat promotion
 
 ```rust
 use hekate_math::matrix::ByteSparseMatrix;
-use hekate_math::{Block128, Flat, HardwareField};
+use hekate_math::{Block128, Flat, HardwareField, TowerField};
 
 fn example_spmv() {
     let rows = 1 << 20; // 1 Million Rows
