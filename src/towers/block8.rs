@@ -473,6 +473,7 @@ impl HardwareField for Block8 {
         {
             let a_tower = Self::from_hardware(Flat::from_raw(lhs));
             let b_tower = Self::from_hardware(Flat::from_raw(rhs));
+
             (a_tower * b_tower).to_hardware()
         }
     }
@@ -481,6 +482,7 @@ impl HardwareField for Block8 {
     fn mul_hardware_packed(lhs: PackedFlat<Self>, rhs: PackedFlat<Self>) -> PackedFlat<Self> {
         let lhs = lhs.into_raw();
         let rhs = rhs.into_raw();
+
         #[cfg(target_arch = "aarch64")]
         {
             PackedFlat::from_raw(neon::mul_flat_packed_8(lhs, rhs))

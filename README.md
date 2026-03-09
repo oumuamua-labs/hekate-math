@@ -402,21 +402,12 @@ Uses precomputed lookup tables for basis conversion:
 cargo bench --features table-math
 ```
 
-## References
+## Acknowledgements
 
-The architecture and algorithms of `hekate-math` are grounded in the following academic research:
-
-* **Cantor, D. G. (1989).** *"On arithmetical algorithms over finite fields."* Journal of Combinatorial Theory, Series
-  A, 50(2), 285-300.
-    * Foundational basis for efficient arithmetic in tower field extensions.
-* **Paar, C. (1994).** *"Efficient VLSI Architectures for Bit-Parallel Arithmetic in Finite Fields."* PhD Thesis, ETH
-  Zurich.
-    * Defines the hardware-friendly approach to binary field arithmetic utilized in our flat basis operations.
-* **Fan, H. & Hasan, M. A. (2007).** *"Fast bit-parallel-shifted polynomial basis multipliers in GF(2^n)."* IEEE
-  Transactions on Circuits and Systems.
-    * Algorithmic basis for the carry-less multiplication strategies employed in `Block64` and `Block128`.
-* **Grabbe, J.** *"Towers of Field Extensions."*
-    * Analysis of the X² + X + β construction for binary towers.
+`hekate-math` is built from a systems engineering perspective. While the underlying cryptography relies
+on binary field theory (Cantor's recursive towers, carry-less multiplication), this library focuses
+strictly on bare-metal hardware mapping, CPU cache alignment, and SIMD pipeline optimization to make
+these mathematical concepts practical for modern ZK provers.
 
 ## Security & Audits
 
