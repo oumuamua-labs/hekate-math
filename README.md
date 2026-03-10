@@ -1,5 +1,10 @@
 # hekate-math
 
+[![CI](https://github.com/oumuamua-labs/hekate-math/actions/workflows/ci.yml/badge.svg)](https://github.com/oumuamua-labs/hekate-math/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/hekate-math.svg)](https://crates.io/crates/hekate-math)
+[![Docs.rs](https://docs.rs/hekate-math/badge.svg)](https://docs.rs/hekate-math)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache2-yellow.svg)](./LICENSE)
+
 *Copyright (c) Andrei Kochergin and Oumuamua Labs.*
 
 Hardware-accelerated binary tower fields for zero-knowledge proofs.
@@ -30,11 +35,11 @@ bandwidth saturation and single-cycle throughput for hardware-accelerated operat
 | Operation                | Basis             | Latency     | Implementation                      |
 |:-------------------------|:------------------|:------------|:------------------------------------|
 | **Multiplication**       | Polynomial (Flat) | **1.08 ns** | `PMULL` (Pipelined)                 |
-| **Multiplication**       | Tower (Canonical) | 122.0 ns    | Recursive Karatsuba                 |
+| **Multiplication**       | Tower (Canonical) | 98.3 ns     | Recursive Karatsuba                 |
 | **Addition**             | Any               | 1.14 ns     | Vectorized XOR                      |
-| **Inversion** (Single)   | Tower             | 283.0 ns    | Itoh-Tsujii / Fermat Little Theorem |
-| **Inversion** (Batch)    | Tower             | ~16.7 ns    | Montgomery's Trick (SIMD)           |
-| **Basis Conv** (Default) | Tower ↔ Flat      | ~90.0 ns    | Bit-Slicing (Constant-Time)         |
+| **Inversion** (Single)   | Tower             | 246.6 ns    | Itoh-Tsujii / Fermat Little Theorem |
+| **Inversion** (Batch)    | Tower             | 15.7 ns     | Montgomery's Trick (SIMD)           |
+| **Basis Conv** (Default) | Tower ↔ Flat      | 90.0 ns     | Bit-Slicing (Constant-Time)         |
 | **Basis Conv** (Fast)    | Tower ↔ Flat      | 3.80 ns     | Look-Up Table (Variable-Time)       |
 
 *Impact: Flat basis multiplication is approximately **100x faster** than the canonical recursive implementation.*
@@ -67,7 +72,7 @@ Benchmarks for `Block128` SpMV with fixed degree 16 (typical for Brakedown/Biniu
 
 ```toml
 [dependencies]
-hekate-math = { git = "https://github.com/oumuamua-labs/hekate-math" }
+hekate-math = "0.3.0"
 ```
 
 ## Examples
