@@ -17,8 +17,6 @@
 
 use crate::packable::PackedFlat;
 use crate::{PackableField, TowerField};
-use alloc::vec;
-use alloc::vec::Vec;
 use core::fmt::{self, Debug, Formatter};
 use core::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 use zeroize::Zeroize;
@@ -48,22 +46,7 @@ pub trait HardwareField: TowerField + PackableField {
 
     /// Multiply packed vectors by
     /// a scalar in hardware basis.
-    #[inline(always)]
-    fn mul_hardware_scalar_packed(lhs: PackedFlat<Self>, rhs: Flat<Self>) -> PackedFlat<Self> {
-        let mut lhs_values: Vec<Self> = vec![Self::ZERO; <Self as PackableField>::WIDTH];
-        let mut result: Vec<Self> = vec![Self::ZERO; <Self as PackableField>::WIDTH];
-
-        let rhs = rhs.into_raw();
-
-        Self::unpack(lhs.into_raw(), &mut lhs_values);
-
-        for i in 0..<Self as PackableField>::WIDTH {
-            result[i] =
-                Self::mul_hardware(Flat::from_raw(lhs_values[i]), Flat::from_raw(rhs)).into_raw();
-        }
-
-        PackedFlat::from_raw(Self::pack(&result))
-    }
+    fn mul_hardware_scalar_packed(lhs: PackedFlat<Self>, rhs: Flat<Self>) -> PackedFlat<Self>;
 
     /// Extracts the `bit_idx` bit of the
     /// canonical Tower representation

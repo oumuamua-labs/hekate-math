@@ -506,6 +506,12 @@ impl HardwareField for Block8 {
     }
 
     #[inline(always)]
+    fn mul_hardware_scalar_packed(lhs: PackedFlat<Self>, rhs: Flat<Self>) -> PackedFlat<Self> {
+        let broadcasted = PackedBlock8([rhs.into_raw(); PACKED_WIDTH_8]);
+        Self::mul_hardware_packed(lhs, PackedFlat::from_raw(broadcasted))
+    }
+
+    #[inline(always)]
     fn tower_bit_from_hardware(value: Flat<Self>, bit_idx: usize) -> u8 {
         let mask = FLAT_TO_TOWER_BIT_MASKS_8[bit_idx];
 

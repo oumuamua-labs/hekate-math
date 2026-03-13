@@ -15,7 +15,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{Flat, FlatPromote, HardwareField};
+use crate::{Block8, Flat, FlatPromote, HardwareField};
 use alloc::vec::Vec;
 use chacha20::ChaCha20Rng;
 use core::arch::asm;
@@ -325,7 +325,7 @@ impl ByteSparseMatrix {
     /// Accepts any source implementing `VectorSource`.
     pub fn spmv<F, V>(&self, x: &V) -> Vec<Flat<F>>
     where
-        F: HardwareField + FlatPromote<crate::Block8>,
+        F: HardwareField + FlatPromote<Block8>,
         V: VectorSource<Flat<F>> + ?Sized,
     {
         assert_eq!(x.len(), self.cols);
@@ -366,7 +366,7 @@ impl ByteSparseMatrix {
     #[inline(always)]
     fn process_chunk<F, V>(&self, start_row: usize, out_chunk: &mut [MaybeUninit<Flat<F>>], x: &V)
     where
-        F: HardwareField + FlatPromote<crate::Block8> + Default + Copy,
+        F: HardwareField + FlatPromote<Block8> + Default + Copy,
         V: VectorSource<Flat<F>> + ?Sized,
     {
         // Strategy:
@@ -393,15 +393,16 @@ impl ByteSparseMatrix {
             }
 
             // B. COMPUTE CURRENT ROW
-            let row_offset = row_idx * self.degree;
-            let mut acc = F::ZERO.to_hardware();
-            let mut j = 0;
-
             const B: usize = 8; // Inner loop unroll factor
+
+            let row_offset = row_idx * self.degree;
+
+            let mut acc = Flat::from_raw(F::ZERO);
+            let mut j = 0;
 
             while j + B <= self.degree {
                 let mut col_idxs = [0usize; B];
-                let mut weights = [F::ZERO.to_hardware(); B];
+                let mut weights = [Flat::from_raw(F::ZERO); B];
 
                 unsafe {
                     for k in 0..B {
@@ -409,7 +410,7 @@ impl ByteSparseMatrix {
                         col_idxs[k] = *self.col_indices.get_unchecked(curr) as usize;
 
                         let w = *self.weights.get_unchecked(curr);
-                        weights[k] = F::promote_flat(crate::Block8(w).to_hardware());
+                        weights[k] = F::promote_flat(Block8(w).to_hardware());
                     }
                 }
 
@@ -425,7 +426,7 @@ impl ByteSparseMatrix {
                 unsafe {
                     let curr = row_offset + j;
                     let w = *self.weights.get_unchecked(curr);
-                    let w_field = F::promote_flat(crate::Block8(w).to_hardware());
+                    let w_field = F::promote_flat(Block8(w).to_hardware());
                     let col_idx = *self.col_indices.get_unchecked(curr) as usize;
                     let val = x.get_at(col_idx);
 

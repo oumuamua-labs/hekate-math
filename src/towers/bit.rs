@@ -380,7 +380,8 @@ impl HardwareField for Bit {
 
     #[inline(always)]
     fn mul_hardware_scalar_packed(lhs: PackedFlat<Self>, rhs: Flat<Self>) -> PackedFlat<Self> {
-        PackedFlat::from_raw(lhs.into_raw() * rhs.into_raw())
+        let broadcasted = PackedBit([rhs.into_raw(); PACKED_WIDTH_BIT]);
+        Self::mul_hardware_packed(lhs, PackedFlat::from_raw(broadcasted))
     }
 
     #[inline(always)]
