@@ -1,8 +1,8 @@
 # hekate-math
 
-[![CI](https://github.com/oumuamua-labs/hekate-math/actions/workflows/ci.yml/badge.svg)](https://github.com/oumuamua-labs/hekate-math/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/hekate-math.svg)](https://crates.io/crates/hekate-math)
 [![Docs.rs](https://docs.rs/hekate-math/badge.svg)](https://docs.rs/hekate-math)
+[![CI](https://github.com/oumuamua-labs/hekate-math/actions/workflows/ci.yml/badge.svg)](https://github.com/oumuamua-labs/hekate-math/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache2-yellow.svg)](./LICENSE)
 
 *Copyright (c) Andrei Kochergin and Oumuamua Labs.*
@@ -12,7 +12,7 @@ Hardware-accelerated binary tower fields for zero-knowledge proofs.
 `hekate-math` provides a high-performance, constant-time implementation of binary tower fields (𝔽(2^k))
 optimized for GKR-based provers, Sumcheck, and Binius protocols. The library implements a rigorous algebraic tower
 construction up to 𝔽(2^128), leveraging basis isomorphism to utilize native CPU hardware instructions:
-**PMULL** (ARMv8 NEON) and **PCLMULQDQ** (x86_64 AVX2).
+PMULL (ARMv8 NEON) and PCLMULQDQ (x86_64 AVX2).
 
 Designed for low-level cryptographic engineering, the crate is `no-std` compatible and defaults to constant-time
 execution paths to mitigate side-channel attacks. It enforces strict type safety between canonical (tower) and

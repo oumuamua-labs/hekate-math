@@ -24,7 +24,19 @@ use rand::{RngExt, SeedableRng};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
+/// Rows per processing unit.
+/// 1024 keeps the hot set within L1 cache.
 const CHUNK_SIZE: usize = 1024;
+
+/// Min rows to trigger Rayon.
+/// Binary XOR is too fast to justify
+/// thread sync overhead below 32k.
+const PARALLEL_THRESHOLD: usize = 32768;
+
+/// Prefetch distance.
+/// 8 rows ahead to saturate memory
+/// controller during random access
+/// to VectorSource.
 const LOOKAHEAD: usize = 8;
 
 /// Abstract source of a vector for Matrix-Vector
@@ -340,25 +352,24 @@ impl ByteSparseMatrix {
         }
 
         #[cfg(feature = "parallel")]
-        {
+        if self.rows >= PARALLEL_THRESHOLD {
             y.par_chunks_mut(CHUNK_SIZE)
                 .enumerate()
                 .for_each(|(chunk_id, out_chunk)| {
                     let start_row = chunk_id * CHUNK_SIZE;
                     self.process_chunk(start_row, out_chunk, x);
                 });
+
+            // SAFETY:
+            // All elements were initialized above.
+            return unsafe { assume_init_vec(y) };
         }
 
-        #[cfg(not(feature = "parallel"))]
-        {
-            for (chunk_id, out_chunk) in y.chunks_mut(CHUNK_SIZE).enumerate() {
-                let start_row = chunk_id * CHUNK_SIZE;
-                self.process_chunk(start_row, out_chunk, x);
-            }
+        for (chunk_id, out_chunk) in y.chunks_mut(CHUNK_SIZE).enumerate() {
+            let start_row = chunk_id * CHUNK_SIZE;
+            self.process_chunk(start_row, out_chunk, x);
         }
 
-        // SAFETY:
-        // All elements were initialized above.
         unsafe { assume_init_vec(y) }
     }
 
