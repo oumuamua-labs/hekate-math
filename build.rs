@@ -723,6 +723,127 @@ impl_write_raw_basis!(write_raw_32, u32, 32, 8);
 impl_write_raw_basis!(write_raw_64, u64, 64, 16);
 impl_write_raw_basis!(write_raw_128, u128, 128, 32);
 
+// ==========================================
+// 7. BYTE-DECOMPOSED PROMOTE TABLES
+// ==========================================
+//
+// For promoting Block16/32/64 to Block128 via
+// table-math. Each source byte position gets
+// its own [u128; 256] table. The full promote
+// is the XOR of per-byte lookups (GF(2)-linear).
+//
+// Block8 to Block128 is a single-byte source,
+// so it uses LIFT_TABLE_8_TO_128 from section 4
+// (no byte decomposition needed).
+
+macro_rules! impl_write_promote_byte_tables_to_128 {
+    ($func_name:ident, $from_type:ty, $n_bytes:expr, $apply_from:ident) => {
+        fn $func_name(
+            file: &mut File,
+            prefix: &str,
+            flat_to_tower_from: &[$from_type; $n_bytes * 8],
+        ) {
+            for byte_idx in 0..$n_bytes {
+                writeln!(
+                    file,
+                    "pub const {}_{}_TO_128: [u128; 256] = [",
+                    prefix, byte_idx
+                )
+                .unwrap();
+
+                for val in 0..=255u8 {
+                    let from_val = (val as $from_type) << (byte_idx * 8);
+                    let tower_from = $apply_from(from_val, flat_to_tower_from);
+                    let tower_128 = tower_from as u128;
+                    let flat_128 = apply_128(tower_128, &TOWER_TO_FLAT_128);
+
+                    writeln!(file, "    0x{:032x},", flat_128).unwrap();
+                }
+
+                writeln!(file, "];\n").unwrap();
+            }
+        }
+    };
+}
+
+impl_write_promote_byte_tables_to_128!(write_promote_byte_tables_16_to_128, u16, 2, apply_16);
+impl_write_promote_byte_tables_to_128!(write_promote_byte_tables_32_to_128, u32, 4, apply_32);
+impl_write_promote_byte_tables_to_128!(write_promote_byte_tables_64_to_128, u64, 8, apply_64);
+
+// ==========================================
+// 8. NIBBLE-DECOMPOSED PROMOTE TABLES (CT NEON)
+// ==========================================
+//
+// For constant-time NEON promotion via vqtbl1q_u8.
+// Split each source element into 4-bit nibbles,
+// look up the contribution of each nibble to each
+// output byte position. GF(2)-linearity guarantees
+// the full promote is XOR of all nibble contributions.
+//
+// Layout per nibble position:
+//   [output_byte_pos][nibble_value] → u8
+//   16 output bytes × 16 nibble values = 256 bytes.
+//
+// | Source  | Nibbles | Tables | Total bytes |
+// |---------|---------|--------|-------------|
+// | Block8  | 2       | 2×256  | 512         |
+// | Block16 | 4       | 4×256  | 1024        |
+// | Block32 | 8       | 8×256  | 2048        |
+// | Block64 | 16      | 16×256 | 4096        |
+
+macro_rules! impl_write_nibble_promote_tables_to_128 {
+    ($func_name:ident, $from_type:ty, $n_nibbles:expr, $apply_from:ident) => {
+        fn $func_name(
+            file: &mut File,
+            prefix: &str,
+            flat_to_tower_from: &[$from_type; <$from_type>::BITS as usize],
+        ) {
+            for nib_idx in 0..$n_nibbles {
+                // Precompute full 128-bit lift for all
+                // 16 values of this nibble position.
+                let mut lifted = [0u128; 16];
+
+                for nibble in 0u8..16 {
+                    let from_val = (nibble as $from_type) << (nib_idx * 4);
+                    let tower_from = $apply_from(from_val, flat_to_tower_from);
+                    let tower_128 = tower_from as u128;
+
+                    lifted[nibble as usize] = apply_128(tower_128, &TOWER_TO_FLAT_128);
+                }
+
+                writeln!(
+                    file,
+                    "pub const {}_{}_TO_128: [[u8; 16]; 16] = [",
+                    prefix, nib_idx
+                )
+                .unwrap();
+
+                for byte_pos in 0..16usize {
+                    write!(file, "    [").unwrap();
+
+                    for nibble in 0..16usize {
+                        let b = ((lifted[nibble] >> (byte_pos * 8)) & 0xFF) as u8;
+                        write!(file, "0x{:02x}", b).unwrap();
+
+                        if nibble < 15 {
+                            write!(file, ", ").unwrap();
+                        }
+                    }
+
+                    writeln!(file, "],").unwrap();
+                }
+
+                writeln!(file, "];\n").unwrap();
+            }
+        }
+    };
+}
+
+impl_write_nibble_promote_tables_to_128!(write_nibble_promote_8_to_128, u8, 2, apply_8);
+impl_write_nibble_promote_tables_to_128!(write_nibble_promote_16_to_128, u16, 4, apply_16);
+impl_write_nibble_promote_tables_to_128!(write_nibble_promote_32_to_128, u32, 8, apply_32);
+impl_write_nibble_promote_tables_to_128!(write_nibble_promote_64_to_128, u64, 16, apply_64);
+
 fn main() {
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("generated_constants.rs");
@@ -824,6 +945,19 @@ fn main() {
         &FLAT_TO_TOWER_64,
         &TOWER_TO_FLAT_128,
     );
+
+    // Byte-decomposed promote tables
+    // for Block16/32/64 to Block128.
+    write_promote_byte_tables_16_to_128(&mut file, "PROMOTE_16_BYTE", &FLAT_TO_TOWER_16);
+    write_promote_byte_tables_32_to_128(&mut file, "PROMOTE_32_BYTE", &FLAT_TO_TOWER_32);
+    write_promote_byte_tables_64_to_128(&mut file, "PROMOTE_64_BYTE", &FLAT_TO_TOWER_64);
+
+    // Nibble-decomposed promote tables
+    // for CT NEON promotion to Block128.
+    write_nibble_promote_8_to_128(&mut file, "NIBBLE_PROMOTE_8", &FLAT_TO_TOWER_8);
+    write_nibble_promote_16_to_128(&mut file, "NIBBLE_PROMOTE_16", &FLAT_TO_TOWER_16);
+    write_nibble_promote_32_to_128(&mut file, "NIBBLE_PROMOTE_32", &FLAT_TO_TOWER_32);
+    write_nibble_promote_64_to_128(&mut file, "NIBBLE_PROMOTE_64", &FLAT_TO_TOWER_64);
 
     println!("cargo:rerun-if-changed=build.rs");
 }
