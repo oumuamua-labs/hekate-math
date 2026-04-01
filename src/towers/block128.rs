@@ -569,7 +569,7 @@ impl FlatPromote<Block8> for Block128 {
                 unsafe {
                     neon::promote_batch_8_to_128(
                         input.as_ptr().add(i).cast::<u8>(),
-                        output.as_ptr().add(i).cast::<u128>() as *mut u128,
+                        output.as_mut_ptr().add(i).cast::<u128>(),
                     );
                 }
             }
@@ -610,7 +610,7 @@ impl FlatPromote<Block16> for Block128 {
                 unsafe {
                     neon::promote_batch_16_to_128(
                         input.as_ptr().add(i).cast::<u8>(),
-                        output.as_ptr().add(i).cast::<u128>() as *mut u128,
+                        output.as_mut_ptr().add(i).cast::<u128>(),
                     );
                 }
             }
@@ -651,7 +651,7 @@ impl FlatPromote<Block32> for Block128 {
                 unsafe {
                     neon::promote_batch_32_to_128(
                         input.as_ptr().add(i).cast::<u8>(),
-                        output.as_ptr().add(i).cast::<u128>() as *mut u128,
+                        output.as_mut_ptr().add(i).cast::<u128>(),
                     );
                 }
             }
