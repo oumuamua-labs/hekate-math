@@ -152,6 +152,17 @@ where
     FromF: HardwareField,
 {
     fn promote_flat(val: Flat<FromF>) -> Flat<Self>;
+
+    /// Batch promote a slice of flat elements.
+    ///
+    /// Default:
+    /// Scalar loop. Implementors may override
+    /// for SIMD or table acceleration.
+    fn promote_flat_batch(input: &[Flat<FromF>], output: &mut [Flat<Self>]) {
+        for (o, v) in output.iter_mut().zip(input.iter()) {
+            *o = Self::promote_flat(*v);
+        }
+    }
 }
 
 impl<F: HardwareField> FlatPromote<F> for F {
