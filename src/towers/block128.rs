@@ -905,6 +905,7 @@ mod neon {
 
     /// CT packed promote:
     /// 16 × Block8 → 16 × Block128 via nibble decomposition.
+    #[cfg(not(feature = "table-math"))]
     #[inline(always)]
     pub unsafe fn promote_batch_8_to_128(input: *const u8, output: *mut u128) {
         unsafe {
@@ -951,6 +952,7 @@ mod neon {
 
     /// CT packed promote:
     /// 16 × Block16 → 16 × Block128 via nibble decomposition.
+    #[cfg(not(feature = "table-math"))]
     #[inline(always)]
     pub unsafe fn promote_batch_16_to_128(input: *const u8, output: *mut u128) {
         unsafe {
@@ -1008,6 +1010,7 @@ mod neon {
 
     /// CT packed promote:
     /// 16 × Block32 → 16 × Block128 via nibble decomposition.
+    #[cfg(not(feature = "table-math"))]
     #[inline(always)]
     pub unsafe fn promote_batch_32_to_128(input: *const u8, output: *mut u128) {
         unsafe {
@@ -1088,6 +1091,7 @@ mod neon {
     }
 
     /// 16×16 byte matrix transpose via TRN cascade.
+    #[cfg(not(feature = "table-math"))]
     #[inline(always)]
     unsafe fn transpose_16x16(r: &[uint8x16_t; 16]) -> [uint8x16_t; 16] {
         // Shorthand reinterpret casts
