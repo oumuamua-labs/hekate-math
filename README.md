@@ -72,7 +72,7 @@ Benchmarks for `Block128` SpMV with fixed degree 16 (typical for Brakedown/Biniu
 
 ```toml
 [dependencies]
-hekate-math = "0.3.0"
+hekate-math = "0.4.0"
 ```
 
 ## Examples
