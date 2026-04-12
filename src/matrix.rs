@@ -932,6 +932,75 @@ mod tests {
         assert_eq!(&matrix.col_indices()[..64], &EXPECTED);
     }
 
+    /// Counter block = (nonce << 64 | counter).to_le_bytes()
+    #[test]
+    fn aes_ctr_prg_golden() {
+        #[rustfmt::skip]
+        const EXPECTED: [u8; 128] = [
+            // block 0: AES-256([0;32], counter=0)
+            0xdc, 0x95, 0xc0, 0x78, 0xa2, 0x40, 0x89, 0x89,
+            0xad, 0x48, 0xa2, 0x14, 0x92, 0x84, 0x20, 0x87,
+            // block 1: counter=1
+            0x52, 0x75, 0xf3, 0xd8, 0x6b, 0x4f, 0xb8, 0x68,
+            0x45, 0x93, 0x13, 0x3e, 0xbf, 0xa5, 0x3c, 0xd3,
+            // block 2: counter=2
+            0x77, 0x9b, 0x38, 0xd1, 0x5b, 0xff, 0xb6, 0x3d,
+            0x8d, 0x60, 0x9d, 0x55, 0x1a, 0x5c, 0xc9, 0x8e,
+            // block 3: counter=3
+            0x39, 0xd6, 0xe9, 0xae, 0x76, 0xa9, 0xb2, 0xf3,
+            0xfc, 0x46, 0x26, 0x80, 0xf7, 0x66, 0x72, 0x0e,
+            // block 4: counter=4
+            0x75, 0xd1, 0x1b, 0x0e, 0x3a, 0x68, 0xc4, 0x22,
+            0x3d, 0x88, 0xdb, 0xf0, 0x17, 0x97, 0x7d, 0xd7,
+            // block 5: counter=5
+            0x84, 0x5c, 0x7d, 0x46, 0x90, 0xfa, 0x59, 0x4f,
+            0x90, 0xe6, 0x7f, 0x7b, 0x52, 0x11, 0xa5, 0x1a,
+            // block 6: counter=6
+            0x6f, 0x87, 0x1f, 0x44, 0x5c, 0x18, 0xaf, 0xc2,
+            0xf8, 0x93, 0x7a, 0xf8, 0x41, 0xfd, 0x2a, 0xd0,
+            // block 7: counter=7
+            0x8d, 0x3a, 0xe1, 0x50, 0x22, 0x15, 0x52, 0x33,
+            0x4d, 0xdb, 0x29, 0xfe, 0x36, 0xa0, 0xb7, 0x24,
+        ];
+
+        let mut prg = AesCtrPrg::from_seed([0u8; 32]);
+        let mut output = [0u8; 128];
+
+        let _ = prg.try_fill_bytes(&mut output);
+
+        assert_eq!(output, EXPECTED);
+    }
+
+    #[test]
+    fn aes_ctr_prg_stream_isolation() {
+        let seed = [0xabu8; 32];
+
+        let mut prg0 = AesCtrPrg::from_seed(seed);
+        prg0.set_stream(0);
+
+        let mut out0 = [0u8; 64];
+        let _ = prg0.try_fill_bytes(&mut out0);
+
+        let mut prg1 = AesCtrPrg::from_seed(seed);
+        prg1.set_stream(1);
+
+        let mut out1 = [0u8; 64];
+        let _ = prg1.try_fill_bytes(&mut out1);
+
+        assert_ne!(
+            out0, out1,
+            "Different streams must produce different output"
+        );
+
+        let mut prg0_again = AesCtrPrg::from_seed(seed);
+        prg0_again.set_stream(0);
+
+        let mut out0_again = [0u8; 64];
+        let _ = prg0_again.try_fill_bytes(&mut out0_again);
+
+        assert_eq!(out0, out0_again, "Same stream must be deterministic");
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(1000))]
         #[test]
