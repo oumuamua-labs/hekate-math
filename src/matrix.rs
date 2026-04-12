@@ -587,7 +587,6 @@ unsafe fn assume_init_vec<T>(mut v: Vec<MaybeUninit<T>>) -> Vec<T> {
 mod tests {
     use super::*;
     use crate::{Block128, HardwareField};
-    use aes::cipher::{BlockCipherEncrypt, KeyInit};
     use alloc::vec;
     use proptest::prelude::*;
 
