@@ -20,7 +20,7 @@ parallel = ["dep:rayon"]
 table-math = []
 
 [dependencies]
-rand = { version = "0.10", default-features = false }
+rand = { version = "0.10.1", default-features = false }
 aes = { version = "0.9", default-features = false }
 rayon = { version = "1.11", optional = true }
 serde = { version = "1.0", default-features = false, features = ["alloc", "derive"] }
