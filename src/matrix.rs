@@ -16,11 +16,13 @@
 // limitations under the License.
 
 use crate::{Block8, Flat, FlatPromote, HardwareField};
+use aes::Aes256;
+use aes::cipher::{BlockCipherEncrypt, KeyInit};
 use alloc::vec::Vec;
-use chacha20::ChaCha20Rng;
 use core::arch::asm;
+use core::convert::Infallible;
 use core::mem::MaybeUninit;
-use rand::{RngExt, SeedableRng};
+use rand::{RngExt, SeedableRng, TryRng};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
@@ -33,11 +35,15 @@ const CHUNK_SIZE: usize = 1024;
 /// thread sync overhead below 32k.
 const PARALLEL_THRESHOLD: usize = 32768;
 
-/// Prefetch distance.
-/// 8 rows ahead to saturate memory
-/// controller during random access
-/// to VectorSource.
+/// 8 rows ahead keeps the memory
+/// controller saturated during
+/// random VectorSource access.
 const LOOKAHEAD: usize = 8;
+
+/// 8 blocks saturates the AES-NI
+/// and ARMv8-CE pipeline via ILP.
+const AES_BATCH: usize = 8;
+const AES_BUF_SIZE: usize = AES_BATCH * 16;
 
 /// Abstract source of a vector for Matrix-Vector
 /// multiplication. Allows using both dense slices
@@ -231,7 +237,7 @@ impl ByteSparseMatrix {
                 .for_each(|(chunk_id, (w_chunk, col_chunk))| {
                     let rows_in_this_chunk = w_chunk.len() / degree;
 
-                    let mut rng = ChaCha20Rng::from_seed(seed);
+                    let mut rng = AesCtrPrg::from_seed(seed);
                     rng.set_stream(chunk_id as u64);
 
                     let mut used_cols = [0u32; MAX_DEGREE];
@@ -265,7 +271,7 @@ impl ByteSparseMatrix {
 
         #[cfg(not(feature = "parallel"))]
         {
-            let mut rng = ChaCha20Rng::from_seed(seed);
+            let mut rng = AesCtrPrg::from_seed(seed);
             let mut used_cols = [0u32; MAX_DEGREE];
 
             for r in 0..rows {
@@ -449,6 +455,107 @@ impl ByteSparseMatrix {
 
             out_chunk[i].write(acc);
         }
+    }
+}
+
+/// AES-256-CTR PRG for
+/// expander graph generation.
+struct AesCtrPrg {
+    cipher: Aes256,
+    nonce: u64,
+    counter: u64,
+    buffer: [u8; AES_BUF_SIZE],
+    buf_pos: usize,
+}
+
+impl AesCtrPrg {
+    fn set_stream(&mut self, stream_id: u64) {
+        self.nonce = stream_id;
+        self.counter = 0;
+        self.buf_pos = AES_BUF_SIZE;
+    }
+
+    fn refill(&mut self) {
+        let nonce_high = (self.nonce as u128) << 64;
+
+        let mut blocks: [aes::Block; AES_BATCH] = Default::default();
+        for (i, block) in blocks.iter_mut().enumerate() {
+            let val = (self.counter + i as u64) as u128 | nonce_high;
+            *block = val.to_le_bytes().into();
+        }
+
+        self.cipher.encrypt_blocks(&mut blocks);
+
+        for (i, block) in blocks.iter().enumerate() {
+            self.buffer[i * 16..(i + 1) * 16].copy_from_slice(block.as_slice());
+        }
+
+        self.counter += AES_BATCH as u64;
+        self.buf_pos = 0;
+    }
+}
+
+impl SeedableRng for AesCtrPrg {
+    type Seed = [u8; 32];
+
+    fn from_seed(seed: [u8; 32]) -> Self {
+        Self {
+            cipher: Aes256::new(&seed.into()),
+            nonce: 0,
+            counter: 0,
+            buffer: [0u8; AES_BUF_SIZE],
+            buf_pos: AES_BUF_SIZE,
+        }
+    }
+}
+
+impl TryRng for AesCtrPrg {
+    type Error = Infallible;
+
+    fn try_next_u32(&mut self) -> Result<u32, Infallible> {
+        if self.buf_pos + 4 > AES_BUF_SIZE {
+            self.refill();
+        }
+
+        let p = self.buf_pos;
+        let val = u32::from_le_bytes(core::array::from_fn(|i| self.buffer[p + i]));
+
+        self.buf_pos = p + 4;
+
+        Ok(val)
+    }
+
+    fn try_next_u64(&mut self) -> Result<u64, Infallible> {
+        if self.buf_pos + 8 > AES_BUF_SIZE {
+            self.refill();
+        }
+
+        let p = self.buf_pos;
+        let val = u64::from_le_bytes(core::array::from_fn(|i| self.buffer[p + i]));
+
+        self.buf_pos = p + 8;
+
+        Ok(val)
+    }
+
+    fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Infallible> {
+        let mut written = 0;
+        while written < dst.len() {
+            if self.buf_pos >= AES_BUF_SIZE {
+                self.refill();
+            }
+
+            let available = AES_BUF_SIZE - self.buf_pos;
+            let copy_len = available.min(dst.len() - written);
+
+            dst[written..written + copy_len]
+                .copy_from_slice(&self.buffer[self.buf_pos..self.buf_pos + copy_len]);
+
+            self.buf_pos += copy_len;
+            written += copy_len;
+        }
+
+        Ok(())
     }
 }
 
@@ -640,10 +747,10 @@ mod tests {
         // Two columns should not share too many neighbors.
         // Expected weight ~ 2 * degree. Significantly less
         // implies poor expansion (collisions).
-        let mut rng = ChaCha20Rng::from_seed([1u8; 32]);
+        let mut rng = AesCtrPrg::from_seed([1u8; 32]);
         let mut total_weight = 0;
-        let trials = 100;
 
+        let trials = 100;
         for _ in 0..trials {
             let mut x = vec![Block128::from(0u128).to_hardware(); cols];
 
