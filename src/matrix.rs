@@ -33,6 +33,7 @@ const CHUNK_SIZE: usize = 1024;
 /// Min rows to trigger Rayon.
 /// Binary XOR is too fast to justify
 /// thread sync overhead below 32k.
+#[cfg(feature = "parallel")]
 const PARALLEL_THRESHOLD: usize = 32768;
 
 /// 8 rows ahead keeps the memory
@@ -40,10 +41,18 @@ const PARALLEL_THRESHOLD: usize = 32768;
 /// random VectorSource access.
 const LOOKAHEAD: usize = 8;
 
+/// Fixed chunk size for deterministic
+/// matrix generation. Both parallel
+/// and sequential paths use the same
+/// boundaries so output is bit-identical
+/// across feature configurations.
+const GEN_CHUNK_ROWS: usize = 256;
+
 /// 8 blocks saturates the AES-NI
 /// and ARMv8-CE pipeline via ILP.
+const AES_BLOCK: usize = 16;
 const AES_BATCH: usize = 8;
-const AES_BUF_SIZE: usize = AES_BATCH * 16;
+const AES_BUF_SIZE: usize = AES_BATCH * AES_BLOCK;
 
 /// Abstract source of a vector for Matrix-Vector
 /// multiplication. Allows using both dense slices
@@ -220,14 +229,7 @@ impl ByteSparseMatrix {
 
         #[cfg(feature = "parallel")]
         {
-            // Use deterministic chunking independent
-            // of thread pool size. This ensures the same
-            // seed always produces the same matrix,
-            // regardless of the runtime environment's
-            // thread configuration.
-            const DETERMINISTIC_CHUNK_SIZE: usize = 256;
-
-            let rows_per_chunk = DETERMINISTIC_CHUNK_SIZE.min(rows.max(1));
+            let rows_per_chunk = GEN_CHUNK_ROWS.min(rows.max(1));
             let aligned_chunk_len = rows_per_chunk * degree;
 
             weights_uninit[..total_elems]
@@ -271,25 +273,36 @@ impl ByteSparseMatrix {
 
         #[cfg(not(feature = "parallel"))]
         {
-            let mut rng = AesCtrPrg::from_seed(seed);
+            let rows_per_chunk = GEN_CHUNK_ROWS.min(rows.max(1));
+            let aligned_chunk_len = rows_per_chunk * degree;
+            let num_chunks = total_elems.div_ceil(aligned_chunk_len);
+
             let mut used_cols = [0u32; MAX_DEGREE];
+            for chunk_id in 0..num_chunks {
+                let mut rng = AesCtrPrg::from_seed(seed);
+                rng.set_stream(chunk_id as u64);
 
-            for r in 0..rows {
-                let row_offset = r * degree;
+                let elem_start = chunk_id * aligned_chunk_len;
+                let elem_end = (elem_start + aligned_chunk_len).min(total_elems);
+                let rows_in_this_chunk = (elem_end - elem_start) / degree;
 
-                for d in 0..degree {
-                    weights_uninit[row_offset + d].write(1u8);
+                for r in 0..rows_in_this_chunk {
+                    let row_offset = elem_start + r * degree;
 
-                    let mut col_idx;
-                    loop {
-                        col_idx = rng.random_range(0..cols as u32);
-                        if !used_cols[..d].contains(&col_idx) {
-                            break;
+                    for d in 0..degree {
+                        weights_uninit[row_offset + d].write(1u8);
+
+                        let mut col_idx;
+                        loop {
+                            col_idx = rng.random_range(0..cols as u32);
+                            if !used_cols[..d].contains(&col_idx) {
+                                break;
+                            }
                         }
-                    }
 
-                    used_cols[d] = col_idx;
-                    col_indices_uninit[row_offset + d].write(col_idx);
+                        used_cols[d] = col_idx;
+                        col_indices_uninit[row_offset + d].write(col_idx);
+                    }
                 }
             }
         }
@@ -487,7 +500,7 @@ impl AesCtrPrg {
         self.cipher.encrypt_blocks(&mut blocks);
 
         for (i, block) in blocks.iter().enumerate() {
-            self.buffer[i * 16..(i + 1) * 16].copy_from_slice(block.as_slice());
+            self.buffer[i * AES_BLOCK..(i + 1) * AES_BLOCK].copy_from_slice(block.as_slice());
         }
 
         self.counter += AES_BATCH as u64;
@@ -574,6 +587,7 @@ unsafe fn assume_init_vec<T>(mut v: Vec<MaybeUninit<T>>) -> Vec<T> {
 mod tests {
     use super::*;
     use crate::{Block128, HardwareField};
+    use aes::cipher::{BlockCipherEncrypt, KeyInit};
     use alloc::vec;
     use proptest::prelude::*;
 
@@ -895,6 +909,27 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Identical output regardless of
+    /// `--features parallel` or not.
+    #[test]
+    fn cross_feature_determinism_golden() {
+        let matrix = ByteSparseMatrix::generate_random(1024, 512, 16, [42u8; 32]);
+
+        #[rustfmt::skip]
+        const EXPECTED: [u32; 64] = [
+            442, 352, 465,  69, 176, 472, 322, 109,
+            349, 216,  74,  35, 206,  50,   7, 443,
+            349, 214,  30, 332,  66, 316, 297, 415,
+            325,  88, 484, 345,   5, 224, 106, 326,
+            454, 345, 295, 443, 267, 264,  91, 333,
+            163, 359, 262,  49, 112, 499, 219,  67,
+            420, 106, 415,  54, 437, 123, 366, 284,
+            503, 249,  26, 353,  90,  29, 311, 111,
+        ];
+
+        assert_eq!(&matrix.col_indices()[..64], &EXPECTED);
     }
 
     proptest! {
