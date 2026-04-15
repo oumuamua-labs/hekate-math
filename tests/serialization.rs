@@ -16,8 +16,8 @@
 // limitations under the License.
 
 use hekate_math::{
-    Bit, Block8, Block16, Block32, Block64, Block128, CanonicalDeserialize, CanonicalSerialize,
-    TowerField,
+    Bit, Block8, Block16, Block32, Block64, Block128, Block256, CanonicalDeserialize,
+    CanonicalSerialize, TowerField,
 };
 use rand::{RngExt, rng};
 
@@ -169,6 +169,47 @@ fn block128_endianness() {
 }
 
 #[test]
+fn block256_endianness() {
+    let val = Block256::ONE;
+    let mut expected_bytes = vec![0u8; 32];
+    expected_bytes[0] = 1;
+
+    assert_eq!(
+        val.to_bytes(),
+        expected_bytes,
+        "Block256(1) must be Little Endian padded to 32 bytes"
+    );
+
+    let recovered = Block256::deserialize(&expected_bytes).expect("Deserialize failed");
+    assert_eq!(recovered, val);
+
+    let max_val = Block256([u128::MAX, u128::MAX]);
+    let max_bytes = vec![0xFFu8; 32];
+    assert_eq!(max_val.to_bytes(), max_bytes);
+
+    run_serialization_roundtrip(max_val);
+}
+
+#[test]
+fn block256_from_uniform_bytes() {
+    let bytes: [u8; 32] = [
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,
+        0x1F, 0x20,
+    ];
+
+    let val = Block256::from_uniform_bytes(&bytes);
+    let serialized = val.to_bytes();
+    assert_eq!(&serialized[..], &bytes[..]);
+}
+
+#[test]
+fn block256_deserialize_too_short() {
+    let bytes = [0u8; 31];
+    assert!(Block256::deserialize(&bytes).is_err());
+}
+
+#[test]
 fn fuzz_all_blocks_roundtrip() {
     let mut rng = rng();
 
@@ -178,5 +219,6 @@ fn fuzz_all_blocks_roundtrip() {
         run_serialization_roundtrip(Block32(rng.random()));
         run_serialization_roundtrip(Block64(rng.random()));
         run_serialization_roundtrip(Block128(rng.random()));
+        run_serialization_roundtrip(Block256([rng.random(), rng.random()]));
     }
 }
