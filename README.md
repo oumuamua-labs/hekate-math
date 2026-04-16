@@ -237,11 +237,11 @@ fn example_spmv() {
 The immediate engineering focus is establishing absolute
 hardware supremacy across both ARM and x86 backends.
 
-- [ ] **x86_64 Hardware Acceleration (Beta → Prod)**
+- **x86_64 Hardware Acceleration (Beta → Prod)**
     - Replace software fallbacks with hand-tuned assembly/intrinsics for AVX2 and PCLMULQDQ.
     - **Goal**: Path to x86_64 Supremacy.
 
-- [ ] **Formal Verification & Execution Path Auditing**
+- **Formal Verification & Execution Path Auditing**
     - Mathematical modeling of execution boundaries and DoS-resistant state transitions.
     - **Goal**: Enforce strict `Result` propagation across all public interfaces for
       enterprise-grade fault tolerance.
