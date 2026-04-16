@@ -64,9 +64,9 @@ Benchmarks for `Block128` SpMV with fixed degree 16 (typical for Brakedown/Biniu
 
 | Matrix Size   | Time (M3 Max) | Throughput   | Memory Bandwidth (est.) |
 |:--------------|:--------------|:-------------|:------------------------|
-| **64K Rows**  | ~284 µs       | 3.69 Gelem/s | ~59 GB/s                |
-| **256K Rows** | ~912 µs       | 4.60 Gelem/s | ~73 GB/s                |
-| **1M Rows**   | ~5.16 ms      | 3.25 Gelem/s | ~52 GB/s                |
+| **64K Rows**  | ~171 µs       | 6.14 Gelem/s | ~98 GB/s                |
+| **256K Rows** | ~628 µs       | 6.68 Gelem/s | ~107 GB/s               |
+| **1M Rows**   | ~5.17 ms      | 3.25 Gelem/s | ~52 GB/s                |
 
 ## Installation
 

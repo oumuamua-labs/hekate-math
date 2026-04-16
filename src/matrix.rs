@@ -15,7 +15,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{Block8, Flat, FlatPromote, HardwareField};
+use crate::{Flat, HardwareField};
 use aes::Aes256;
 use aes::cipher::{BlockCipherEncrypt, KeyInit};
 use alloc::vec::Vec;
@@ -129,7 +129,7 @@ impl<F: Copy + Sync> VectorSource<F> for [F] {
 /// A Field-Agnostic Sparse Matrix.
 /// Stores weights as `u8` to save memory.
 /// Can be applied to ANY field that
-/// implements `FlatPromote<Block8>`.
+/// implements `HardwareField`.
 ///
 /// SOUNDNESS:
 /// weights must be binary (0 or 1).
@@ -326,6 +326,11 @@ impl ByteSparseMatrix {
             col_indices.set_len(total_elems);
         }
 
+        assert!(
+            weights.iter().all(|&w| w == 0 || w == 1),
+            "Binary weight invariant violated in generate_random"
+        );
+
         Self {
             rows,
             cols,
@@ -360,13 +365,13 @@ impl ByteSparseMatrix {
         &self.col_indices
     }
 
-    /// Generic SpMV that promotes u8 weights to
-    /// Field F on the fly. Uses the FlatPromote
-    /// trait for max speed (partial lookups).
+    /// Binary SpMV:
+    /// weights are 0 or 1, so each
+    /// term is a conditional XOR.
     /// Accepts any source implementing `VectorSource`.
     pub fn spmv<F, V>(&self, x: &V) -> Vec<Flat<F>>
     where
-        F: HardwareField + FlatPromote<Block8>,
+        F: HardwareField,
         V: VectorSource<Flat<F>> + ?Sized,
     {
         assert_eq!(x.len(), self.cols);
@@ -402,11 +407,12 @@ impl ByteSparseMatrix {
         unsafe { assume_init_vec(y) }
     }
 
-    /// Process a chunk of rows with lookahead prefetching.
+    /// Process a chunk of rows
+    /// with lookahead prefetching.
     #[inline(always)]
     fn process_chunk<F, V>(&self, start_row: usize, out_chunk: &mut [MaybeUninit<Flat<F>>], x: &V)
     where
-        F: HardwareField + FlatPromote<Block8> + Default + Copy,
+        F: HardwareField + Default + Copy,
         V: VectorSource<Flat<F>> + ?Sized,
     {
         // Strategy:
@@ -440,23 +446,23 @@ impl ByteSparseMatrix {
             let mut acc = Flat::from_raw(F::ZERO);
             let mut j = 0;
 
+            // Binary weight invariant:
+            // w ∈ {0, 1}
             while j + B <= self.degree {
                 let mut col_idxs = [0usize; B];
-                let mut weights = [Flat::from_raw(F::ZERO); B];
-
                 unsafe {
-                    for k in 0..B {
-                        let curr = row_offset + j + k;
-                        col_idxs[k] = *self.col_indices.get_unchecked(curr) as usize;
-
-                        let w = *self.weights.get_unchecked(curr);
-                        weights[k] = F::promote_flat(Block8(w).to_hardware());
+                    for (k, slot) in col_idxs.iter_mut().enumerate() {
+                        *slot = *self.col_indices.get_unchecked(row_offset + j + k) as usize;
                     }
                 }
 
                 let values = x.get_batch::<B>(&col_idxs);
-                for k in 0..B {
-                    acc += weights[k] * values[k];
+                unsafe {
+                    for (k, &val) in values.iter().enumerate() {
+                        if *self.weights.get_unchecked(row_offset + j + k) != 0 {
+                            acc += val;
+                        }
+                    }
                 }
 
                 j += B;
@@ -465,12 +471,10 @@ impl ByteSparseMatrix {
             while j < self.degree {
                 unsafe {
                     let curr = row_offset + j;
-                    let w = *self.weights.get_unchecked(curr);
-                    let w_field = F::promote_flat(Block8(w).to_hardware());
-                    let col_idx = *self.col_indices.get_unchecked(curr) as usize;
-                    let val = x.get_at(col_idx);
-
-                    acc += w_field * val;
+                    if *self.weights.get_unchecked(curr) != 0 {
+                        let col_idx = *self.col_indices.get_unchecked(curr) as usize;
+                        acc += x.get_at(col_idx);
+                    }
                 }
 
                 j += 1;
@@ -657,9 +661,7 @@ mod tests {
 
     #[test]
     fn byte_sparse_matrix_spmv() {
-        // 2 rows,
-        // 3 cols,
-        // degree 2,
+        // 2 rows, 3 cols, degree 2,
         // binary weights only.
         let weights = vec![1u8, 1u8, 1u8, 1u8];
 
@@ -693,6 +695,35 @@ mod tests {
         let res = matrix.spmv(x.as_slice());
 
         assert_eq!(res, expected, "Sequential SpMV failed (Basis Mismatch?)");
+    }
+
+    #[test]
+    fn zero_weight_entries_contribute_nothing() {
+        // 2 rows, 3 cols, degree 3.
+        // Row 0:
+        // w=1 col=0,
+        // w=0 col=1,
+        // w=1 col=2
+        // Row 1:
+        // w=0 col=0,
+        // w=1 col=1,
+        // w=0 col=2
+        let weights = vec![1, 0, 1, 0, 1, 0];
+        let col_indices = vec![0, 1, 2, 0, 1, 2];
+        let matrix = ByteSparseMatrix::new(2, 3, 3, weights, col_indices);
+
+        let x0 = b128(0xA0);
+        let x1 = b128(0xB0);
+        let x2 = b128(0xC0);
+        let x = vec![x0.to_hardware(), x1.to_hardware(), x2.to_hardware()];
+
+        // Row 0:
+        // 1*x0 + 0*x1 + 1*x2 = x0 + x2
+        // Row 1:
+        // 0*x0 + 1*x1 + 0*x2 = x1
+        let expected = vec![(x0 + x2).to_hardware(), x1.to_hardware()];
+
+        assert_eq!(matrix.spmv(x.as_slice()), expected);
     }
 
     #[test]
