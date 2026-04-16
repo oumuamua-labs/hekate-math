@@ -130,6 +130,12 @@ impl<F: Copy + Sync> VectorSource<F> for [F] {
 /// Stores weights as `u8` to save memory.
 /// Can be applied to ANY field that
 /// implements `FlatPromote<Block8>`.
+///
+/// SOUNDNESS:
+/// weights must be binary (0 or 1).
+/// tower_bit is GF(2)-linear, not
+/// GF(2^k)-linear, non-binary weight
+/// break virtual packing commutativity.
 #[derive(Clone, Debug)]
 pub struct ByteSparseMatrix {
     rows: usize,
@@ -164,6 +170,10 @@ impl ByteSparseMatrix {
             col_indices.len(),
             expected_len,
             "Column indices vector length mismatch"
+        );
+        assert!(
+            weights.iter().all(|&w| w == 0 || w == 1),
+            "Virtual packing requires binary weights"
         );
 
         for &idx in &col_indices {
@@ -647,49 +657,48 @@ mod tests {
 
     #[test]
     fn byte_sparse_matrix_spmv() {
-        // Scenario: 2 Rows, 2 Cols, Degree 2
+        // 2 rows,
+        // 3 cols,
+        // degree 2,
+        // binary weights only.
+        let weights = vec![1u8, 1u8, 1u8, 1u8];
 
-        // Weights are u8 (bytes)
-        let v1 = 1u8;
-        let v2 = 2u8;
-        let v3 = 3u8;
-        let v4 = 4u8;
+        // Row 0:
+        // col 0 + col 2,
+        // Row 1:
+        // col 1 + col 0
+        let col_indices = vec![0, 2, 1, 0];
 
-        let weights = vec![v1, v2, v3, v4];
-        let col_indices = vec![0, 1, 1, 0]; // Row 0: (0, 1), Row 1: (1, 0)
+        let matrix = ByteSparseMatrix::new(2, 3, 2, weights, col_indices);
 
-        // Manual construction of ByteSparseMatrix
-        let matrix = ByteSparseMatrix::new(2, 2, 2, weights, col_indices);
-
-        // Vector x = [10, 100]
-        // IMPORTANT: SpMV expects inputs in HARDWARE Basis!
-        // We must convert our test inputs to hardware basis first.
         let x0_tower = b128(10);
         let x1_tower = b128(100);
+        let x2_tower = b128(255);
 
-        let x = vec![x0_tower.to_hardware(), x1_tower.to_hardware()];
+        let x = vec![
+            x0_tower.to_hardware(),
+            x1_tower.to_hardware(),
+            x2_tower.to_hardware(),
+        ];
 
-        // Calculate EXPECTED value using standard (Tower) arithmetic,
-        // then convert the result to Hardware basis for comparison.
-        //
-        // Row 0 logic: 1*x0 + 2*x1
-        let w1 = Block128::from(v1);
-        let w2 = Block128::from(v2);
-        let y0_tower = w1 * x0_tower + w2 * x1_tower;
+        // Row 0:
+        // 1*x0 + 1*x2 = x0 + x2 (XOR)
+        let y0_tower = x0_tower + x2_tower;
 
-        // Row 1 logic: 3*x1 + 4*x0
-        let w3 = Block128::from(v3);
-        let w4 = Block128::from(v4);
-        let y1_tower = w3 * x1_tower + w4 * x0_tower;
+        // Row 1:
+        // 1*x1 + 1*x0 = x1 + x0 (XOR)
+        let y1_tower = x1_tower + x0_tower;
 
-        // The result from matrix.spmv will be in Hardware basis.
         let expected = vec![y0_tower.to_hardware(), y1_tower.to_hardware()];
-
-        // Test
         let res = matrix.spmv(x.as_slice());
 
-        // Now comparing Hardware(res) == Hardware(expected)
         assert_eq!(res, expected, "Sequential SpMV failed (Basis Mismatch?)");
+    }
+
+    #[test]
+    #[should_panic(expected = "binary weights")]
+    fn rejects_non_binary_weights() {
+        ByteSparseMatrix::new(1, 2, 2, vec![1, 3], vec![0, 1]);
     }
 
     #[test]
