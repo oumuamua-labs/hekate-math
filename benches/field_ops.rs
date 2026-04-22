@@ -19,8 +19,15 @@ use core::hint::black_box;
 use criterion::{
     BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main, measurement::WallTime,
 };
-use hekate_math::{Bit, Block8, Block16, Block32, Block64, Block128, Flat, HardwareField};
+use hekate_math::{
+    Bit, Block8, Block16, Block32, Block64, Block128, Block256, Flat, HardwareField, TowerField,
+};
 use rand::{RngExt, rng};
+
+fn rand_field<F: TowerField>(rng: &mut rand::rngs::ThreadRng) -> F {
+    let bytes: [u8; 32] = rng.random();
+    F::from_uniform_bytes(&bytes)
+}
 
 fn bench_mul_latency(c: &mut Criterion) {
     let mut group = c.benchmark_group("field_ops/mul_latency");
@@ -31,6 +38,7 @@ fn bench_mul_latency(c: &mut Criterion) {
     run_mul_bench::<Block32>(&mut group, "Block32");
     run_mul_bench::<Block64>(&mut group, "Block64");
     run_mul_bench::<Block128>(&mut group, "Block128");
+    run_mul_bench::<Block256>(&mut group, "Block256");
 
     group.finish();
 }
@@ -42,8 +50,8 @@ where
     // Setup:
     // Generate random field elements
     let mut rng = rng();
-    let a: F = rng.random::<u128>().into();
-    let b: F = rng.random::<u128>().into();
+    let a: F = rand_field(&mut rng);
+    let b: F = rand_field(&mut rng);
 
     // 1. Baseline:
     // Tower Basis Multiplication (Recursive Karatsuba)
@@ -72,6 +80,7 @@ fn bench_square_latency(c: &mut Criterion) {
     run_square_bench::<Block32>(&mut group, "Block32");
     run_square_bench::<Block64>(&mut group, "Block64");
     run_square_bench::<Block128>(&mut group, "Block128");
+    run_square_bench::<Block256>(&mut group, "Block256");
 
     group.finish();
 }
@@ -82,7 +91,7 @@ where
 {
     // Setup
     let mut rng = rng();
-    let a: F = rng.random::<u128>().into();
+    let a: F = rand_field(&mut rng);
 
     // 1. Tower Basis Squaring
     group.bench_function(format!("{}/tower_basis", name), |bencher| {
@@ -105,6 +114,7 @@ fn bench_inv_latency(c: &mut Criterion) {
     run_inv_bench::<Block32>(&mut group, "Block32");
     run_inv_bench::<Block64>(&mut group, "Block64");
     run_inv_bench::<Block128>(&mut group, "Block128");
+    run_inv_bench::<Block256>(&mut group, "Block256");
 
     group.finish();
 }
@@ -120,7 +130,7 @@ where
         .map(|_| {
             let mut x;
             loop {
-                x = rng.random::<u128>().into();
+                x = rand_field(&mut rng);
                 if x != F::ZERO {
                     break;
                 }
@@ -166,6 +176,7 @@ fn bench_add_throughput(c: &mut Criterion) {
     run_add_bench::<Block32>(&mut group, "Block32");
     run_add_bench::<Block64>(&mut group, "Block64");
     run_add_bench::<Block128>(&mut group, "Block128");
+    run_add_bench::<Block256>(&mut group, "Block256");
 
     group.finish();
 }
@@ -180,8 +191,9 @@ where
     group.throughput(Throughput::Elements(size as u64));
 
     let mut rng = rng();
-    let a: Vec<F> = (0..size).map(|_| rng.random::<u128>().into()).collect();
-    let b: Vec<F> = (0..size).map(|_| rng.random::<u128>().into()).collect();
+
+    let a: Vec<F> = (0..size).map(|_| rand_field(&mut rng)).collect();
+    let b: Vec<F> = (0..size).map(|_| rand_field(&mut rng)).collect();
 
     let mut out = vec![F::ZERO; size];
 

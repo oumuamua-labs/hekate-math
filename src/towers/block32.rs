@@ -150,7 +150,7 @@ impl CanonicalSerialize for Block32 {
             return Err(());
         }
 
-        writer.copy_from_slice(&self.0.to_le_bytes());
+        writer[..4].copy_from_slice(&self.0.to_le_bytes());
 
         Ok(())
     }

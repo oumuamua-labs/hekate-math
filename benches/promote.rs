@@ -18,7 +18,8 @@
 use core::hint::black_box;
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use hekate_math::{
-    Block8, Block16, Block32, Block64, Block128, Flat, FlatPromote, HardwareField, TowerField,
+    Block8, Block16, Block32, Block64, Block128, Block256, Flat, FlatPromote, HardwareField,
+    TowerField,
 };
 use rand::{RngExt, rng};
 
@@ -36,6 +37,7 @@ fn bench_promote_scalar(c: &mut Criterion) {
     let val16 = Block16(rng.random::<u16>()).to_hardware();
     let val32 = Block32(rng.random::<u32>()).to_hardware();
     let val64 = Block64(rng.random::<u64>()).to_hardware();
+    let val128 = Block128(rng.random::<u128>()).to_hardware();
 
     group.bench_function("Block8_to_Block128", |b| {
         b.iter(|| Block128::promote_flat(black_box(val8)))
@@ -51,6 +53,14 @@ fn bench_promote_scalar(c: &mut Criterion) {
 
     group.bench_function("Block64_to_Block128", |b| {
         b.iter(|| Block128::promote_flat(black_box(val64)))
+    });
+
+    group.bench_function("Block8_to_Block256", |b| {
+        b.iter(|| Block256::promote_flat(black_box(val8)))
+    });
+
+    group.bench_function("Block128_to_Block256", |b| {
+        b.iter(|| Block256::promote_flat(black_box(val128)))
     });
 
     group.finish();

@@ -19,10 +19,15 @@ use criterion::{
     BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main, measurement::WallTime,
 };
 use hekate_math::{
-    Bit, Block8, Block16, Block32, Block64, Block128, CanonicalSerialize, Flat, HardwareField,
-    PackableField, PackedFlat, TowerField,
+    Bit, Block8, Block16, Block32, Block64, Block128, Block256, CanonicalSerialize, Flat,
+    HardwareField, PackableField, PackedFlat, TowerField,
 };
 use rand::{RngExt, rng};
+
+fn rand_field<F: TowerField>(rng: &mut rand::rngs::ThreadRng) -> F {
+    let bytes: [u8; 32] = rng.random();
+    F::from_uniform_bytes(&bytes)
+}
 
 fn bench_basis_conversion(c: &mut Criterion) {
     let mut group = c.benchmark_group("basis_conversion");
@@ -37,6 +42,7 @@ fn bench_basis_conversion(c: &mut Criterion) {
     run_conversion_bench::<Block32>(&mut group, "Block32", size);
     run_conversion_bench::<Block64>(&mut group, "Block64", size);
     run_conversion_bench::<Block128>(&mut group, "Block128", size);
+    run_conversion_bench::<Block256>(&mut group, "Block256", size);
 
     group.finish();
 }
@@ -46,7 +52,8 @@ where
     F: HardwareField + TowerField + CanonicalSerialize,
 {
     let mut rng = rng();
-    let input: Vec<F> = (0..size).map(|_| F::from(rng.random::<u128>())).collect();
+
+    let input: Vec<F> = (0..size).map(|_| rand_field(&mut rng)).collect();
     let bytes_per_elem = input[0].serialized_size() as u64;
 
     group.throughput(Throughput::Bytes(size as u64 * bytes_per_elem));

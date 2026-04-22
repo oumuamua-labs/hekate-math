@@ -11,7 +11,7 @@ Hardware-accelerated binary tower fields for zero-knowledge proofs.
 
 `hekate-math` provides a high-performance, constant-time implementation of binary tower fields (𝔽(2^k))
 optimized for GKR-based provers, Sumcheck, and Binius protocols. The library implements a rigorous algebraic tower
-construction up to 𝔽(2^128), leveraging basis isomorphism to utilize native CPU hardware instructions:
+construction up to 𝔽(2^256), leveraging basis isomorphism to utilize native CPU hardware instructions:
 PMULL (ARMv8 NEON) and PCLMULQDQ (x86_64 AVX2).
 
 Designed for low-level cryptographic engineering, the crate is `no-std` compatible and defaults to constant-time
@@ -72,7 +72,7 @@ Benchmarks for `Block128` SpMV with fixed degree 16 (typical for Brakedown/Biniu
 
 ```toml
 [dependencies]
-hekate-math = "0.5.0"
+hekate-math = "0.6.0"
 ```
 
 ## Examples
@@ -237,11 +237,11 @@ fn example_spmv() {
 The immediate engineering focus is establishing absolute
 hardware supremacy across both ARM and x86 backends.
 
-- [ ] **x86_64 Hardware Acceleration (Beta → Prod)**
+- **x86_64 Hardware Acceleration (Beta → Prod)**
     - Replace software fallbacks with hand-tuned assembly/intrinsics for AVX2 and PCLMULQDQ.
     - **Goal**: Path to x86_64 Supremacy.
 
-- [ ] **Formal Verification & Execution Path Auditing**
+- **Formal Verification & Execution Path Auditing**
     - Mathematical modeling of execution boundaries and DoS-resistant state transitions.
     - **Goal**: Enforce strict `Result` propagation across all public interfaces for
       enterprise-grade fault tolerance.
@@ -257,11 +257,13 @@ The construction follows a strict recursive data layout. Higher-order blocks are
 of two lower-order blocks (Low, High).
 
 ```plaintext
-              Block128 (GF(2^128))
-                /              \
-          Block64              Block64
-           /    \              /     \
-       Block32  Block32      ...     ...
+                    Block256 (GF(2^256))
+                    /              \
+              Block128              Block128 (GF(2^128))
+                /    \              /     \
+          Block64   Block64       ...     ...
+           /    \
+       Block32  Block32
         /    \
     Block16  Block16
      /    \
@@ -275,14 +277,15 @@ of two lower-order blocks (Low, High).
 The extension defines 𝔽(2^(2^(i+1))) ≅ 𝔽(2^(2^i))[v] / (v² + v + βᵢ),
 where βᵢ is the extension constant (`EXTENSION_TAU`) for that level.
 
-| Height | Field     | Implementation | Extension Constant (β)       | Arithmetic            |
-|:-------|:----------|:---------------|:-----------------------------|:----------------------|
-| h=0    | 𝔽₂       | `Bit`          | N/A                          | Boolean (XOR/AND)     |
-| h=3    | 𝔽(2^8)   | `Block8`       | *Base Field* (AES Poly)      | Recursive / Karatsuba |
-| h=4    | 𝔽(2^16)  | `Block16`      | 0x20 ∈ Block8                | Recursive / Karatsuba |
-| h=5    | 𝔽(2^32)  | `Block32`      | 0x2000 ∈ Block16             | Recursive / Karatsuba |
-| h=6    | 𝔽(2^64)  | `Block64`      | 0x20000000 ∈ Block32         | Recursive / Karatsuba |
-| h=7    | 𝔽(2^128) | `Block128`     | 0x2000000000000000 ∈ Block64 | Recursive / Karatsuba |
+| Height | Field     | Implementation | Extension Constant (β)                        | Arithmetic            |
+|:-------|:----------|:---------------|:----------------------------------------------|:----------------------|
+| h=0    | 𝔽₂       | `Bit`          | N/A                                           | Boolean (XOR/AND)     |
+| h=3    | 𝔽(2^8)   | `Block8`       | *Base Field* (AES Poly)                       | Recursive / Karatsuba |
+| h=4    | 𝔽(2^16)  | `Block16`      | 0x20 ∈ Block8                                 | Recursive / Karatsuba |
+| h=5    | 𝔽(2^32)  | `Block32`      | 0x2000 ∈ Block16                              | Recursive / Karatsuba |
+| h=6    | 𝔽(2^64)  | `Block64`      | 0x20000000 ∈ Block32                          | Recursive / Karatsuba |
+| h=7    | 𝔽(2^128) | `Block128`     | 0x2000000000000000 ∈ Block64                  | Recursive / Karatsuba |
+| h=8    | 𝔽(2^256) | `Block256`     | 0x20000000000000000000000000000000 ∈ Block128 | Recursive / Karatsuba |
 
 *Note: The tower is rooted at F(2^8) (AES Field) for hardware compatibility. Lower fields (Bit)
 are subfields embedded via isomorphism, making this a Hybrid Tower construction.*
