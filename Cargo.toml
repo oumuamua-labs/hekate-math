@@ -4,7 +4,7 @@ version = "0.6.0"
 edition = "2024"
 authors = [
     "Oumuamua Labs <info@oumuamua.dev>",
-    "Andrei Kochergin <zeek@tuta.com>",
+    "Andrei Kochergin <andrei@oumuamua.dev>",
 ]
 repository = "https://github.com/oumuamua-labs/hekate-math"
 homepage = "https://github.com/oumuamua-labs/hekate-math"

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // This file is part of the hekate-math project.
-// Copyright (C) 2026 Andrei Kochergin <zeek@tuta.com>
-// Copyright (C) 2026 Oumuamua Labs. All rights reserved.
+// Copyright (C) 2026 Andrei Kochergin <andrei@oumuamua.dev>
+// Copyright (C) 2026 Oumuamua Labs <info@oumuamua.dev>.All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
