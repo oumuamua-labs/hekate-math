@@ -53,8 +53,8 @@ Efficiency of polynomial operations in 𝔽(2^128).
 | **Dense Eval (Tower)**    | 2²⁰ coeffs      | 91.93 ms    | 174 MiB/s      |
 | **Dense Eval (Hardware)** | 2²⁰ coeffs      | **8.34 ms** | **1.87 GiB/s** |
 | **Batch Eval (SIMD)**     | 256 × 16384     | 5.43 ms     | 772 Melem/s    |
-| **FFT Layer (RAM)**       | 2²⁰ elements    | 909 µs      | 1.15 Gelem/s   |
-| **FFT Layer (L1)**        | 256 elements    | 241 ns      | 1.06 Gelem/s   |
+| **Additive FFT (scalar)** | 2⁹ pts · Block16  | 7.08 µs     | 72 Melem/s     |
+| **Additive FFT (packed)** | 2⁹ pts · ×8 lanes | 8.22 µs     | 499 Melem/s    |
 | **Interpolate MSM**       | 65536 points    | 77.12 µs    | 850 Melem/s    |
 | **MLE Evaluation**        | 20 variables    | 1.27 ms     | 822 Melem/s    |
 
