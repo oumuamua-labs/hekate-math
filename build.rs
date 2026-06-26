@@ -20,6 +20,12 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
+// Mirror Block8::EXTENSION_TAU and constants::POLY_8/16;
+// write_algebra_extras_16 pins them at build time.
+const POLY_8: u8 = 0x1b;
+const POLY_16: u16 = 0x2b;
+const EXTENSION_TAU_8: u8 = 0x20;
+
 // === 8 BIT CONSTANTS ===
 // Generator 8:
 // Block8(27)
@@ -844,6 +850,272 @@ impl_write_nibble_promote_tables_to_128!(write_nibble_promote_16_to_128, u16, 4,
 impl_write_nibble_promote_tables_to_128!(write_nibble_promote_32_to_128, u32, 8, apply_32);
 impl_write_nibble_promote_tables_to_128!(write_nibble_promote_64_to_128, u64, 16, apply_64);
 
+// ==========================================
+// 9. ALGEBRAIC EXTRAS (Block16, GF(2^16))
+// ==========================================
+//
+// Block16 = Block8[X]/(X^2 + X + 0x20) over the
+// AES field (0x1b). Trace and the Artin-Schreier
+// operator L(x) = x^2 + x reduce to squaring, so
+// tower squaring is the only field op needed here.
+
+fn gf8_mul(mut a: u8, mut b: u8) -> u8 {
+    let mut res = 0u8;
+    let mut i = 0;
+
+    while i < 8 {
+        if b & 1 == 1 {
+            res ^= a;
+        }
+
+        let carry = a & 0x80;
+
+        a <<= 1;
+
+        if carry != 0 {
+            a ^= POLY_8;
+        }
+
+        b >>= 1;
+        i += 1;
+    }
+
+    res
+}
+
+fn sq16_tower(a: u16) -> u16 {
+    let lo = (a & 0x00ff) as u8;
+    let hi = (a >> 8) as u8;
+
+    let lo2 = gf8_mul(lo, lo);
+    let hi2 = gf8_mul(hi, hi);
+    let new_lo = lo2 ^ gf8_mul(hi2, EXTENSION_TAU_8);
+
+    ((hi2 as u16) << 8) | (new_lo as u16)
+}
+
+fn flat_sq_16(a: u16) -> u16 {
+    let mut acc = 0u32;
+
+    for i in 0..16 {
+        if (a >> i) & 1 == 1 {
+            acc ^= 1u32 << (2 * i);
+        }
+    }
+
+    for i in (16..32).rev() {
+        if (acc >> i) & 1 == 1 {
+            acc ^= (1u32 << i) ^ ((POLY_16 as u32) << (i - 16));
+        }
+    }
+
+    acc as u16
+}
+
+fn trace_of_16(x: u16) -> u16 {
+    let mut acc = 0u16;
+    let mut p = x;
+    let mut i = 0;
+
+    while i < 16 {
+        acc ^= p;
+        p = sq16_tower(p);
+        i += 1;
+    }
+
+    acc
+}
+
+// cols[k] and the result are column-image form:
+// column k is the image of basis vector e_k.
+fn gf2_invert_16(cols: &[u16; 16]) -> [u16; 16] {
+    let mut rows = [0u16; 16];
+    let mut inv = [0u16; 16];
+
+    for (i, slot) in inv.iter_mut().enumerate() {
+        *slot = 1 << i;
+    }
+
+    for (i, row) in rows.iter_mut().enumerate() {
+        for (k, &col) in cols.iter().enumerate() {
+            *row |= ((col >> i) & 1) << k;
+        }
+    }
+
+    for col in 0..16 {
+        let mut piv = col;
+        while piv < 16 && (rows[piv] >> col) & 1 == 0 {
+            piv += 1;
+        }
+
+        assert!(
+            piv < 16,
+            "Artin-Schreier operator is singular: field constants are inconsistent"
+        );
+
+        rows.swap(col, piv);
+        inv.swap(col, piv);
+
+        for r in 0..16 {
+            if r != col && (rows[r] >> col) & 1 == 1 {
+                rows[r] ^= rows[col];
+                inv[r] ^= inv[col];
+            }
+        }
+    }
+
+    let mut out = [0u16; 16];
+    for (k, slot) in out.iter_mut().enumerate() {
+        for (i, &v) in inv.iter().enumerate() {
+            *slot |= ((v >> k) & 1) << i;
+        }
+    }
+
+    out
+}
+
+fn vanish_build(i: usize, x: u16) -> u16 {
+    let mut t = x;
+    for _ in 0..i {
+        t = sq16_tower(t) ^ t;
+    }
+
+    t
+}
+
+fn gf2_rank_16(vals: &[u16; 16]) -> usize {
+    let mut piv = [0u16; 16];
+    let mut rank = 0;
+
+    for &v in vals.iter() {
+        let mut x = v;
+        while x != 0 {
+            let b = x.trailing_zeros() as usize;
+            if piv[b] == 0 {
+                piv[b] = x;
+                rank += 1;
+
+                break;
+            }
+
+            x ^= piv[b];
+        }
+    }
+
+    rank
+}
+
+fn write_algebra_extras_16(file: &mut File) {
+    // FIPS-197 §4.2 worked example pins POLY_8.
+    assert_eq!(gf8_mul(0x57, 0x83), 0xc1, "gf8_mul is not the AES field");
+
+    let mut trace_mask = 0u16;
+    for k in 0..16 {
+        if trace_of_16(1 << k) == 1 {
+            trace_mask |= 1 << k;
+        }
+    }
+
+    // L(x) = x^2 + x has kernel {0, 1}, so it is not
+    // invertible. Lift to L~(x) = L(x) + (bit0 x)*d with
+    // d outside the trace-zero image; then L~^-1 on the
+    // trace-zero subspace solves x^2 + x = c (Tr c = 0).
+    assert_ne!(
+        trace_mask, 0,
+        "trace functional is identically zero: field is broken"
+    );
+
+    let d = 1u16 << trace_mask.trailing_zeros();
+
+    let mut l_tilde = [0u16; 16];
+    for (k, slot) in l_tilde.iter_mut().enumerate() {
+        let l_k = sq16_tower(1 << k) ^ (1u16 << k);
+        *slot = l_k ^ if k == 0 { d } else { 0 };
+    }
+
+    let solve_basis = gf2_invert_16(&l_tilde);
+
+    // Build-time proof: trace laws + solvability.
+    let mut trace_zero = 0u32;
+    for x in 0u16..=u16::MAX {
+        let t = trace_of_16(x);
+        assert!(t <= 1, "trace escaped GF(2)");
+
+        let parity = ((x & trace_mask).count_ones() & 1) as u16;
+        assert_eq!(parity, t, "TRACE_MASK_16 does not reproduce the trace");
+
+        let via_basis = apply_16(
+            flat_sq_16(apply_16(x, &TOWER_TO_FLAT_16)),
+            &FLAT_TO_TOWER_16,
+        );
+        assert_eq!(
+            sq16_tower(x),
+            via_basis,
+            "tower squaring disagrees with the change-of-basis oracle: \
+             EXTENSION_TAU_8/POLY_8/POLY_16 inconsistent with the basis matrices"
+        );
+
+        if t == 0 {
+            trace_zero += 1;
+
+            let root = apply_16(x, &solve_basis);
+            assert_eq!(
+                sq16_tower(root) ^ root,
+                x,
+                "SOLVE_QUADRATIC_BASIS_16 fails the round-trip x^2 + x = c"
+            );
+        }
+    }
+
+    assert_eq!(trace_of_16(1), 0, "Tr(1) must vanish in GF(2^16)");
+    assert_eq!(trace_zero, 32768, "trace functional is unbalanced");
+
+    writeln!(file, "pub const TRACE_MASK_16: u16 = 0x{trace_mask:04x};\n").unwrap();
+    write_raw_16(file, "SOLVE_QUADRATIC_BASIS_16", &solve_basis);
+
+    // Cantor basis:
+    // β_0 = 1,
+    // β_i solves x^2 + x = β_{i-1}.
+    let mut cantor_tower = [0u16; 16];
+    cantor_tower[0] = 1;
+
+    for i in 1..16 {
+        cantor_tower[i] = apply_16(cantor_tower[i - 1], &solve_basis);
+    }
+
+    // V10 self-check:
+    // independence, β_0 = 1, σ(β_i) = β_{i-1},
+    // s_i(β_i) = 1,
+    // Tr(β_i) = 0 for i < 15 and Tr(β_15) = 1.
+    assert_eq!(
+        gf2_rank_16(&cantor_tower),
+        16,
+        "Cantor basis is GF(2)-dependent"
+    );
+    assert_eq!(cantor_tower[0], 1, "beta_0 must be 1");
+
+    for i in 0..16 {
+        assert_eq!(vanish_build(i, cantor_tower[i]), 1, "s_i(beta_i) != 1");
+
+        let tr = (cantor_tower[i] & trace_mask).count_ones() & 1;
+        if i < 15 {
+            assert_eq!(tr, 0, "Tr(beta_i) must vanish for i < 15");
+        } else {
+            assert_eq!(tr, 1, "Tr(beta_15) must be 1");
+        }
+
+        if i >= 1 {
+            assert_eq!(
+                sq16_tower(cantor_tower[i]) ^ cantor_tower[i],
+                cantor_tower[i - 1],
+                "Cantor chain broken: sigma(beta_i) != beta_(i-1)"
+            );
+        }
+    }
+
+    write_raw_16(file, "CANTOR_BASIS_TOWER_16", &cantor_tower);
+}
+
 fn main() {
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("generated_constants.rs");
@@ -852,8 +1124,8 @@ fn main() {
 
     writeln!(file, "// AUTO-GENERATED BY build.rs").unwrap();
 
-    writeln!(file, "pub const POLY_8: u8 = 0x1b;").unwrap();
-    writeln!(file, "pub const POLY_16: u16 = 0x002b;").unwrap();
+    writeln!(file, "pub const POLY_8: u8 = 0x{POLY_8:02x};").unwrap();
+    writeln!(file, "pub const POLY_16: u16 = 0x{POLY_16:04x};").unwrap();
     writeln!(file, "pub const POLY_32: u32 = 0x0000008d;").unwrap();
     writeln!(file, "pub const POLY_64: u64 = 0x000000000000001b;").unwrap();
     writeln!(
@@ -882,6 +1154,8 @@ fn main() {
     );
     write_raw_16(&mut file, "RAW_FLAT_TO_TOWER_16", &FLAT_TO_TOWER_16);
     write_raw_16(&mut file, "RAW_TOWER_TO_FLAT_16", &TOWER_TO_FLAT_16);
+
+    write_algebra_extras_16(&mut file);
 
     // 32 bit
     write_table_32(&mut file, "FLAT_TO_TOWER_32", &FLAT_TO_TOWER_32);
