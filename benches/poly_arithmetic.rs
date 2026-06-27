@@ -18,9 +18,12 @@
 use core::hint::black_box;
 use core::mem::size_of;
 use criterion::{
-    BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main, measurement::WallTime,
+    BatchSize, BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main,
+    measurement::WallTime,
 };
-use hekate_math::{Block128, Flat, HardwareField, PackableField, PackedBlock128, PackedFlat};
+use hekate_math::{
+    AdditiveFft, Block16, Block128, Flat, HardwareField, PackableField, PackedBlock128, PackedFlat,
+};
 use rand::{RngExt, rng};
 use std::time::Duration;
 
@@ -39,17 +42,10 @@ fn bench_poly_arithmetic(c: &mut Criterion) {
     // 256 * 16384 = ~4.1M ops.
     bench_eval_batch_block128(&mut group, 1 << 8, 1 << 14);
 
-    // 3. FFT Additive (Mock/Butterfly)
-    // Scenario A:
-    // RAM Bound (Large size, large stride)
-    // 1M elements, Stride 1024 (jumps around memory)
-    bench_fft_additive::<Block128>(&mut group, "Block128/ram_bound", 1 << 20, 1024);
-
-    // Scenario B:
-    // L1 Bound (Small size, contiguous)
-    // 256 elements, Stride 1 (packed).
-    // Shows peak compute power.
-    bench_fft_additive::<Block128>(&mut group, "Block128/l1_bound", 1 << 8, 1);
+    // 3. Additive FFT (Gao–Mateer, Block16).
+    // Profile A (n=512) and field-max (n=65536).
+    bench_fft_additive(&mut group, 9);
+    bench_fft_additive(&mut group, 16);
 
     // 4. Interpolate (Lagrange Subset)
     // MSM-like workload
@@ -172,54 +168,48 @@ fn bench_eval_batch_block128(
     );
 }
 
-// 3. Additive FFT (Mock Butterfly)
-fn bench_fft_additive<F>(
-    group: &mut BenchmarkGroup<WallTime>,
-    name: &str,
-    size: usize,
-    stride: usize,
-) where
-    F: HardwareField,
-{
+// 3. Additive FFT (Gao–Mateer, Block16)
+fn bench_fft_additive(group: &mut BenchmarkGroup<WallTime>, log_n: u32) {
+    let n = 1usize << log_n;
+    let fft = AdditiveFft::<Block16>::new(log_n);
+
     let mut rng = rng();
-    let mut data: Vec<Flat<F>> = (0..size)
-        .map(|_| F::from(rng.random::<u128>()).to_hardware())
+
+    let scalar_src: Vec<Flat<Block16>> = (0..n)
+        .map(|_| Block16::from(rng.random::<u16>()).to_hardware())
         .collect();
-    let twiddle = F::from(rng.random::<u128>()).to_hardware();
 
-    group.throughput(Throughput::Elements(size as u64));
-    group.bench_function(
-        format!("{}/fft_layer_{}_stride_{}", name, size, stride),
-        |bencher| {
-            bencher.iter(|| {
-                let mut i = 0;
-                while i < size {
-                    for j in 0..stride {
-                        if i + j + stride >= size {
-                            break;
-                        }
-
-                        // Unsafe get for max speed
-                        let u = unsafe { *data.get_unchecked(i + j) };
-                        let v = unsafe { *data.get_unchecked(i + j + stride) };
-
-                        // Butterfly operations
-                        let sum = u + v;
-                        let twisted = u + v * twiddle;
-
-                        unsafe {
-                            *data.get_unchecked_mut(i + j) = sum;
-                            *data.get_unchecked_mut(i + j + stride) = twisted;
-                        }
-                    }
-
-                    i += 2 * stride;
-                }
-
+    group.throughput(Throughput::Elements(n as u64));
+    group.bench_function(format!("Block16/fft_forward_scalar_{}", n), |bencher| {
+        bencher.iter_batched_ref(
+            || scalar_src.clone(),
+            |data| {
+                fft.forward_scalar(data).unwrap();
                 black_box(&data[0]);
-            })
-        },
-    );
+            },
+            BatchSize::LargeInput,
+        )
+    });
+
+    let packed_src: Vec<PackedFlat<Block16>> = (0..n)
+        .map(|_| {
+            let lanes: [Flat<Block16>; 8] =
+                core::array::from_fn(|_| Block16::from(rng.random::<u16>()).to_hardware());
+            Flat::<Block16>::pack(&lanes)
+        })
+        .collect();
+
+    group.throughput(Throughput::Elements((n * 8) as u64));
+    group.bench_function(format!("Block16/fft_forward_packed_{}x8", n), |bencher| {
+        bencher.iter_batched_ref(
+            || packed_src.clone(),
+            |data| {
+                fft.forward(data).unwrap();
+                black_box(&data[0]);
+            },
+            BatchSize::LargeInput,
+        )
+    });
 }
 
 // 4. Interpolate (Linear Combination subset)

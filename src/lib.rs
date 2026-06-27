@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // This file is part of the hekate-math project.
 // Copyright (C) 2026 Andrei Kochergin <andrei@oumuamua.dev>
-// Copyright (C) 2026 Oumuamua Labs <info@oumuamua.dev>. All rights reserved.
+// Copyright (C) 2026 Oumuamua Labs <info@oumuamua.dev>.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 
 extern crate alloc;
 
+mod algebra;
 mod field;
 mod towers;
 
@@ -26,8 +27,11 @@ mod constants;
 mod hardware;
 mod packable;
 
+pub mod fft;
 pub mod matrix;
 
+pub use algebra::BinaryFieldExtras;
+pub use fft::{AdditiveFft, CantorBasis, FftError};
 pub use field::*;
 pub use hardware::{Flat, FlatPromote, HardwareField};
 pub use packable::{PackableField, PackedFlat};

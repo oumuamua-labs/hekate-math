@@ -19,8 +19,8 @@
 use crate::towers::bit::Bit;
 use crate::towers::block8::Block8;
 use crate::{
-    CanonicalDeserialize, CanonicalSerialize, Flat, FlatPromote, HardwareField, PackableField,
-    PackedFlat, TowerField, constants,
+    BinaryFieldExtras, CanonicalDeserialize, CanonicalSerialize, Flat, FlatPromote, HardwareField,
+    PackableField, PackedFlat, TowerField, constants,
 };
 use core::ops::{Add, AddAssign, BitXor, BitXorAssign, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
@@ -462,8 +462,19 @@ impl HardwareField for Block16 {
 
     #[inline(always)]
     fn mul_hardware_scalar_packed(lhs: PackedFlat<Self>, rhs: Flat<Self>) -> PackedFlat<Self> {
-        let broadcasted = PackedBlock16([rhs.into_raw(); PACKED_WIDTH_16]);
-        Self::mul_hardware_packed(lhs, PackedFlat::from_raw(broadcasted))
+        #[cfg(target_arch = "aarch64")]
+        {
+            PackedFlat::from_raw(neon::mul_flat_scalar_packed_16(
+                lhs.into_raw(),
+                rhs.into_raw(),
+            ))
+        }
+
+        #[cfg(not(target_arch = "aarch64"))]
+        {
+            let broadcasted = PackedBlock16([rhs.into_raw(); PACKED_WIDTH_16]);
+            Self::mul_hardware_packed(lhs, PackedFlat::from_raw(broadcasted))
+        }
     }
 
     #[inline(always)]
@@ -507,6 +518,39 @@ impl FlatPromote<Block8> for Block16 {
     }
 }
 
+// ===================================
+// Binary Field Extras
+// ===================================
+
+impl BinaryFieldExtras for Block16 {
+    #[inline(always)]
+    fn square(&self) -> Self {
+        // char 2:
+        // (lo + hi·X)^2 = lo^2 + hi^2·X^2,
+        // no cross term.
+        let (lo, hi) = self.split();
+        let hi2 = hi.square();
+
+        Self::new(lo.square() + hi2 * Block8::EXTENSION_TAU, hi2)
+    }
+
+    #[inline(always)]
+    fn trace(&self) -> Bit {
+        Bit(((self.0 & constants::TRACE_MASK_16).count_ones() & 1) as u8)
+    }
+
+    #[inline(always)]
+    fn solve_quadratic(c: Self) -> Option<Self> {
+        match c.trace() {
+            Bit(0) => Some(Block16(map_ct_16(
+                c.0,
+                &constants::SOLVE_QUADRATIC_BASIS_16,
+            ))),
+            _ => None,
+        }
+    }
+}
+
 // ===========================================
 // UTILS
 // ===========================================
@@ -536,7 +580,6 @@ pub fn apply_matrix_16(val: Block16, table: &[u16; 512]) -> Block16 {
     Block16(res)
 }
 
-#[cfg(not(feature = "table-math"))]
 #[inline(always)]
 fn map_ct_16(x: u16, basis: &[u16; 16]) -> u16 {
     let mut acc = 0u16;
@@ -545,6 +588,7 @@ fn map_ct_16(x: u16, basis: &[u16; 16]) -> u16 {
     while i < 16 {
         let bit = (x >> i) & 1;
         let mask = 0u16.wrapping_sub(bit);
+
         acc ^= basis[i] & mask;
         i += 1;
     }
@@ -561,6 +605,9 @@ mod neon {
     use super::*;
     use core::arch::aarch64::*;
     use core::mem::transmute;
+
+    // Shifts 5,3,1,0 in reduce_packed_16 encode R = POLY_16 (0x2b)
+    const _: () = assert!(constants::POLY_16 == 0x2b, "packed fold hardcodes R = 0x2b");
 
     #[inline(always)]
     pub fn add_packed_16(lhs: PackedBlock16, rhs: PackedBlock16) -> PackedBlock16 {
@@ -614,22 +661,104 @@ mod neon {
         }
     }
 
-    /// Vectorized multiplication
-    /// for Block16 (8 elements at once).
-    /// Uses Vector Karatsuba +
-    /// Shift-XOR Reduction for 0x2B.
+    /// 8-wide GF(2^16) flat multiply, bit-identical
+    /// to eight scalar mul_flat_16 calls.
     #[inline(always)]
     pub fn mul_flat_packed_16(lhs: PackedBlock16, rhs: PackedBlock16) -> PackedBlock16 {
-        let r0 = mul_flat_16(lhs.0[0], rhs.0[0]);
-        let r1 = mul_flat_16(lhs.0[1], rhs.0[1]);
-        let r2 = mul_flat_16(lhs.0[2], rhs.0[2]);
-        let r3 = mul_flat_16(lhs.0[3], rhs.0[3]);
-        let r4 = mul_flat_16(lhs.0[4], rhs.0[4]);
-        let r5 = mul_flat_16(lhs.0[5], rhs.0[5]);
-        let r6 = mul_flat_16(lhs.0[6], rhs.0[6]);
-        let r7 = mul_flat_16(lhs.0[7], rhs.0[7]);
+        unsafe {
+            let a = transmute::<[Block16; 8], uint16x8_t>(lhs.0);
+            let b = transmute::<[Block16; 8], uint16x8_t>(rhs.0);
 
-        PackedBlock16([r0, r1, r2, r3, r4, r5, r6, r7])
+            let a_lo = vmovn_u16(a);
+            let a_hi = vmovn_u16(vshrq_n_u16(a, 8));
+            let b_lo = vmovn_u16(b);
+            let b_hi = vmovn_u16(vshrq_n_u16(b, 8));
+
+            let ll = transmute::<poly16x8_t, uint16x8_t>(vmull_p8(
+                transmute::<uint8x8_t, poly8x8_t>(a_lo),
+                transmute::<uint8x8_t, poly8x8_t>(b_lo),
+            ));
+
+            let hh = transmute::<poly16x8_t, uint16x8_t>(vmull_p8(
+                transmute::<uint8x8_t, poly8x8_t>(a_hi),
+                transmute::<uint8x8_t, poly8x8_t>(b_hi),
+            ));
+
+            let mm = transmute::<poly16x8_t, uint16x8_t>(vmull_p8(
+                transmute::<uint8x8_t, poly8x8_t>(veor_u8(a_lo, a_hi)),
+                transmute::<uint8x8_t, poly8x8_t>(veor_u8(b_lo, b_hi)),
+            ));
+
+            PackedBlock16(transmute::<uint16x8_t, [Block16; 8]>(reduce_packed_16(
+                ll, mm, hh,
+            )))
+        }
+    }
+
+    /// Hoists the scalar twiddle's lane-uniform byte split
+    /// out of the eight lanes; otherwise as mul_flat_packed_16.
+    #[inline(always)]
+    pub fn mul_flat_scalar_packed_16(lhs: PackedBlock16, scalar: Block16) -> PackedBlock16 {
+        unsafe {
+            let a = transmute::<[Block16; 8], uint16x8_t>(lhs.0);
+
+            let s_lo = (scalar.0 & 0xff) as u8;
+            let s_hi = (scalar.0 >> 8) as u8;
+
+            let b_lo = transmute::<uint8x8_t, poly8x8_t>(vdup_n_u8(s_lo));
+            let b_hi = transmute::<uint8x8_t, poly8x8_t>(vdup_n_u8(s_hi));
+            let b_mid = transmute::<uint8x8_t, poly8x8_t>(vdup_n_u8(s_lo ^ s_hi));
+
+            let a_lo = vmovn_u16(a);
+            let a_hi = vmovn_u16(vshrq_n_u16(a, 8));
+
+            let ll = transmute::<poly16x8_t, uint16x8_t>(vmull_p8(
+                transmute::<uint8x8_t, poly8x8_t>(a_lo),
+                b_lo,
+            ));
+
+            let hh = transmute::<poly16x8_t, uint16x8_t>(vmull_p8(
+                transmute::<uint8x8_t, poly8x8_t>(a_hi),
+                b_hi,
+            ));
+
+            let mm = transmute::<poly16x8_t, uint16x8_t>(vmull_p8(
+                transmute::<uint8x8_t, poly8x8_t>(veor_u8(a_lo, a_hi)),
+                b_mid,
+            ));
+
+            PackedBlock16(transmute::<uint16x8_t, [Block16; 8]>(reduce_packed_16(
+                ll, mm, hh,
+            )))
+        }
+    }
+
+    // Bit-identical to the scalar mul_flat_16 fold.
+    #[inline(always)]
+    fn reduce_packed_16(ll: uint16x8_t, mm: uint16x8_t, hh: uint16x8_t) -> uint16x8_t {
+        unsafe {
+            let mid = veorq_u16(veorq_u16(mm, ll), hh);
+            let l = veorq_u16(ll, vshlq_n_u16(mid, 8));
+            let h = veorq_u16(hh, vshrq_n_u16(mid, 8));
+
+            let h_fold = veorq_u16(
+                veorq_u16(vshlq_n_u16(h, 5), vshlq_n_u16(h, 3)),
+                veorq_u16(vshlq_n_u16(h, 1), h),
+            );
+
+            // h <= deg 14, so h*R spills <= 4 bits past bit 15.
+            let carry = veorq_u16(
+                veorq_u16(vshrq_n_u16(h, 11), vshrq_n_u16(h, 13)),
+                vshrq_n_u16(h, 15),
+            );
+
+            let carry_fold = veorq_u16(
+                veorq_u16(vshlq_n_u16(carry, 5), vshlq_n_u16(carry, 3)),
+                veorq_u16(vshlq_n_u16(carry, 1), carry),
+            );
+
+            veorq_u16(veorq_u16(l, h_fold), carry_fold)
+        }
     }
 }
 
@@ -637,6 +766,9 @@ mod neon {
 mod tests {
     use super::*;
     use rand::{RngExt, rng};
+
+    #[cfg(target_arch = "aarch64")]
+    use proptest::prelude::*;
 
     // ==================================
     // BASIC
@@ -976,6 +1108,36 @@ mod tests {
                     "Block16 tower_bit_from_hardware mismatch at x_flat={x_flat:#06x}, bit_idx={k}"
                 );
             }
+        }
+    }
+
+    // The NEON vmull_p8 path vs
+    // the scalar vmull_p64 path.
+    #[cfg(target_arch = "aarch64")]
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(65536))]
+
+        #[test]
+        fn neon_packed_eq_scalar(a in any::<[u16; 8]>(), b in any::<[u16; 8]>()) {
+            let pp = neon::mul_flat_packed_16(
+                PackedBlock16(a.map(Block16)),
+                PackedBlock16(b.map(Block16)),
+            );
+
+            let want: [Block16; 8] =
+                core::array::from_fn(|i| neon::mul_flat_16(Block16(a[i]), Block16(b[i])));
+
+            prop_assert_eq!(pp.0, want);
+        }
+
+        #[test]
+        fn neon_scalar_packed_eq_scalar(a in any::<[u16; 8]>(), s in any::<u16>()) {
+            let sp = neon::mul_flat_scalar_packed_16(PackedBlock16(a.map(Block16)), Block16(s));
+
+            let want: [Block16; 8] =
+                core::array::from_fn(|i| neon::mul_flat_16(Block16(a[i]), Block16(s)));
+
+            prop_assert_eq!(sp.0, want);
         }
     }
 }

@@ -67,6 +67,23 @@ impl Block8 {
     pub const fn new(val: u8) -> Self {
         Self(val)
     }
+
+    #[inline(always)]
+    pub fn square(self) -> Self {
+        // Carryless square (bit spread), then fold the
+        // high half twice by 0x1b (= x^4 + x^3 + x + 1).
+        let mut s = self.0 as u16;
+        s = (s | (s << 4)) & 0x0f0f;
+        s = (s | (s << 2)) & 0x3333;
+        s = (s | (s << 1)) & 0x5555;
+
+        let hi = s >> 8;
+        let s = (s & 0x00ff) ^ (hi ^ (hi << 1) ^ (hi << 3) ^ (hi << 4));
+
+        let hi = s >> 8;
+
+        Block8(((s & 0x00ff) ^ (hi ^ (hi << 1) ^ (hi << 3) ^ (hi << 4))) as u8)
+    }
 }
 
 impl TowerField for Block8 {
@@ -838,6 +855,14 @@ mod tests {
         // Example from the AES specification:
         // 0x57 * 0x83 = 0xC1
         assert_eq!(Block8(0x57) * Block8(0x83), Block8(0xC1));
+    }
+
+    #[test]
+    fn square_exhaustive() {
+        for i in 0u16..=255 {
+            let x = Block8(i as u8);
+            assert_eq!(x.square(), x * x, "Block8 square mismatch at {i:#04x}");
+        }
     }
 
     #[test]
