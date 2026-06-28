@@ -18,7 +18,7 @@ Designed for low-level cryptographic engineering, the crate is `no-std` compatib
 execution paths to mitigate side-channel attacks. It enforces strict type safety between canonical (tower) and
 polynomial (flat/hardware) representations.
 
-This is the mathematical core of the Hekate ZK Engine.
+This is the mathematical core of the [Hekate ZK Engine](https://github.com/oumuamua-labs/hekate).
 
 ## Performance Metrics
 
@@ -72,7 +72,7 @@ Benchmarks for `Block128` SpMV with fixed degree 16 (typical for Brakedown/Biniu
 
 ```toml
 [dependencies]
-hekate-math = "0.7.0"
+hekate-math = "0.8.0"
 ```
 
 ## Examples
@@ -200,35 +200,36 @@ fn example_simd() {
 
 ### Sparse Matrix-Vector Multiplication (SpMV)
 
-A core primitive for Brakedown, Binius, and linear-code based commitments. The engine efficiently
-promotes `u8` matrix weights to `Block128` on the fly using typed flat promotion (`FlatPromote`).
+A core primitive for Brakedown, Binius, and linear-code based commitments. `ByteSparseMatrix` holds
+binary weights (`0`/`1`) packed as `u8` and applies them to a hardware-basis vector by branch-gated
+XOR, no per-weight field multiply. The vector comes from any `VectorSource`, so dense slices and
+zero-allocation algorithmic generators share a single code path.
+
+Random expander sampling, drawing the matrix from a seed, lives in the consumer, not here: which
+oracle samples the code is a PCS soundness parameter, not field arithmetic.
 
 ```rust
 use hekate_math::matrix::ByteSparseMatrix;
-use hekate_math::{Block128, Flat, HardwareField, TowerField};
+use hekate_math::{Block128, Flat, HardwareField};
 
 fn example_spmv() {
-    let rows = 1 << 20; // 1 Million Rows
-    let cols = 1 << 20;
-    let degree = 16; // Expansion factor (non-zeros per row)
-    let seed = [42u8; 32];
+    // 2 rows, 3 cols, degree 2. Binary weights only.
+    // Row 0 = col0 + col2,  Row 1 = col1 + col0.
+    let weights = vec![1u8, 1, 1, 1];
+    let col_indices = vec![0, 2, 1, 0];
+    let matrix = ByteSparseMatrix::new(2, 3, 2, weights, col_indices);
 
-    // 1. Generate Expander Graph
-    // Weights are stored as u8 (1 byte)
-    // to minimize RAM usage.
-    let matrix = ByteSparseMatrix::generate_random(rows, cols, degree, seed);
+    // Input vector in the hardware (flat) basis.
+    let x0 = Block128::from(10u128).to_hardware();
+    let x1 = Block128::from(100u128).to_hardware();
+    let x2 = Block128::from(255u128).to_hardware();
+    let input: Vec<Flat<Block128>> = vec![x0, x1, x2];
 
-    // 2. Prepare Input Vector (Hardware Basis)
-    // Input must be in the flat basis
-    // for hardware acceleration.
-    let input: Vec<Flat<Block128>> = vec![Block128::ZERO.to_hardware(); cols];
-
-    // 3. Execute SpMV
-    // The engine handles lifting
-    // u8 -> Block128 implicitly.
     let output = matrix.spmv(input.as_slice());
 
-    assert_eq!(output.len(), rows);
+    // Addition in a binary field is XOR.
+    assert_eq!(output[0], x0 + x2);
+    assert_eq!(output[1], x1 + x0);
 }
 ```
 

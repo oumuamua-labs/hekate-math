@@ -78,6 +78,7 @@ impl<F: TowerField> Poly<F> {
                 break;
             }
         }
+
         Self { coeffs: c }
     }
 

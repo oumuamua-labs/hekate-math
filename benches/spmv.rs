@@ -21,6 +21,38 @@ use hekate_math::matrix::ByteSparseMatrix;
 use hekate_math::{Block128, Flat, HardwareField};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
+fn random_binary_matrix(
+    rows: usize,
+    cols: usize,
+    degree: usize,
+    seed: [u8; 32],
+) -> ByteSparseMatrix {
+    let mut rng = StdRng::from_seed(seed);
+    let mut weights = Vec::with_capacity(rows * degree);
+    let mut col_indices = Vec::with_capacity(rows * degree);
+
+    let mut used: Vec<u32> = Vec::with_capacity(degree);
+    for _ in 0..rows {
+        used.clear();
+
+        for _ in 0..degree {
+            let mut c;
+            loop {
+                c = rng.random_range(0..cols as u32);
+                if !used.contains(&c) {
+                    break;
+                }
+            }
+
+            used.push(c);
+            weights.push(1u8);
+            col_indices.push(c);
+        }
+    }
+
+    ByteSparseMatrix::new(rows, cols, degree, weights, col_indices)
+}
+
 /// Benchmark for Sparse Matrix-Vector Multiplication (SpMV).
 fn bench_spmv_block128(c: &mut Criterion) {
     let mut group = c.benchmark_group("spmv/block128");
@@ -42,7 +74,7 @@ fn bench_spmv_block128(c: &mut Criterion) {
         group.throughput(Throughput::Elements(ops));
 
         // Pre-generate matrix outside the benchmark loop
-        let matrix = ByteSparseMatrix::generate_random(size, size, degree, seed);
+        let matrix = random_binary_matrix(size, size, degree, seed);
 
         // Pre-generate input vector
         let mut rng = StdRng::seed_from_u64(42);
@@ -96,7 +128,7 @@ fn bench_spmv_sparsity(c: &mut Criterion) {
         let ops = (size * degree) as u64;
         group.throughput(Throughput::Elements(ops));
 
-        let matrix = ByteSparseMatrix::generate_random(size, size, degree, seed);
+        let matrix = random_binary_matrix(size, size, degree, seed);
 
         let mut rng = StdRng::seed_from_u64(42);
         let input: Vec<Flat<Block128>> = (0..size)
@@ -124,7 +156,7 @@ fn bench_spmv_conversion_overhead(c: &mut Criterion) {
     let degree = 16;
     let seed = [42u8; 32];
 
-    let matrix = ByteSparseMatrix::generate_random(size, size, degree, seed);
+    let matrix = random_binary_matrix(size, size, degree, seed);
     let ops = (size * degree) as u64;
     group.throughput(Throughput::Elements(ops));
 
@@ -170,7 +202,7 @@ fn bench_spmv_parallel(c: &mut Criterion) {
     let degree = 16;
     let seed = [42u8; 32];
 
-    let matrix = ByteSparseMatrix::generate_random(size, size, degree, seed);
+    let matrix = random_binary_matrix(size, size, degree, seed);
     let ops = (size * degree) as u64;
     group.throughput(Throughput::Elements(ops));
 
