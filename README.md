@@ -210,7 +210,7 @@ oracle samples the code is a PCS soundness parameter, not field arithmetic.
 
 ```rust
 use hekate_math::matrix::ByteSparseMatrix;
-use hekate_math::{Block128, Flat, HardwareField, TowerField};
+use hekate_math::{Block128, Flat, HardwareField};
 
 fn example_spmv() {
     // 2 rows, 3 cols, degree 2. Binary weights only.
@@ -220,11 +220,16 @@ fn example_spmv() {
     let matrix = ByteSparseMatrix::new(2, 3, 2, weights, col_indices);
 
     // Input vector in the hardware (flat) basis.
-    let input: Vec<Flat<Block128>> = vec![Block128::ZERO.to_hardware(); 3];
+    let x0 = Block128::from(10u128).to_hardware();
+    let x1 = Block128::from(100u128).to_hardware();
+    let x2 = Block128::from(255u128).to_hardware();
+    let input: Vec<Flat<Block128>> = vec![x0, x1, x2];
 
     let output = matrix.spmv(input.as_slice());
 
-    assert_eq!(output.len(), 2);
+    // Addition in a binary field is XOR.
+    assert_eq!(output[0], x0 + x2);
+    assert_eq!(output[1], x1 + x0);
 }
 ```
 
