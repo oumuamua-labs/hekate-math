@@ -462,7 +462,7 @@ fn gen_tables_128() {
 #[ignore]
 #[test]
 fn generate_all_iso_tables() {
-    println!("// Generated for build.rs:\\n");
+    println!("// Generated for build/main.rs:\\n");
 
     gen_tables_8();
     gen_tables_16();
