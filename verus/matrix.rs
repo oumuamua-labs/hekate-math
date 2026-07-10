@@ -12,9 +12,12 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
-//! Standalone Verus twin of production `process_chunk` (src/matrix.rs:250):
-//! proves the SpMV loop indexes in bounds and leaves no output slot uninit.
-//! `Flat<F>` is modeled as `u128`; field values don't affect memory safety.
+//! Memory-safety twin of production `process_chunk`/`spmv`:
+//! indexes in bounds, every slot initialized, writes confined
+//! to each chunk's range. `Flat<F>` is `u128`; values don't
+//! affect safety. Confinement stands in for the disjoint
+//! `&mut` subslices production uses; rayon's partition
+//! contract stays trusted (TRUSTED_AXIOMS.md).
 
 use core::mem::MaybeUninit;
 use vstd::prelude::*;
@@ -23,6 +26,7 @@ use vstd::slice::*;
 verus! {
 
 const LOOKAHEAD: usize = 8;
+const CHUNK_SIZE: usize = 1024;
 
 struct ByteSparseMatrix {
     rows: usize,
@@ -105,26 +109,46 @@ impl ByteSparseMatrix {
         }
     }
 
-    fn process_chunk(&self, start_row: usize, out_chunk: &mut [MaybeUninit<u128>], x: &Vec<u128>)
+    // Rows [start_row, start_row + chunk_len): every index read in bounds,
+    // every slot in the range initialized, no slot outside the range touched.
+    fn process_chunk(
+        &self,
+        start_row: usize,
+        chunk_len: usize,
+        y: &mut Vec<MaybeUninit<u128>>,
+        x: &Vec<u128>,
+    )
         requires
             self.well_formed(),
             x@.len() == self.cols,
-            start_row + old(out_chunk)@.len() <= self.rows,
+            old(y)@.len() == self.rows,
+            start_row + chunk_len <= self.rows,
         ensures
+            final(y)@.len() == old(y)@.len(),
             forall|k: int|
-                0 <= k < final(out_chunk)@.len() ==> (#[trigger] final(out_chunk)@[k]).mem_contents().is_init(),
+                start_row <= k < start_row + chunk_len
+                    ==> (#[trigger] final(y)@[k]).mem_contents().is_init(),
+            forall|k: int|
+                0 <= k < final(y)@.len() && (k < start_row || start_row + chunk_len <= k)
+                    ==> (#[trigger] final(y)@[k]) == old(y)@[k],
     {
-        let n = out_chunk.len();
+        let n = chunk_len;
         let mut i: usize = 0;
 
         while i < n
             invariant
-                n == out_chunk@.len(),
                 self.well_formed(),
                 x@.len() == self.cols,
+                y@.len() == self.rows,
+                n == chunk_len,
                 start_row + n <= self.rows,
+                i <= n,
                 forall|k: int|
-                    0 <= k < i ==> (#[trigger] out_chunk@[k]).mem_contents().is_init(),
+                    start_row <= k < start_row + i
+                        ==> (#[trigger] y@[k]).mem_contents().is_init(),
+                forall|k: int|
+                    0 <= k < y@.len() && (k < start_row || start_row + i <= k)
+                        ==> (#[trigger] y@[k]) == old(y)@[k],
             decreases n - i,
         {
             let row_idx = start_row + i;
@@ -138,14 +162,15 @@ impl ByteSparseMatrix {
             }
 
             self.scan_row(row_idx, x);
-            out_chunk[i] = MaybeUninit::new(0u128);
+            y[row_idx] = MaybeUninit::new(0u128);
 
             i += 1;
         }
     }
 
-    // Twin of spmv (src/matrix.rs:209): build uninitialized, fill every row,
-    // finalize. The chunked fill is flattened; chunk partitioning is trusted.
+    // The invariant proves production's enumerate() arithmetic:
+    // start_row == chunk_id * CHUNK_SIZE. Confinement makes
+    // chunk order irrelevant, covering the parallel path too.
     fn spmv(&self, x: &Vec<u128>) -> (r: Vec<u128>)
         requires
             self.well_formed(),
@@ -154,26 +179,36 @@ impl ByteSparseMatrix {
             r@.len() == self.rows,
     {
         let mut y = alloc_uninit(self.rows);
-        let mut i: usize = 0;
+        let mut chunk_id: usize = 0;
+        let mut start_row: usize = 0;
 
-        while i < self.rows
+        while start_row < self.rows
             invariant
-                y@.len() == self.rows,
                 self.well_formed(),
                 x@.len() == self.cols,
-                forall|k: int| 0 <= k < i ==> (#[trigger] y@[k]).mem_contents().is_init(),
-            decreases self.rows - i,
+                y@.len() == self.rows,
+                start_row == chunk_id * CHUNK_SIZE || start_row == self.rows,
+                forall|k: int|
+                    0 <= k < start_row ==> (#[trigger] y@[k]).mem_contents().is_init(),
+            decreases self.rows - start_row,
         {
-            self.scan_row(i, x);
-            y[i] = MaybeUninit::new(0u128);
-            i += 1;
+            let chunk_len = if CHUNK_SIZE < self.rows - start_row {
+                CHUNK_SIZE
+            } else {
+                self.rows - start_row
+            };
+
+            self.process_chunk(start_row, chunk_len, &mut y, x);
+
+            chunk_id += 1;
+            start_row += chunk_len;
         }
 
         assume_init_vec(y)
     }
 }
 
-// src/matrix.rs:216-223, with_capacity + set_len; `n` slots, uninitialized.
+// src/matrix.rs, with_capacity + set_len; `n` slots, uninitialized.
 #[verifier::external_body]
 fn alloc_uninit(n: usize) -> (v: Vec<MaybeUninit<u128>>)
     ensures
@@ -186,8 +221,8 @@ fn alloc_uninit(n: usize) -> (v: Vec<MaybeUninit<u128>>)
     v
 }
 
-// src/matrix.rs:326, from_raw_parts reinterpret; the `requires` is its
-// soundness condition, discharged by every caller.
+// src/matrix.rs, from_raw_parts reinterpret; the `requires`
+// is its soundness condition, discharged by every caller.
 #[verifier::external_body]
 fn assume_init_vec(v: Vec<MaybeUninit<u128>>) -> (r: Vec<u128>)
     requires
