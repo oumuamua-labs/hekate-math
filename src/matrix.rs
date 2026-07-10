@@ -17,6 +17,7 @@
 
 use crate::{Flat, HardwareField};
 use alloc::vec::Vec;
+#[cfg(not(miri))]
 use core::arch::asm;
 use core::mem::MaybeUninit;
 #[cfg(feature = "parallel")]
@@ -84,28 +85,32 @@ impl<F: Copy + Sync> VectorSource<F> for [F] {
     /// Explicit prefetching implementation using Inline ASM.
     #[inline(always)]
     fn prefetch(&self, indices: &[usize]) {
-        let base_ptr = self.as_ptr();
-        for &idx in indices {
-            unsafe {
-                let ptr = base_ptr.wrapping_add(idx) as *const u8;
+        #[cfg(not(miri))]
+        {
+            let base_ptr = self.as_ptr();
+            for &idx in indices {
+                unsafe {
+                    let ptr = base_ptr.wrapping_add(idx) as *const u8;
 
-                // Apple Silicon (M1/M2/M3) & ARM64
-                #[cfg(target_arch = "aarch64")]
-                asm!(
-                    "prfm pldl1keep, [{p}]",
-                    p = in(reg) ptr,
-                    options(nostack, preserves_flags, readonly)
-                );
+                    #[cfg(target_arch = "aarch64")]
+                    asm!(
+                        "prfm pldl1keep, [{p}]",
+                        p = in(reg) ptr,
+                        options(nostack, preserves_flags, readonly)
+                    );
 
-                // Intel/AMD x86_64
-                #[cfg(target_arch = "x86_64")]
-                asm!(
-                    "prefetcht0 [{p}]",
-                    p = in(reg) ptr,
-                    options(nostack, preserves_flags, readonly)
-                );
+                    #[cfg(target_arch = "x86_64")]
+                    asm!(
+                        "prefetcht0 [{p}]",
+                        p = in(reg) ptr,
+                        options(nostack, preserves_flags, readonly)
+                    );
+                }
             }
         }
+
+        #[cfg(miri)]
+        let _ = indices;
     }
 }
 
@@ -336,7 +341,7 @@ unsafe fn assume_init_vec<T>(mut v: Vec<MaybeUninit<T>>) -> Vec<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Block128, HardwareField};
+    use crate::{Bit, Block128, HardwareField};
     use alloc::vec;
 
     struct VirtualLinearSource {
@@ -365,6 +370,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn spmv_with_virtual_source() {
         // Scenario: Multiply matrix by a
         // "Virtual" vector without allocation.
@@ -395,6 +401,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn byte_sparse_matrix_spmv() {
         // 2 rows, 3 cols, degree 2,
         // binary weights only.
@@ -465,5 +472,22 @@ mod tests {
     #[should_panic(expected = "binary weights")]
     fn rejects_non_binary_weights() {
         ByteSparseMatrix::new(1, 2, 2, vec![1, 3], vec![0, 1]);
+    }
+
+    #[test]
+    fn spmv_bit_memory_safety() {
+        let (rows, cols, degree) = (16usize, 2usize, 2usize);
+        let weights = vec![1u8; rows * degree];
+        let col_indices: Vec<u32> = (0..rows * degree).map(|k| (k % cols) as u32).collect();
+        let matrix = ByteSparseMatrix::new(rows, cols, degree, weights, col_indices);
+
+        let x = vec![Bit::new(1).to_hardware(), Bit::new(0).to_hardware()];
+        let y = matrix.spmv(x.as_slice());
+
+        assert_eq!(y.len(), rows);
+
+        for yi in &y {
+            assert_eq!(*yi, Bit::new(1).to_hardware());
+        }
     }
 }
