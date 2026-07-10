@@ -28,7 +28,7 @@ fn trace_via_squaring<F: BinaryFieldExtras>(x: F) -> Bit {
         p = p.square();
     }
 
-    Bit((acc == F::ONE) as u8)
+    Bit::new((acc == F::ONE) as u8)
 }
 
 #[test]
@@ -87,7 +87,7 @@ fn block16_trace_in_gf2_and_additive() {
     for v in 0u16..=u16::MAX {
         let t = Block16(v).trace();
         assert!(
-            t == Bit(0) || t == Bit(1),
+            t == Bit::ZERO || t == Bit::ONE,
             "trace escaped GF(2) at {v:#06x}"
         );
     }
@@ -97,7 +97,7 @@ fn block16_trace_in_gf2_and_additive() {
             let x = Block16(a);
             let y = Block16(b);
 
-            assert_eq!((x + y).trace(), Bit(x.trace().0 ^ y.trace().0));
+            assert_eq!((x + y).trace(), Bit::new(x.trace().get() ^ y.trace().get()));
         }
     }
 }
@@ -115,7 +115,7 @@ fn block16_trace_frobenius_invariant() {
 
     assert_eq!(
         Block16::ONE.trace(),
-        Bit(0),
+        Bit::ZERO,
         "Tr(1) must vanish for GF(2^16)"
     );
 }
@@ -142,9 +142,9 @@ fn block16_solve_quadratic_roundtrip() {
 
                 let other = r + Block16::ONE;
                 assert_eq!(other * other + other, c, "second root invalid at {v:#06x}");
-                assert_eq!(c.trace(), Bit(0), "solved c with Tr != 0 at {v:#06x}");
+                assert_eq!(c.trace(), Bit::ZERO, "solved c with Tr != 0 at {v:#06x}");
             }
-            None => assert_eq!(c.trace(), Bit(1), "rejected solvable c at {v:#06x}"),
+            None => assert_eq!(c.trace(), Bit::ONE, "rejected solvable c at {v:#06x}"),
         }
     }
 }
@@ -158,7 +158,7 @@ fn block16_solve_quadratic_iff_trace_zero() {
 
         assert_eq!(
             ok,
-            c.trace() == Bit(0),
+            c.trace() == Bit::ZERO,
             "solvability != (Tr == 0) at {v:#06x}"
         );
 

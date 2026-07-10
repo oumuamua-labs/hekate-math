@@ -68,6 +68,27 @@ fn bit_serialization() {
     // Deserialize check
     let rec_one = Bit::deserialize(&[1]).expect("Failed to deserialize Bit(1)");
     assert_eq!(rec_one, one);
+
+    // Bytes outside GF(2) must not deserialize into a Bit.
+    assert!(Bit::deserialize(&[2]).is_err());
+    assert!(Bit::deserialize(&[0xFF]).is_err());
+}
+
+#[test]
+fn bit_serde_enforces_gf2_invariant() {
+    use serde::de::IntoDeserializer;
+    use serde::de::value::{Error, U8Deserializer};
+
+    fn from_u8(v: u8) -> Result<Bit, Error> {
+        let de: U8Deserializer<Error> = v.into_deserializer();
+        <Bit as serde::Deserialize>::deserialize(de)
+    }
+
+    assert_eq!(from_u8(0).unwrap(), Bit::ZERO);
+    assert_eq!(from_u8(1).unwrap(), Bit::ONE);
+
+    assert!(from_u8(2).is_err(), "serde admitted Bit(2)");
+    assert!(from_u8(0xFF).is_err(), "serde admitted Bit(255)");
 }
 
 #[test]
