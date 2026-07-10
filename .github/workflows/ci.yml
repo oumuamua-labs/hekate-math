@@ -6,8 +6,14 @@ on:
     branches: [ main ]
 jobs:
   test:
-    name: CI checks
-    runs-on: ubuntu-latest
+    name: CI checks (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # arm: production NEON paths;
+        # x86: software-fallback paths.
+        os: [ubuntu-24.04-arm, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
 
@@ -28,12 +34,31 @@ jobs:
         run: cargo test --all-features --release
 
       - name: Install cargo-audit and cargo-deny
+        if: matrix.os == 'ubuntu-24.04-arm'
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit, cargo-deny
 
       - name: Cargo audit
+        if: matrix.os == 'ubuntu-24.04-arm'
         run: cargo audit
 
       - name: Cargo deny check
+        if: matrix.os == 'ubuntu-24.04-arm'
         run: cargo deny check
+
+  miri:
+    name: Miri SpMV memory safety
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Miri SpMV
+        run: cargo miri test spmv
