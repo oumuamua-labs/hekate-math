@@ -30,8 +30,13 @@ const CHUNK_SIZE: usize = 1024;
 /// Min rows to trigger Rayon.
 /// Binary XOR is too fast to justify
 /// thread sync overhead below 32k.
-#[cfg(feature = "parallel")]
+#[cfg(all(feature = "parallel", not(miri)))]
 const PARALLEL_THRESHOLD: usize = 32768;
+
+/// Miri-sized: two chunks, small
+/// enough to interpret.
+#[cfg(all(feature = "parallel", miri))]
+const PARALLEL_THRESHOLD: usize = 2 * CHUNK_SIZE;
 
 /// 8 rows ahead keeps the memory
 /// controller saturated during
@@ -483,6 +488,31 @@ mod tests {
 
         let x = vec![Bit::new(1).to_hardware(), Bit::new(0).to_hardware()];
         let y = matrix.spmv(x.as_slice());
+
+        assert_eq!(y.len(), rows);
+
+        for yi in &y {
+            assert_eq!(*yi, Bit::new(1).to_hardware());
+        }
+    }
+
+    /// Two real threads: Miri's race detector
+    /// watches the actual rayon dispatch.
+    #[test]
+    #[cfg(feature = "parallel")]
+    fn spmv_parallel_bit_memory_safety() {
+        let (rows, cols, degree) = (PARALLEL_THRESHOLD, 2usize, 2usize);
+        let weights = vec![1u8; rows * degree];
+        let col_indices: Vec<u32> = (0..rows * degree).map(|k| (k % cols) as u32).collect();
+        let matrix = ByteSparseMatrix::new(rows, cols, degree, weights, col_indices);
+
+        let x = vec![Bit::new(1).to_hardware(), Bit::new(0).to_hardware()];
+
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .unwrap();
+        let y = pool.install(|| matrix.spmv(x.as_slice()));
 
         assert_eq!(y.len(), rows);
 
