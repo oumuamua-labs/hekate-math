@@ -204,7 +204,7 @@ impl From<u128> for Block64 {
 impl From<Bit> for Block64 {
     #[inline(always)]
     fn from(val: Bit) -> Self {
-        Self(val.0 as u64)
+        Self(val.get() as u64)
     }
 }
 

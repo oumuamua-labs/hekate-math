@@ -210,7 +210,7 @@ impl From<u128> for Block32 {
 impl From<Bit> for Block32 {
     #[inline(always)]
     fn from(val: Bit) -> Self {
-        Self(val.0 as u32)
+        Self(val.get() as u32)
     }
 }
 

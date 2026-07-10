@@ -215,7 +215,7 @@ impl From<u128> for Block16 {
 impl From<Bit> for Block16 {
     #[inline(always)]
     fn from(val: Bit) -> Self {
-        Self(val.0 as u16)
+        Self(val.get() as u16)
     }
 }
 
@@ -536,17 +536,18 @@ impl BinaryFieldExtras for Block16 {
 
     #[inline(always)]
     fn trace(&self) -> Bit {
-        Bit(((self.0 & constants::TRACE_MASK_16).count_ones() & 1) as u8)
+        Bit::new(((self.0 & constants::TRACE_MASK_16).count_ones() & 1) as u8)
     }
 
     #[inline(always)]
     fn solve_quadratic(c: Self) -> Option<Self> {
-        match c.trace() {
-            Bit(0) => Some(Block16(map_ct_16(
+        if c.trace() == Bit::ZERO {
+            Some(Block16(map_ct_16(
                 c.0,
                 &constants::SOLVE_QUADRATIC_BASIS_16,
-            ))),
-            _ => None,
+            )))
+        } else {
+            None
         }
     }
 }
