@@ -60,5 +60,8 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Miri SpMV
-        run: cargo miri test spmv
+      - name: Miri SpMV (sequential)
+        run: cargo miri test spmv_bit
+
+      - name: Miri SpMV (parallel)
+        run: MIRIFLAGS="-Zmiri-disable-stacked-borrows -Zmiri-ignore-leaks" cargo miri test spmv_parallel
