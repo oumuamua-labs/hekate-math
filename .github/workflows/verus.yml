@@ -1,0 +1,62 @@
+name: Verus Proofs
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  VERUS_VERSION: "0.2026.07.05.49b8806"
+
+jobs:
+  verify:
+    name: Verus verification
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Cache Verus toolchain
+        id: cache-verus
+        uses: actions/cache@v4
+        with:
+          path: verus-toolchain
+          key: verus-${{ env.VERUS_VERSION }}-x86-linux
+
+      - name: Download Verus
+        if: steps.cache-verus.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          url="https://github.com/verus-lang/verus/releases/download/release/${VERUS_VERSION}/verus-${VERUS_VERSION}-x86-linux.zip"
+          echo "Downloading $url"
+          curl -fSL "$url" -o verus.zip
+          mkdir -p verus-toolchain
+          unzip -q verus.zip -d verus-toolchain
+          rm verus.zip
+
+      - name: Locate verus binary
+        id: verus-bin
+        run: |
+          set -euo pipefail
+          bin="$(find "$PWD/verus-toolchain" -type f -name verus | head -n1)"
+          test -n "$bin" || { echo "verus binary not found under verus-toolchain/"; exit 1; }
+          chmod +x "$bin"
+          echo "bin=$bin" >> "$GITHUB_OUTPUT"
+          "$bin" --version
+
+      - name: Verify proofs
+        run: |
+          set -uo pipefail
+          verus="${{ steps.verus-bin.outputs.bin }}"
+          fail=0
+          for f in verus/*.rs; do
+            echo "::group::verus $f"
+            if "$verus" "$f"; then
+              echo "PASS  $f"
+            else
+              echo "::error file=$f::Verus verification failed"
+              fail=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$fail"
