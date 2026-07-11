@@ -20,7 +20,7 @@ use hekate_math::{
     AdditiveFft, BinaryFieldExtras, Block16, CantorBasis, FftError, Flat, HardwareField,
     PackableField, PackedFlat, TowerField,
 };
-use rand::{RngExt, rng};
+use rand::{RngExt, SeedableRng, rng, rngs::StdRng};
 
 fn eval_point(j: usize) -> Block16 {
     let mut acc = Block16::ZERO;
@@ -63,6 +63,57 @@ fn horner_eval(coeffs: &[Block16], x: Block16, log_n: u32) -> Block16 {
     }
 
     acc
+}
+
+fn lanewise_differential(
+    seed: u64,
+    packed_op: impl Fn(&AdditiveFft<Block16>, &mut [PackedFlat<Block16>]) -> Result<(), FftError>,
+    scalar_op: impl Fn(&AdditiveFft<Block16>, &mut [Flat<Block16>]) -> Result<(), FftError>,
+    label: &str,
+) {
+    const WIDTH: usize = 8;
+    assert_eq!(<Flat<Block16> as PackableField>::WIDTH, WIDTH);
+
+    for log_n in [1u32, 3, 6, 10] {
+        let n = 1usize << log_n;
+        let fft = AdditiveFft::<Block16>::new(log_n);
+
+        let mut r = StdRng::seed_from_u64(seed ^ u64::from(log_n));
+
+        let cols: Vec<Vec<Flat<Block16>>> = (0..WIDTH)
+            .map(|_| {
+                (0..n)
+                    .map(|_| Flat::from_raw(Block16(r.random())))
+                    .collect()
+            })
+            .collect();
+
+        let mut packed: Vec<PackedFlat<Block16>> = (0..n)
+            .map(|k| {
+                let lanes: [Flat<Block16>; WIDTH] = core::array::from_fn(|l| cols[l][k]);
+                <Flat<Block16> as PackableField>::pack(&lanes)
+            })
+            .collect();
+
+        packed_op(&fft, &mut packed).unwrap();
+
+        let mut cols_ref = cols;
+        for col in cols_ref.iter_mut() {
+            scalar_op(&fft, col).unwrap();
+        }
+
+        for (k, pk) in packed.iter().enumerate() {
+            let mut out = [Flat::<Block16>::default(); WIDTH];
+            <Flat<Block16> as PackableField>::unpack(*pk, &mut out);
+
+            for (l, lane) in out.iter().enumerate() {
+                assert_eq!(
+                    *lane, cols_ref[l][k],
+                    "{label}: packed != scalar at log_n={log_n}, k={k}, lane={l}"
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -418,6 +469,50 @@ fn additive_fft_new_rejects_above_field_bits() {
 #[should_panic]
 fn cantor_beta_tower_out_of_range_panics() {
     let _ = CantorBasis::beta_tower(CantorBasis::DIM);
+}
+
+#[test]
+fn additive_fft_lanewise_forward() {
+    lanewise_differential(
+        0x5eed_f0f0_0001,
+        |fft, data| fft.forward(data),
+        |fft, col| fft.forward_scalar(col),
+        "forward",
+    );
+}
+
+#[test]
+fn additive_fft_lanewise_inverse() {
+    lanewise_differential(
+        0x5eed_f0f0_0002,
+        |fft, data| fft.inverse(data),
+        |fft, col| fft.inverse_scalar(col),
+        "inverse",
+    );
+}
+
+#[test]
+fn additive_fft_lanewise_forward_coset() {
+    let offset = Flat::from_raw(Block16(0xB2C7));
+
+    lanewise_differential(
+        0x5eed_f0f0_0003,
+        move |fft, data| fft.forward_coset(data, offset),
+        move |fft, col| fft.forward_coset_scalar(col, offset),
+        "forward_coset",
+    );
+}
+
+#[test]
+fn additive_fft_lanewise_inverse_coset() {
+    let offset = Flat::from_raw(Block16(0x39D4));
+
+    lanewise_differential(
+        0x5eed_f0f0_0004,
+        move |fft, data| fft.inverse_coset(data, offset),
+        move |fft, col| fft.inverse_coset_scalar(col, offset),
+        "inverse_coset",
+    );
 }
 
 #[test]
