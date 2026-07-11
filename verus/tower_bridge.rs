@@ -18,10 +18,10 @@
 use vstd::prelude::*;
 
 #[path = "gf_model.rs"]
-mod gf_model;
+pub mod gf_model;
 
 #[path = "block256.rs"]
-mod b256;
+pub mod b256;
 
 use b256::b128::b64::b32::b16::b8::{clmul8, reduce8, schoolbook8};
 use b256::b128::b64::b32::b16::schoolbook16;
@@ -74,7 +74,7 @@ proof fn clmul8_rec(a: u8, b: u8)
 }
 
 // gf_model::xor on 16-bit values is native ^.
-proof fn xor16(x: u16, y: u16)
+pub proof fn xor16(x: u16, y: u16)
     ensures gf_model::xor(x as nat, y as nat) == (x ^ y) as nat
     decreases x as nat + y as nat
 {
@@ -373,7 +373,7 @@ proof fn pack16(l: u8, h: u8)
 
 // Lift 8 -> 16: schoolbook16's four base multiplies and its pack are gf_mul_tower's,
 // via bridge8 on each sub-product (tau_tower(8) = 0x20), xor8 on the combines, pack16.
-proof fn bridge16(a: u16, b: u16)
+pub proof fn bridge16(a: u16, b: u16)
     ensures schoolbook16(a, b) as nat == gf_mul_tower(a as nat, b as nat, 16),
 {
     let a0 = (a & 0xff) as u8;

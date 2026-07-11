@@ -1245,6 +1245,66 @@ fn verify_norm_anisotropy() {
     );
 }
 
+// Build-time discharge of gf_model.rs::frobenius_order_gen:
+// e_i^(2^m) = e_i for every single-bit generator of GF(2^m),
+// squaring through the same shared gf_oracle::schoolbook*.
+fn verify_frobenius_order() {
+    for i in 0..8 {
+        let e = 1u8 << i;
+
+        let mut p = e;
+        for _ in 0..8 {
+            p = gf_oracle::sb8(p, p);
+        }
+
+        assert_eq!(p, e, "GF(2^8): e_{i} not fixed by x^(2^8)");
+    }
+
+    for i in 0..16 {
+        let e = 1u16 << i;
+
+        let mut p = e;
+        for _ in 0..16 {
+            p = gf_oracle::schoolbook16(p, p);
+        }
+
+        assert_eq!(p, e, "GF(2^16): e_{i} not fixed by x^(2^16)");
+    }
+
+    for i in 0..32 {
+        let e = 1u32 << i;
+
+        let mut p = e;
+        for _ in 0..32 {
+            p = gf_oracle::schoolbook32(p, p);
+        }
+
+        assert_eq!(p, e, "GF(2^32): e_{i} not fixed by x^(2^32)");
+    }
+
+    for i in 0..64 {
+        let e = 1u64 << i;
+
+        let mut p = e;
+        for _ in 0..64 {
+            p = gf_oracle::schoolbook64(p, p);
+        }
+
+        assert_eq!(p, e, "GF(2^64): e_{i} not fixed by x^(2^64)");
+    }
+
+    for i in 0..128 {
+        let e = 1u128 << i;
+
+        let mut p = e;
+        for _ in 0..128 {
+            p = gf_oracle::schoolbook128(p, p);
+        }
+
+        assert_eq!(p, e, "GF(2^128): e_{i} not fixed by x^(2^128)");
+    }
+}
+
 fn write_algebra_extras_16(file: &mut File) {
     // FIPS-197 §4.2 worked example pins POLY_8.
     assert_eq!(gf8_mul(0x57, 0x83), 0xc1, "gf8_mul is not the AES field");
@@ -1353,6 +1413,23 @@ fn write_algebra_extras_16(file: &mut File) {
         }
     }
 
+    // The FFT applies sigma in the flat basis; pin the chain
+    // there too, independent of the isomorphism transport.
+    let mut prev_flat = apply_16(cantor_tower[0], &TOWER_TO_FLAT_16);
+    assert_eq!(prev_flat, 1, "flat Cantor basis must start at 1");
+
+    for &beta in cantor_tower.iter().skip(1) {
+        let bf = apply_16(beta, &TOWER_TO_FLAT_16);
+
+        assert_eq!(
+            flat_sq_16(bf) ^ bf,
+            prev_flat,
+            "flat Cantor chain broken: sigma_flat(beta_i) != beta_(i-1)"
+        );
+
+        prev_flat = bf;
+    }
+
     write_raw_16(file, "CANTOR_BASIS_TOWER_16", &cantor_tower);
 }
 
@@ -1363,6 +1440,7 @@ fn main() {
     verify_isomorphism_64();
     verify_isomorphism_128();
     verify_norm_anisotropy();
+    verify_frobenius_order();
 
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("generated_constants.rs");

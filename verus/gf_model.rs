@@ -268,13 +268,13 @@ pub proof fn xor_comm(a: nat, b: nat)
     }
 }
 
-proof fn xor_assoc(a: nat, b: nat, c: nat)
+pub proof fn xor_assoc(a: nat, b: nat, c: nat)
     ensures xor(xor(a, b), c) == xor(a, xor(b, c))
 {
     gf_add_assoc(a, b, c);
 }
 
-proof fn xor_zero(a: nat)
+pub proof fn xor_zero(a: nat)
     ensures xor(a, 0) == a, xor(0, a) == a
     decreases a
 {
@@ -318,7 +318,7 @@ pub proof fn clmul_shift_r(a: nat, b: nat)
     }
 }
 
-proof fn xor_self(a: nat)
+pub proof fn xor_self(a: nat)
     ensures xor(a, a) == 0
     decreases a
 {
@@ -330,7 +330,7 @@ proof fn xor_self(a: nat)
     }
 }
 
-proof fn xor_rearrange4(a: nat, b: nat, c: nat, d: nat)
+pub proof fn xor_rearrange4(a: nat, b: nat, c: nat, d: nat)
     ensures xor(xor(a, b), xor(c, d)) == xor(xor(a, c), xor(b, d))
 {
     xor_assoc(a, b, xor(c, d));
@@ -483,7 +483,7 @@ proof fn clmul_assoc(a: nat, b: nat, c: nat)
 // Degree / value bridge
 // ============================================================
 
-proof fn pow2_pos(n: nat)
+pub proof fn pow2_pos(n: nat)
     ensures pow2(n) >= 1
     decreases n
 {
@@ -586,7 +586,7 @@ proof fn xor_eq_zero(a: nat, b: nat)
     }
 }
 
-proof fn deg_xor_lt(a: nat, b: nat, d: nat)
+pub proof fn deg_xor_lt(a: nat, b: nat, d: nat)
     requires deg(a) < d, deg(b) < d
     ensures deg(xor(a, b)) < d
     decreases a + b
@@ -1864,6 +1864,270 @@ pub proof fn linear_determined_field(
         assert(f(xor(x2, pow2(d))) == xor(f(x2), f(pow2(d))));
         assert(g(xor(x2, pow2(d))) == xor(g(x2), g(pow2(d))));
     }
+}
+
+// ============================================================
+// Squaring: additive in char 2
+// (a+b)^2 == a^2 + b^2, cross terms cancel
+// ============================================================
+
+pub proof fn gf_sq_additive(a: nat, b: nat, k: nat)
+    requires k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
+    ensures gf_mul(xor(a, b), xor(a, b), k) == xor(gf_mul(a, a, k), gf_mul(b, b, k))
+{
+    let s = xor(a, b);
+
+    gf_distrib(s, a, b, k);
+    gf_mul_comm(s, a, k);
+    gf_distrib(a, a, b, k);
+    gf_mul_comm(s, b, k);
+    gf_distrib(b, a, b, k);
+
+    let aa = gf_mul(a, a, k);
+    let ab = gf_mul(a, b, k);
+    let bb = gf_mul(b, b, k);
+
+    gf_mul_comm(a, b, k);
+
+    assert(gf_mul(s, s, k) == xor(xor(aa, ab), xor(ab, bb)));
+
+    xor_comm(ab, bb);
+    xor_rearrange4(aa, ab, bb, ab);
+    xor_self(ab);
+    xor_zero(xor(aa, bb));
+}
+
+pub proof fn gf_mul_tower_sq_additive(a: nat, b: nat, k: nat)
+    requires k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
+    ensures
+        gf_mul_tower(xor(a, b), xor(a, b), k)
+            == xor(gf_mul_tower(a, a, k), gf_mul_tower(b, b, k))
+{
+    let s = xor(a, b);
+
+    gf_mul_tower_distrib_r(s, a, b, k);
+    gf_mul_tower_distrib_l(a, b, a, k);
+    gf_mul_tower_distrib_l(a, b, b, k);
+
+    let aa = gf_mul_tower(a, a, k);
+    let ab = gf_mul_tower(a, b, k);
+    let bb = gf_mul_tower(b, b, k);
+
+    gf_mul_tower_comm(a, b, k);
+
+    assert(gf_mul_tower(s, s, k) == xor(xor(aa, ab), xor(ab, bb)));
+
+    xor_comm(ab, bb);
+    xor_rearrange4(aa, ab, bb, ab);
+    xor_self(ab);
+    xor_zero(xor(aa, bb));
+}
+
+// Diagonal of the tower unfold: the cross terms are
+// equal and cancel, squaring never mixes the halves.
+pub proof fn gf_mul_tower_square_unfold(a: nat, k: nat)
+    requires k == 16 || k == 32 || k == 64 || k == 128 || k == 256,
+    ensures ({
+        let m = (k / 2) as nat;
+        let a0 = lo_half(a, k);
+        let a1 = hi_half(a, k);
+        let sq1 = gf_mul_tower(a1, a1, m);
+
+        gf_mul_tower(a, a, k)
+            == xor(gf_mul_tower(a0, a0, m), gf_mul_tower(sq1, tau_tower(m), m))
+                + pow2(m) * sq1
+    })
+{
+    let m = (k / 2) as nat;
+    let a0 = lo_half(a, k);
+    let a1 = hi_half(a, k);
+
+    gf_mul_tower_unfold(a, a, k);
+    gf_mul_tower_comm(a0, a1, m);
+
+    let cross = gf_mul_tower(a0, a1, m);
+    let sq1 = gf_mul_tower(a1, a1, m);
+
+    xor_self(cross);
+    xor_zero(sq1);
+
+    assert(thi(a0, a1, a0, a1, m) == sq1);
+}
+
+// ============================================================
+// Frobenius order and trace
+// x^(2^k) == x on GF(2^k); Tr(x)^2 == Tr(x)
+// ============================================================
+
+// e-fold tower squaring: x^(2^e).
+pub open spec fn pow_2exp(x: nat, e: nat, k: nat) -> nat
+    decreases e
+{
+    if e == 0 {
+        x
+    } else {
+        let p = pow_2exp(x, (e - 1) as nat, k);
+        gf_mul_tower(p, p, k)
+    }
+}
+
+// Absolute trace over GF(2): sum of the first n
+// Frobenius iterates, Tr = trace_spec(x, k, k).
+pub open spec fn trace_spec(x: nat, n: nat, k: nat) -> nat
+    decreases n
+{
+    if n == 0 {
+        0
+    } else {
+        xor(trace_spec(x, (n - 1) as nat, k), pow_2exp(x, (n - 1) as nat, k))
+    }
+}
+
+pub proof fn pow_2exp_additive(u: nat, v: nat, e: nat, k: nat)
+    requires k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
+    ensures pow_2exp(xor(u, v), e, k) == xor(pow_2exp(u, e, k), pow_2exp(v, e, k))
+    decreases e
+{
+    if e == 0 {
+    } else {
+        pow_2exp_additive(u, v, (e - 1) as nat, k);
+        gf_mul_tower_sq_additive(
+            pow_2exp(u, (e - 1) as nat, k),
+            pow_2exp(v, (e - 1) as nat, k),
+            k,
+        );
+    }
+}
+
+pub proof fn pow_2exp_add(x: nat, e1: nat, e2: nat, k: nat)
+    ensures pow_2exp(x, e1 + e2, k) == pow_2exp(pow_2exp(x, e1, k), e2, k)
+    decreases e2
+{
+    if e2 == 0 {
+    } else {
+        pow_2exp_add(x, e1, (e2 - 1) as nat, k);
+        assert(e1 + e2 - 1 == e1 + (e2 - 1));
+    }
+}
+
+// The 2^k-power map fixes every single-bit generator: out of
+// Z3's reach (Lagrange over GF(2^k)), discharged exhaustively
+// on the real field by build/main.rs::verify_frobenius_order
+// at every cargo build. Trusted axiom.
+#[verifier::external_body]
+pub proof fn frobenius_order_gen(i: nat, k: nat)
+    requires
+        k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
+        i < k,
+    ensures pow_2exp(pow2(i), k, k) == pow2(i)
+{}
+
+// x^(2^k) == x for every field element: the generator axiom
+// extends over GF(2)-linearity (squaring is additive).
+pub proof fn frobenius_order(x: nat, k: nat)
+    requires
+        k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
+        in_field(x, k),
+    ensures pow_2exp(x, k, k) == x
+{
+    let f = |y: nat| pow_2exp(y, k, k);
+    let g = |y: nat| y;
+
+    assert forall|u: nat, v: nat| in_field(u, k) && in_field(v, k)
+        implies #[trigger] f(xor(u, v)) == xor(f(u), f(v)) by {
+        pow_2exp_additive(u, v, k, k);
+    }
+
+    assert forall|u: nat, v: nat| in_field(u, k) && in_field(v, k)
+        implies #[trigger] g(xor(u, v)) == xor(g(u), g(v)) by {
+    }
+
+    assert forall|i: nat| i < k implies #[trigger] f(pow2(i)) == g(pow2(i)) by {
+        frobenius_order_gen(i, k);
+    }
+
+    linear_determined_field(f, g, x, k);
+}
+
+// Justifies production frobenius's `k % BITS` reduction.
+pub proof fn frobenius_mod_cycle(x: nat, e: nat, k: nat)
+    requires
+        k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
+        in_field(x, k),
+    ensures pow_2exp(x, e, k) == pow_2exp(x, (e % k) as nat, k)
+    decreases e
+{
+    if e < k {
+        assert(e % k == e);
+    } else {
+        pow_2exp_add(x, k, (e - k) as nat, k);
+        frobenius_order(x, k);
+        frobenius_mod_cycle(x, (e - k) as nat, k);
+
+        assert(((e - k) as nat) % k == e % k) by (nonlinear_arith)
+            requires e >= k, k > 0;
+    }
+}
+
+proof fn trace_sq_shift(x: nat, n: nat, k: nat)
+    requires k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
+    ensures ({
+        let t = trace_spec(x, n, k);
+        gf_mul_tower(t, t, k) == xor(trace_spec(x, n + 1, k), x)
+    })
+    decreases n
+{
+    if n == 0 {
+        gf_mul_tower_zero_l(0, k);
+        xor_zero(x);
+        xor_self(x);
+        xor_comm(0, x);
+
+        assert(trace_spec(x, 0, k) == 0);
+        assert(trace_spec(x, 1, k) == xor(0, pow_2exp(x, 0, k)));
+    } else {
+        trace_sq_shift(x, (n - 1) as nat, k);
+
+        let t = trace_spec(x, (n - 1) as nat, k);
+        let p = pow_2exp(x, (n - 1) as nat, k);
+
+        gf_mul_tower_sq_additive(t, p, k);
+
+        let sq_t = gf_mul_tower(t, t, k);
+        let sq_p = gf_mul_tower(p, p, k);
+
+        assert(sq_p == pow_2exp(x, n, k));
+        assert(sq_t == xor(trace_spec(x, n, k), x));
+
+        xor_comm(trace_spec(x, n, k), x);
+        xor_assoc(x, trace_spec(x, n, k), sq_p);
+        xor_comm(x, xor(trace_spec(x, n, k), sq_p));
+
+        assert(trace_spec(x, n + 1, k) == xor(trace_spec(x, n, k), sq_p));
+    }
+}
+
+// Tr(x)^2 == Tr(x): the trace lands in the
+// Frobenius-fixed subfield GF(2).
+pub proof fn trace_idempotent(x: nat, k: nat)
+    requires
+        k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
+        in_field(x, k),
+    ensures ({
+        let t = trace_spec(x, k, k);
+        gf_mul_tower(t, t, k) == t
+    })
+{
+    trace_sq_shift(x, k, k);
+    frobenius_order(x, k);
+
+    let t = trace_spec(x, k, k);
+
+    assert(trace_spec(x, k + 1, k) == xor(t, x));
+
+    xor_assoc(t, x, x);
+    xor_self(x);
+    xor_zero(t);
 }
 
 // ============================================================
