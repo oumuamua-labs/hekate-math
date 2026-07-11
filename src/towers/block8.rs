@@ -659,6 +659,11 @@ mod neon {
     use core::arch::aarch64::*;
     use core::mem::transmute;
 
+    const _: () = assert!(
+        constants::POLY_8 == 0x1b,
+        "reduction tables and verus twins hardcode R = 0x1b"
+    );
+
     #[inline(always)]
     pub fn add_packed_8(lhs: PackedBlock8, rhs: PackedBlock8) -> PackedBlock8 {
         unsafe {

@@ -565,6 +565,8 @@ mod neon {
     use core::arch::aarch64::*;
     use core::mem::transmute;
 
+    const _: () = assert!(constants::POLY_32 == 0x8d, "verus twins hardcode R = 0x8d");
+
     #[inline(always)]
     pub fn add_packed_32(lhs: PackedBlock32, rhs: PackedBlock32) -> PackedBlock32 {
         unsafe {
