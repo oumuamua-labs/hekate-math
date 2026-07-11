@@ -4,10 +4,12 @@
 # per proof unit, then the tool's own verified/error counts.
 #
 # Usage:
-#   verus/verify.sh              # every unit under verus/
+#   verus/verify.sh # every unit under verus/
 #   verus/verify.sh verus/neon/flat.rs [...]
 #
-# Binary resolution: $VERUS, then `verus` on PATH. Requires jq.
+# Binary resolution:
+# $VERUS, then `verus` on PATH.
+# Requires jq.
 set -uo pipefail
 
 VERUS_BIN="${VERUS:-$(command -v verus || true)}"
@@ -27,7 +29,17 @@ if [ "$#" -gt 0 ]; then
   FILES="$*"
 else
   FILES=$(find verus -name '*.rs' | sort)
+  N=$(echo "$FILES" | wc -l | tr -d ' ')
+
+  # Silent-shrink guard:
+  # bump when adding or removing a proof unit.
+  if [ "$N" -ne 16 ]; then
+    echo "error: expected 16 verus units, found $N" >&2
+    exit 2
+  fi
 fi
+
+GHA="${GITHUB_ACTIONS:-}"
 
 if [ -t 1 ]; then
   GRN=$'\033[32m' RED=$'\033[31m' CYN=$'\033[36m'
@@ -48,14 +60,22 @@ trap 'rm -f "$STDERR_LOG"' EXIT
 for f in $FILES; do
   UNITS=$((UNITS + 1))
 
-  echo ""
-  echo "${BLD}${CYN}━━ ${f}${RST}"
+  if [ -n "$GHA" ]; then
+    echo "::group::verus $f"
+  else
+    echo ""
+    echo "${BLD}${CYN}━━ ${f}${RST}"
+  fi
 
   JSON=$("$VERUS_BIN" "$f" --time-expanded --output-json 2> "$STDERR_LOG")
 
   OK=$(echo "$JSON" | jq -r '."verification-results".success // false')
   VERIFIED=$(echo "$JSON" | jq -r '."verification-results".verified // 0')
   ERRORS=$(echo "$JSON" | jq -r '."verification-results".errors // 999')
+
+  [ -n "$OK" ] || OK=false
+  [ -n "$VERIFIED" ] || VERIFIED=0
+  [ -n "$ERRORS" ] || ERRORS=0
 
   echo "$JSON" | jq -r '
     ."times-ms".smt."smt-run-module-times"[]
@@ -75,11 +95,21 @@ for f in $FILES; do
     done
 
   if [ "$OK" = "true" ] && [ "$ERRORS" = "0" ]; then
+    UNIT_OK=1
     UNITS_OK=$((UNITS_OK + 1))
-    printf "  %s→ %s verified, %s errors%s\n" "$DIM" "$VERIFIED" "$ERRORS" "$RST"
+    printf "  %s-> %s verified, %s errors%s\n" "$DIM" "$VERIFIED" "$ERRORS" "$RST"
   else
-    printf "  %s→ %s verified, %s errors%s\n" "$RED" "$VERIFIED" "$ERRORS" "$RST"
+    UNIT_OK=0
+    printf "  %s-> %s verified, %s errors%s\n" "$RED" "$VERIFIED" "$ERRORS" "$RST"
     sed 's/^/  /' "$STDERR_LOG"
+  fi
+
+  if [ -n "$GHA" ]; then
+    echo "::endgroup::"
+
+    if [ "$UNIT_OK" -eq 0 ]; then
+      echo "::error file=$f::Verus verification failed"
+    fi
   fi
 
   TOTAL_VERIFIED=$((TOTAL_VERIFIED + VERIFIED))
