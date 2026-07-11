@@ -734,7 +734,8 @@ mod neon {
         }
     }
 
-    // Bit-identical to the scalar mul_flat_16 fold.
+    // Per lane == gf_mul(·,·,16):
+    // verus/neon/packed.rs::packed_16_lane_correct.
     #[inline(always)]
     fn reduce_packed_16(ll: uint16x8_t, mm: uint16x8_t, hh: uint16x8_t) -> uint16x8_t {
         unsafe {

@@ -813,6 +813,7 @@ macro_rules! impl_write_nibble_promote_tables_to_128 {
             file: &mut File,
             prefix: &str,
             flat_to_tower_from: &[$from_type; <$from_type>::BITS as usize],
+            tower_to_flat_from: &[$from_type; <$from_type>::BITS as usize],
         ) {
             for nib_idx in 0..$n_nibbles {
                 // Precompute full 128-bit lift for all
@@ -825,6 +826,21 @@ macro_rules! impl_write_nibble_promote_tables_to_128 {
                     let tower_128 = tower_from as u128;
 
                     lifted[nibble as usize] = apply_128(tower_128, &TOWER_TO_FLAT_128);
+
+                    // Every entry round-trips through the mutually-inverse
+                    // matrices at both widths: pins the tables against
+                    // a corrupted matrix or transport, independent of
+                    // the generating direction.
+                    assert_eq!(
+                        apply_128(lifted[nibble as usize], &FLAT_TO_TOWER_128),
+                        tower_128,
+                        "{prefix}: 128-side round-trip broken at nib {nib_idx}, value {nibble}"
+                    );
+                    assert_eq!(
+                        $apply_from(tower_from, tower_to_flat_from),
+                        from_val,
+                        "{prefix}: source-side round-trip broken at nib {nib_idx}, value {nibble}"
+                    );
                 }
 
                 writeln!(
@@ -1549,10 +1565,30 @@ fn main() {
 
     // Nibble-decomposed promote tables
     // for CT NEON promotion to Block128.
-    write_nibble_promote_8_to_128(&mut file, "NIBBLE_PROMOTE_8", &FLAT_TO_TOWER_8);
-    write_nibble_promote_16_to_128(&mut file, "NIBBLE_PROMOTE_16", &FLAT_TO_TOWER_16);
-    write_nibble_promote_32_to_128(&mut file, "NIBBLE_PROMOTE_32", &FLAT_TO_TOWER_32);
-    write_nibble_promote_64_to_128(&mut file, "NIBBLE_PROMOTE_64", &FLAT_TO_TOWER_64);
+    write_nibble_promote_8_to_128(
+        &mut file,
+        "NIBBLE_PROMOTE_8",
+        &FLAT_TO_TOWER_8,
+        &TOWER_TO_FLAT_8,
+    );
+    write_nibble_promote_16_to_128(
+        &mut file,
+        "NIBBLE_PROMOTE_16",
+        &FLAT_TO_TOWER_16,
+        &TOWER_TO_FLAT_16,
+    );
+    write_nibble_promote_32_to_128(
+        &mut file,
+        "NIBBLE_PROMOTE_32",
+        &FLAT_TO_TOWER_32,
+        &TOWER_TO_FLAT_32,
+    );
+    write_nibble_promote_64_to_128(
+        &mut file,
+        "NIBBLE_PROMOTE_64",
+        &FLAT_TO_TOWER_64,
+        &TOWER_TO_FLAT_64,
+    );
 
     println!("cargo:rerun-if-changed=build/main.rs");
     println!("cargo:rerun-if-changed=build/gf_oracle.rs");
