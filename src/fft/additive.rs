@@ -179,7 +179,7 @@ impl<F: BinaryFieldExtras + HardwareField> AdditiveFft<F> {
 
     // Decimation-in-time radix-2 butterfly (Gao–Mateer).
     // σ(x) = x^2 + x maps W_d two-to-one onto W_{d-1}; the
-    // pair (2t, 2t+1) differs by β_0 = 1, so the twiddle is
+    // pair (2t, 2t+1) differs by β_0 = 1, the twiddle is
     // coset + twiddles[t] and the odd output is just + q.
     // Strided recursion keeps the output in natural order.
     fn fwd_scalar(&self, data: &mut [Flat<F>], off: usize, stride: usize, d: u32, coset: Flat<F>) {
