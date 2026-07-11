@@ -48,8 +48,15 @@ jobs:
         run: |
           set -uo pipefail
           verus="${{ steps.verus-bin.outputs.bin }}"
+          files=$(find verus -name '*.rs' | sort)
+          count=$(echo "$files" | wc -l)
+          # Silent-shrink guard: bump when adding or removing a proof unit.
+          if [ "$count" -ne 16 ]; then
+            echo "::error::expected 16 verus units, found $count"
+            exit 1
+          fi
           fail=0
-          for f in verus/*.rs; do
+          for f in $files; do
             echo "::group::verus $f"
             if "$verus" "$f"; then
               echo "PASS  $f"

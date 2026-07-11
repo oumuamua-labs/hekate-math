@@ -16,7 +16,7 @@
 // limitations under the License.
 
 //! Differential test: production `BlockN::mul` equals the `gf_oracle`
-//! schoolbook (shared with `build/main.rs`, from `verus/blockN.rs`).
+//! schoolbook (shared with `build/main.rs`, from `verus/tower/blockN.rs`).
 //! Heavy cases are release-only via `cfg_attr(debug_assertions, ignore)`.
 
 use hekate_math::{Block8, Block16, Block32, Block64, Block128, Block256};

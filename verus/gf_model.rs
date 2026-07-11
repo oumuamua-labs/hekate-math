@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // This file is part of the hekate-math project.
 // Copyright (C) 2026 Andrei Kochergin <andrei@oumuamua.dev>
-// Copyright (C) 2026 Oumuamua Labs <info@oumuamua.dev>. All rights reserved.
+// Copyright (C) 2026 Oumuamua Labs <info@oumuamua.dev>.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -454,7 +454,7 @@ pub proof fn clmul_comm(a: nat, b: nat)
     }
 }
 
-proof fn clmul_assoc(a: nat, b: nat, c: nat)
+pub proof fn clmul_assoc(a: nat, b: nat, c: nat)
     ensures clmul(clmul(a, b), c) == clmul(a, clmul(b, c))
     decreases a
 {
@@ -759,7 +759,7 @@ pub proof fn clmul_pow2(a: nat, k: nat)
     }
 }
 
-proof fn deg_clmul(a: nat, b: nat)
+pub proof fn deg_clmul(a: nat, b: nat)
     requires a > 0, b > 0
     ensures deg(clmul(a, b)) == deg(a) + deg(b)
     decreases a
@@ -1062,7 +1062,7 @@ pub proof fn gf_mul_tower_comm(a: nat, b: nat, k: nat)
     }
 }
 
-proof fn xor_mul_pow2(m: nat, x: nat, y: nat)
+pub proof fn xor_mul_pow2(m: nat, x: nat, y: nat)
     ensures xor(pow2(m) * x, pow2(m) * y) == pow2(m) * xor(x, y)
     decreases m
 {
@@ -1085,7 +1085,7 @@ proof fn xor_mul_pow2(m: nat, x: nat, y: nat)
     }
 }
 
-proof fn lo_plus_hipart_is_xor(m: nat, lo: nat, h: nat)
+pub proof fn lo_plus_hipart_is_xor(m: nat, lo: nat, h: nat)
     requires lo < pow2(m)
     ensures lo + pow2(m) * h == xor(lo, pow2(m) * h)
     decreases m
@@ -1161,7 +1161,7 @@ proof fn xor_split(m: nat, x: nat, y: nat)
     pack_mod_div(ll, hh, m);
 }
 
-proof fn pow2_add(i: nat, j: nat)
+pub proof fn pow2_add(i: nat, j: nat)
     ensures pow2(i + j) == pow2(i) * pow2(j)
     decreases j
 {
@@ -1177,7 +1177,7 @@ proof fn pow2_add(i: nat, j: nat)
     }
 }
 
-proof fn xor_lt_pow2(u: nat, v: nat, m: nat)
+pub proof fn xor_lt_pow2(u: nat, v: nat, m: nat)
     requires u < pow2(m), v < pow2(m)
     ensures xor(u, v) < pow2(m)
 {
@@ -1201,7 +1201,7 @@ proof fn xor_pack(l1: nat, h1: nat, l2: nat, h2: nat, m: nat)
     lo_plus_hipart_is_xor(m, xor(l1, l2), xor(h1, h2));
 }
 
-proof fn gf_mul_tower_bound(a: nat, b: nat, k: nat)
+pub proof fn gf_mul_tower_bound(a: nat, b: nat, k: nat)
     requires k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
     ensures gf_mul_tower(a, b, k) < pow2(k)
     decreases k
@@ -1243,7 +1243,7 @@ proof fn gf_mul_tower_bound(a: nat, b: nat, k: nat)
     }
 }
 
-proof fn gf_mul_tower_distrib_r(a: nat, b: nat, c: nat, k: nat)
+pub proof fn gf_mul_tower_distrib_r(a: nat, b: nat, c: nat, k: nat)
     requires k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
     ensures gf_mul_tower(a, xor(b, c), k) == xor(gf_mul_tower(a, b, k), gf_mul_tower(a, c, k))
     decreases k
@@ -1304,7 +1304,7 @@ proof fn gf_mul_tower_distrib_r(a: nat, b: nat, c: nat, k: nat)
     }
 }
 
-proof fn gf_mul_tower_distrib_l(a: nat, b: nat, c: nat, k: nat)
+pub proof fn gf_mul_tower_distrib_l(a: nat, b: nat, c: nat, k: nat)
     requires k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
     ensures gf_mul_tower(xor(a, b), c, k) == xor(gf_mul_tower(a, c, k), gf_mul_tower(b, c, k))
 {
@@ -1374,7 +1374,7 @@ pub open spec fn thi(a0: nat, a1: nat, b0: nat, b1: nat, m: nat) -> nat {
     xor(xor(gf_mul_tower(a0, b1, m), gf_mul_tower(a1, b0, m)), gf_mul_tower(a1, b1, m))
 }
 
-proof fn gf_mul_tower_unfold(a: nat, b: nat, k: nat)
+pub proof fn gf_mul_tower_unfold(a: nat, b: nat, k: nat)
     requires k == 16 || k == 32 || k == 64 || k == 128 || k == 256,
     ensures
         gf_mul_tower(a, b, k) == tlo(lo_half(a, k), hi_half(a, k), lo_half(b, k), hi_half(b, k),
@@ -1800,8 +1800,8 @@ pub proof fn quad_ext_inverse(a: nat, k: nat, ninv: nat)
 }
 
 // A GF(2)-linear map (over xor) on the field is fixed by its values on the
-// power-of-two basis: two such maps agreeing on every pow2(i), i < k, agree on
-// all field elements.
+// power-of-two basis: two such maps agreeing on every pow2(i), i < k,
+// agree on all field elements.
 pub proof fn linear_determined_field(
     f: spec_fn(nat) -> nat,
     g: spec_fn(nat) -> nat,
@@ -2135,9 +2135,32 @@ pub proof fn trace_idempotent(x: nat, k: nat)
 // ============================================================
 
 // The 128-bit multiplicative query is not SMT-dischargeable;
-// these are proven exhaustively at build time (build/main.rs::verify_isomorphism_128:
-// mutual inverse + homomorphism on all 128x128 generators) and carried here as axioms.
-pub uninterp spec fn phi(x: nat, k: nat) -> nat;
+// roundtrip and the generator homomorphism are proven
+// exhaustively at build time (build/main.rs::verify_isomorphism_128:
+// mutual inverse + homomorphism on all 128x128 generators) and
+// carried here as axioms about the uninterpreted basis columns.
+pub uninterp spec fn phi_basis(i: nat, k: nat) -> nat;
+
+// φ is the column map of the tower->flat matrix: the XOR of
+// basis columns over the set bits, the same shape as the
+// production map_ct kernels (verus/neon/convert.rs::bit_comb).
+// Additivity is therefore a theorem, not an axiom.
+pub closed spec fn phi_fold(x: nat, n: nat, k: nat) -> nat
+    decreases n
+{
+    if n == 0 {
+        0
+    } else {
+        xor(
+            phi_fold(x, (n - 1) as nat, k),
+            if (x / pow2((n - 1) as nat)) % 2 == 1 { phi_basis((n - 1) as nat, k) } else { 0 },
+        )
+    }
+}
+
+pub closed spec fn phi(x: nat, k: nat) -> nat {
+    phi_fold(x, k, k)
+}
 
 pub uninterp spec fn phi_inv(x: nat, k: nat) -> nat;
 
@@ -2147,11 +2170,71 @@ pub proof fn phi_roundtrip(x: nat, k: nat)
     ensures phi_inv(phi(x, k), k) == x
 {}
 
-#[verifier::external_body]
+// Bit i of an xor is the xor of the bits.
+proof fn xor_bit_at(a: nat, b: nat, i: nat)
+    ensures (xor(a, b) / pow2(i)) % 2 == ((a / pow2(i)) % 2 + (b / pow2(i)) % 2) % 2
+    decreases i
+{
+    if i == 0 {
+        assert(pow2(0) == 1);
+
+        xor_bits(a, b);
+    } else {
+        xor_bits(a, b);
+        xor_bit_at(a / 2, b / 2, (i - 1) as nat);
+
+        let h = pow2((i - 1) as nat);
+
+        pow2_pos((i - 1) as nat);
+
+        assert(pow2(i) == 2 * h);
+
+        vstd::arithmetic::div_mod::lemma_div_denominator(xor(a, b) as int, 2, h as int);
+        vstd::arithmetic::div_mod::lemma_div_denominator(a as int, 2, h as int);
+        vstd::arithmetic::div_mod::lemma_div_denominator(b as int, 2, h as int);
+    }
+}
+
+proof fn phi_fold_additive(a: nat, b: nat, n: nat, k: nat)
+    ensures phi_fold(xor(a, b), n, k) == xor(phi_fold(a, n, k), phi_fold(b, n, k))
+    decreases n
+{
+    if n == 0 {
+    } else {
+        let m = (n - 1) as nat;
+        let e = phi_basis(m, k);
+        let ba = (a / pow2(m)) % 2;
+        let bb = (b / pow2(m)) % 2;
+        let sa: nat = if ba == 1 { e } else { 0 };
+        let sb: nat = if bb == 1 { e } else { 0 };
+
+        phi_fold_additive(a, b, m, k);
+        xor_bit_at(a, b, m);
+
+        assert(xor(sa, sb) == (if (xor(a, b) / pow2(m)) % 2 == 1 { e } else { 0nat })) by {
+            if ba == 1 && bb == 1 {
+                xor_self(e);
+            } else {
+                xor_zero(sa);
+                xor_zero(sb);
+                xor_comm(sa, sb);
+            }
+        }
+
+        xor_rearrange4(phi_fold(a, m, k), sa, phi_fold(b, m, k), sb);
+        xor_comm(sa, phi_fold(b, m, k));
+        xor_rearrange4(phi_fold(a, m, k), phi_fold(b, m, k), sa, sb);
+    }
+}
+
+// Retired axiom:
+// XOR-linearity of the column map is structural.
 pub proof fn phi_additive(a: nat, b: nat, k: nat)
     requires in_field(a, k), in_field(b, k)
     ensures phi(gf_add(a, b), k) == gf_add(phi(a, k), phi(b, k))
-{}
+{
+    phi_fold_additive(a, b, k, k);
+}
 
 // Homomorphism on the single-bit generators, build-discharged at k = 128 by
 // build/main.rs::verify_isomorphism_128 (all 128x128 e_i, e_j on the real matrices).
