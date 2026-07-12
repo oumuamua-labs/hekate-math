@@ -1973,6 +1973,13 @@ impl FftTwin {
                     }
                 }
 
+                // Restate in the invariant's exact shape:
+                // the end-of-body check matches it verbatim.
+                assert(forall|u: int| 0 <= u < t + 1 ==> ({
+                    &&& #[trigger] nats(data@)[pos0(off as int, stride as int, u)] == p_seq[u]
+                    &&& nats(data@)[pos1(off as int, stride as int, u)] == q_seq[u]
+                }));
+
                 assert forall|u: int| t + 1 <= u < half implies ({
                     #[trigger] nats(data@)[pos0(off as int, stride as int, u)] == g0[2 * u]
                         && nats(data@)[pos1(off as int, stride as int, u)] == g0[2 * u + 1]
