@@ -17,6 +17,11 @@
 
 use vstd::prelude::*;
 
+#[path = "axioms_t.rs"]
+pub mod axioms_t;
+
+pub use axioms_t::{frobenius_order_gen, norm_nonzero, phi_mult_gen, phi_roundtrip};
+
 verus! {
 
 // ============================================================
@@ -1657,19 +1662,6 @@ pub open spec fn ext_norm(lo: nat, hi: nat, m: nat) -> nat {
         gf_mul_tower(gf_mul_tower(hi, hi, m), tau_tower(m), m))
 }
 
-// N(a) = 0 iff a = 0: anisotropy of the norm form, i.e. X^2 + X + tau_tower(m)
-// is irreducible over the level-m field (Artin-Schreier: Tr(tau) = 1).
-// build/main.rs::verify_norm_anisotropy checks Tr(tau) = 1 for each generated
-// EXTENSION_TAU; the trace over GF(2^k) is out of Z3's reach. Trusted axiom.
-#[verifier::external_body]
-pub proof fn norm_nonzero(a: nat, k: nat)
-    requires
-        k == 16 || k == 32 || k == 64 || k == 128 || k == 256,
-        in_field(a, k),
-        a != 0,
-    ensures ext_norm(lo_half(a, k), hi_half(a, k), (k / 2) as nat) != 0,
-{}
-
 // a^-1 = conj(a) * N(a)^-1, conj = (lo+hi, hi). block128.rs:69-81.
 // The reduction a * (conj(a) * ninv) == N(a) * ninv is proven algebra (tau-generic);
 // only N(a) != 0 for a != 0 is trusted (norm_nonzero).
@@ -2010,18 +2002,6 @@ pub proof fn pow_2exp_add(x: nat, e1: nat, e2: nat, k: nat)
     }
 }
 
-// The 2^k-power map fixes every single-bit generator: out of
-// Z3's reach (Lagrange over GF(2^k)), discharged exhaustively
-// on the real field by build/main.rs::verify_frobenius_order
-// at every cargo build. Trusted axiom.
-#[verifier::external_body]
-pub proof fn frobenius_order_gen(i: nat, k: nat)
-    requires
-        k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
-        i < k,
-    ensures pow_2exp(pow2(i), k, k) == pow2(i)
-{}
-
 // x^(2^k) == x for every field element: the generator axiom
 // extends over GF(2)-linearity (squaring is additive).
 pub proof fn frobenius_order(x: nat, k: nat)
@@ -2137,8 +2117,8 @@ pub proof fn trace_idempotent(x: nat, k: nat)
 // The 128-bit multiplicative query is not SMT-dischargeable;
 // roundtrip and the generator homomorphism are proven
 // exhaustively at build time (build/main.rs::verify_isomorphism_128:
-// mutual inverse + homomorphism on all 128x128 generators) and
-// carried here as axioms about the uninterpreted basis columns.
+// mutual inverse + homomorphism on all 128x128 generators) and carried
+// as axioms about the uninterpreted basis columns in axioms_t.rs.
 pub uninterp spec fn phi_basis(i: nat, k: nat) -> nat;
 
 // φ is the column map of the tower->flat matrix: the XOR of
@@ -2163,12 +2143,6 @@ pub closed spec fn phi(x: nat, k: nat) -> nat {
 }
 
 pub uninterp spec fn phi_inv(x: nat, k: nat) -> nat;
-
-#[verifier::external_body]
-pub proof fn phi_roundtrip(x: nat, k: nat)
-    requires in_field(x, k)
-    ensures phi_inv(phi(x, k), k) == x
-{}
 
 // Bit i of an xor is the xor of the bits.
 proof fn xor_bit_at(a: nat, b: nat, i: nat)
@@ -2235,16 +2209,6 @@ pub proof fn phi_additive(a: nat, b: nat, k: nat)
 {
     phi_fold_additive(a, b, k, k);
 }
-
-// Homomorphism on the single-bit generators, build-discharged at k = 128 by
-// build/main.rs::verify_isomorphism_128 (all 128x128 e_i, e_j on the real matrices).
-#[verifier::external_body]
-pub proof fn phi_mult_gen(i: nat, j: nat)
-    requires i < 128, j < 128
-    ensures
-        phi(gf_mul_tower(pow2(i), pow2(j), 128), 128)
-            == gf_mul(phi(pow2(i), 128), phi(pow2(j), 128), 128)
-{}
 
 // Generator times any field element, by bilinear extension over the 2nd operand.
 proof fn phi_mult_row(i: nat, b: nat)

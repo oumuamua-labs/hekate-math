@@ -32,11 +32,15 @@ else
   N=$(echo "$FILES" | wc -l | tr -d ' ')
 
   # Silent-shrink guard:
-  # bump when adding or removing a proof unit.
-  if [ "$N" -ne 16 ]; then
-    echo "error: expected 16 verus units, found $N" >&2
+  # bump when adding or removing a proof file.
+  if [ "$N" -ne 17 ]; then
+    echo "error: expected 17 verus files, found $N" >&2
     exit 2
   fi
+
+  # axioms_t.rs is a #[path] child of gf_model.rs,
+  # verified through every unit including it, not a root.
+  FILES=$(echo "$FILES" | grep -v '/axioms_t\.rs$')
 fi
 
 GHA="${GITHUB_ACTIONS:-}"

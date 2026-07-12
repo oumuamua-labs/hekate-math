@@ -1200,10 +1200,10 @@ impl_verify_iso!(
     FLAT_TO_TOWER_128
 );
 
-// Build-time discharge of gf_model.rs::norm_nonzero: the norm N(a) has no nonzero
-// root (GF(2^{2m}) is a field) iff X^2+X+tau_m is irreducible over GF(2^m) iff
-// Tr_{GF(2^m)/GF(2)}(tau_m) = 1 (Artin-Schreier). tau_m is EXTENSION_TAU in the
-// tower basis (see gf_oracle::schoolbook*); 1 is the tower identity.
+// Build-time discharge of verus/axioms_t.rs::norm_nonzero: the norm N(a) has
+// no nonzero root (GF(2^{2m}) is a field) iff X^2+X+tau_m is irreducible over GF(2^m)
+// iff Tr_{GF(2^m)/GF(2)}(tau_m) = 1 (Artin-Schreier). tau_m is EXTENSION_TAU in
+// the tower basis (see gf_oracle::schoolbook*); 1 is the tower identity.
 fn verify_norm_anisotropy() {
     let (mut t, mut p) = (0u8, 0x20u8);
     for _ in 0..8 {
@@ -1261,7 +1261,7 @@ fn verify_norm_anisotropy() {
     );
 }
 
-// Build-time discharge of gf_model.rs::frobenius_order_gen:
+// Build-time discharge of verus/axioms_t.rs::frobenius_order_gen:
 // e_i^(2^m) = e_i for every single-bit generator of GF(2^m),
 // squaring through the same shared gf_oracle::schoolbook*.
 fn verify_frobenius_order() {
