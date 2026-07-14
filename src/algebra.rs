@@ -63,7 +63,7 @@ pub trait BinaryFieldExtras: TowerField {
 }
 
 macro_rules! impl_binary_field_extras {
-    ($block:ty, $sub:ty, $uint:ty, $bits:expr, $trace_mask:ident, $solve_basis:ident) => {
+    ($block:ty, $sub:ty, $map_ct:ident, $trace_mask:ident, $solve_basis:ident) => {
         impl BinaryFieldExtras for $block {
             #[inline(always)]
             fn square(&self) -> Self {
@@ -87,18 +87,7 @@ macro_rules! impl_binary_field_extras {
                     return None;
                 }
 
-                let mut acc: $uint = 0;
-                let mut i = 0usize;
-
-                while i < $bits {
-                    let bit = (c.0 >> i) & 1;
-                    let mask = (0 as $uint).wrapping_sub(bit);
-
-                    acc ^= constants::$solve_basis[i] & mask;
-                    i += 1;
-                }
-
-                Some(Self(acc))
+                Some(Self($map_ct(c.0, &constants::$solve_basis)))
             }
         }
     };

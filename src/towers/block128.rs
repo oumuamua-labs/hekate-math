@@ -752,8 +752,7 @@ impl FlatPromote<Block64> for Block128 {
 impl_binary_field_extras!(
     Block128,
     Block64,
-    u128,
-    128,
+    map_ct_128_split,
     TRACE_MASK_128,
     SOLVE_QUADRATIC_BASIS_128
 );

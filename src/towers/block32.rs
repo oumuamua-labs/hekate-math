@@ -517,8 +517,7 @@ impl FlatPromote<Block8> for Block32 {
 impl_binary_field_extras!(
     Block32,
     Block16,
-    u32,
-    32,
+    map_ct_32,
     TRACE_MASK_32,
     SOLVE_QUADRATIC_BASIS_32
 );
