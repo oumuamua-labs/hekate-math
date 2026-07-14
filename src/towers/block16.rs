@@ -16,6 +16,7 @@
 // limitations under the License.
 
 //! BLOCK 16 (GF(2^16))
+use crate::algebra::impl_binary_field_extras;
 use crate::towers::bit::Bit;
 use crate::towers::block8::Block8;
 use crate::{
@@ -522,35 +523,14 @@ impl FlatPromote<Block8> for Block16 {
 // Binary Field Extras
 // ===================================
 
-impl BinaryFieldExtras for Block16 {
-    #[inline(always)]
-    fn square(&self) -> Self {
-        // char 2:
-        // (lo + hi·X)^2 = lo^2 + hi^2·X^2,
-        // no cross term.
-        let (lo, hi) = self.split();
-        let hi2 = hi.square();
-
-        Self::new(lo.square() + hi2 * Block8::EXTENSION_TAU, hi2)
-    }
-
-    #[inline(always)]
-    fn trace(&self) -> Bit {
-        Bit::new(((self.0 & constants::TRACE_MASK_16).count_ones() & 1) as u8)
-    }
-
-    #[inline(always)]
-    fn solve_quadratic(c: Self) -> Option<Self> {
-        if c.trace() == Bit::ZERO {
-            Some(Block16(map_ct_16(
-                c.0,
-                &constants::SOLVE_QUADRATIC_BASIS_16,
-            )))
-        } else {
-            None
-        }
-    }
-}
+impl_binary_field_extras!(
+    Block16,
+    Block8,
+    u16,
+    16,
+    TRACE_MASK_16,
+    SOLVE_QUADRATIC_BASIS_16
+);
 
 // ===========================================
 // UTILS

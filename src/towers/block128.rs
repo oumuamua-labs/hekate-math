@@ -16,14 +16,15 @@
 // limitations under the License.
 
 //! BLOCK 128 (GF(2^128))
+use crate::algebra::impl_binary_field_extras;
 use crate::towers::bit::Bit;
 use crate::towers::block8::Block8;
 use crate::towers::block16::Block16;
 use crate::towers::block32::Block32;
 use crate::towers::block64::Block64;
 use crate::{
-    CanonicalDeserialize, CanonicalSerialize, Flat, FlatPromote, HardwareField, PackableField,
-    PackedFlat, TowerField, constants,
+    BinaryFieldExtras, CanonicalDeserialize, CanonicalSerialize, Flat, FlatPromote, HardwareField,
+    PackableField, PackedFlat, TowerField, constants,
 };
 use core::ops::{Add, AddAssign, BitXor, BitXorAssign, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
@@ -743,6 +744,19 @@ impl FlatPromote<Block64> for Block128 {
         Flat::from_raw(Block128(res))
     }
 }
+
+// ===========================================
+// Binary Field Extras
+// ===========================================
+
+impl_binary_field_extras!(
+    Block128,
+    Block64,
+    u128,
+    128,
+    TRACE_MASK_128,
+    SOLVE_QUADRATIC_BASIS_128
+);
 
 // ===========================================
 // UTILS
