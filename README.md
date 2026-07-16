@@ -20,6 +20,12 @@ polynomial (flat/hardware) representations.
 
 This is the mathematical core of the [Hekate ZK Engine](https://github.com/oumuamua-labs/hekate).
 
+## ⚠️ Security Warning
+
+This crate has not been audited and may contain bugs and security flaws.
+
+USE AT YOUR OWN RISK!
+
 ## Performance Metrics
 
 > [!NOTE]
@@ -53,8 +59,8 @@ Efficiency of polynomial operations in 𝔽(2^128).
 | **Dense Eval (Tower)**    | 2²⁰ coeffs      | 91.93 ms    | 174 MiB/s      |
 | **Dense Eval (Hardware)** | 2²⁰ coeffs      | **8.34 ms** | **1.87 GiB/s** |
 | **Batch Eval (SIMD)**     | 256 × 16384     | 5.43 ms     | 772 Melem/s    |
-| **Additive FFT (scalar)** | 2¹⁶ · Block16   | 1.31 ms     | 50 Melem/s     |
-| **Additive FFT (packed)** | 2¹⁶ · ×8 lanes  | 3.16 ms     | 166 Melem/s    |
+| **Additive FFT (scalar)** | 2¹⁶ · Block16   | 482.2 µs    | 136 Melem/s    |
+| **Additive FFT (packed)** | 2¹⁶ · ×8 lanes  | 1.61 ms     | 326 Melem/s    |
 | **Interpolate MSM**       | 65536 points    | 77.12 µs    | 850 Melem/s    |
 | **MLE Evaluation**        | 20 variables    | 1.27 ms     | 822 Melem/s    |
 
@@ -410,15 +416,6 @@ Uses precomputed lookup tables for basis conversion:
 ```bash
 cargo bench --features table-math
 ```
-
-## Security & Audits
-
-> [!WARNING]
-> This implementation is currently UNAUDITED.
->
-> It is provided "AS IS" with ABSOLUTELY NO WARRANTY under the terms
-> of the Apache 2.0 License. The authors assume zero liability for
-> any damages arising from its use in production environments.
 
 ## License
 
