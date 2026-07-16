@@ -74,7 +74,9 @@ fn lanewise_differential(
     const WIDTH: usize = 8;
     assert_eq!(<Flat<Block16> as PackableField>::WIDTH, WIDTH);
 
-    for log_n in [1u32, 3, 6, 10] {
+    // 16: packed crosses PARALLEL_THRESHOLD_BYTES, the rayon
+    // schedule is differentially pinned to serial scalar.
+    for log_n in [1u32, 3, 6, 10, 16] {
         let n = 1usize << log_n;
         let fft = AdditiveFft::<Block16>::new(log_n);
 
@@ -183,6 +185,57 @@ fn additive_fft_eq_horner() {
     for (j, slot) in data.iter().enumerate() {
         let expected = horner_eval(&coeffs, eval_point(j), log_n);
         assert_eq!(slot.to_tower(), expected, "FFT != Horner at j={j}");
+    }
+}
+
+// Packed at the max Block16 size hits 2^16 · 16 B = 1 MiB
+// = PARALLEL_THRESHOLD_BYTES, the rayon schedule runs;
+#[test]
+fn additive_fft_eq_horner_above_parallel_threshold() {
+    const WIDTH: usize = 8;
+    assert_eq!(<Flat<Block16> as PackableField>::WIDTH, WIDTH);
+
+    let log_n = Block16::BITS as u32;
+    let n = 1usize << log_n;
+
+    let bytes = n * size_of::<PackedFlat<Block16>>();
+    assert!(
+        bytes >= 1 << 20,
+        "packed buffer must reach the 1 MiB parallel threshold; got {bytes} B"
+    );
+
+    let fft = AdditiveFft::<Block16>::new(log_n);
+
+    let mut r = StdRng::seed_from_u64(0x5eed_ff70_8000);
+
+    let cols: Vec<Vec<Block16>> = (0..WIDTH)
+        .map(|_| (0..n).map(|_| Block16(r.random())).collect())
+        .collect();
+
+    let mut packed: Vec<PackedFlat<Block16>> = (0..n)
+        .map(|k| {
+            let lanes: [Flat<Block16>; WIDTH] = core::array::from_fn(|l| cols[l][k].to_hardware());
+            <Flat<Block16> as PackableField>::pack(&lanes)
+        })
+        .collect();
+
+    fft.forward(&mut packed).unwrap();
+
+    for _ in 0..8 {
+        let j = r.random::<u32>() as usize % n;
+        let x = eval_point(j);
+
+        let mut out = [Flat::<Block16>::default(); WIDTH];
+        <Flat<Block16> as PackableField>::unpack(packed[j], &mut out);
+
+        for (l, lane) in out.iter().enumerate() {
+            let expected = horner_eval(&cols[l], x, log_n);
+            assert_eq!(
+                lane.to_tower(),
+                expected,
+                "FFT != Horner at j={j}, lane={l}"
+            );
+        }
     }
 }
 

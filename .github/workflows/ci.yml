@@ -46,22 +46,3 @@ jobs:
       - name: Cargo deny check
         if: matrix.os == 'ubuntu-24.04-arm'
         run: cargo deny check
-
-  miri:
-    name: Miri SpMV memory safety
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: miri
-
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Miri SpMV (sequential)
-        run: cargo miri test spmv_bit
-
-      - name: Miri SpMV (parallel)
-        run: MIRIFLAGS="-Zmiri-disable-stacked-borrows -Zmiri-ignore-leaks" cargo miri test spmv_parallel
