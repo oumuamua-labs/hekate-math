@@ -10,21 +10,25 @@
 Hardware-accelerated binary tower fields for zero-knowledge proofs.
 
 `hekate-math` provides a high-performance, constant-time implementation of binary tower fields (𝔽(2^k))
-optimized for GKR-based provers, Sumcheck, and Binius protocols. The library implements a rigorous algebraic tower
+optimized for Sumcheck, GKR-based provers, and Binius protocols. The library implements a rigorous algebraic tower
 construction up to 𝔽(2^256), leveraging basis isomorphism to utilize native CPU hardware instructions:
 PMULL (ARMv8 NEON) and PCLMULQDQ (x86_64 AVX2).
 
 Designed for low-level cryptographic engineering, the crate is `no-std` compatible and defaults to constant-time
-execution paths to mitigate side-channel attacks. It enforces strict type safety between canonical (tower) and
-polynomial (flat/hardware) representations.
+(unproved yet) execution paths to mitigate side-channel attacks. It enforces strict type safety between canonical
+(tower) and polynomial (flat/hardware) representations.
 
 This is the mathematical core of the [Hekate ZK Engine](https://github.com/oumuamua-labs/hekate).
 
+---
+
 ## ⚠️ Security Warning
 
-This crate has not been audited and may contain bugs and security flaws.
+This crate has not been independently audited and may contain bugs and security flaws.
 
 USE AT YOUR OWN RISK!
+
+---
 
 ## Performance Metrics
 
@@ -33,36 +37,39 @@ USE AT YOUR OWN RISK!
 > to reflect peak performance for public-data scenarios. For private-key
 > operations, use the default constant-time backend.
 
-Benchmarks executed on **Apple M3 Max** (aarch64). The library achieves near-native memory
+Benchmarks executed on *Apple M3 Max*. The library achieves near-native memory
 bandwidth saturation and single-cycle throughput for hardware-accelerated operations.
 
 ### Micro-Benchmarks (Block128)
 
-| Operation                | Basis             | Latency     | Implementation                      |
-|:-------------------------|:------------------|:------------|:------------------------------------|
-| **Multiplication**       | Polynomial (Flat) | **1.08 ns** | `PMULL` (Pipelined)                 |
-| **Multiplication**       | Tower (Canonical) | 98.3 ns     | Recursive Karatsuba                 |
-| **Addition**             | Any               | 1.14 ns     | Vectorized XOR                      |
-| **Inversion** (Single)   | Tower             | 246.6 ns    | Itoh-Tsujii / Fermat Little Theorem |
-| **Inversion** (Batch)    | Tower             | 15.7 ns     | Montgomery's Trick (SIMD)           |
-| **Basis Conv** (Default) | Tower ↔ Flat      | 90.0 ns     | Bit-Slicing (Constant-Time)         |
-| **Basis Conv** (Fast)    | Tower ↔ Flat      | 3.80 ns     | Look-Up Table (Variable-Time)       |
+| Operation                | Basis             | Latency  | Implementation                      |
+|:-------------------------|:------------------|:---------|:------------------------------------|
+| **Multiplication**       | Polynomial (Flat) | 1.08 ns  | `PMULL` (Pipelined)                 |
+| **Multiplication**       | Tower (Canonical) | 98.3 ns  | Recursive Karatsuba                 |
+| **Addition**             | Any               | 1.14 ns  | Vectorized XOR                      |
+| **Inversion** (Single)   | Tower             | 246.6 ns | Itoh-Tsujii / Fermat Little Theorem |
+| **Inversion** (Batch)    | Tower             | 15.7 ns  | Montgomery's Trick (SIMD)           |
+| **Basis Conv** (Default) | Tower ↔ Flat      | 90.0 ns  | Bit-Slicing (Constant-Time)         |
+| **Basis Conv** (Fast)    | Tower ↔ Flat      | 3.80 ns  | Look-Up Table (Variable-Time)       |
 
-*Impact: Flat basis multiplication is approximately **100x faster** than the canonical recursive implementation.*
+*Impact: Flat basis multiplication is approximately 100x faster than the canonical recursive implementation.*
 
 ### Polynomial Arithmetic (Poly ALU)
 
 Efficiency of polynomial operations in 𝔽(2^128).
 
-| Operation                 | Scenario / Size | Time        | Throughput     |
-|:--------------------------|:----------------|:------------|:---------------|
-| **Dense Eval (Tower)**    | 2²⁰ coeffs      | 91.93 ms    | 174 MiB/s      |
-| **Dense Eval (Hardware)** | 2²⁰ coeffs      | **8.34 ms** | **1.87 GiB/s** |
-| **Batch Eval (SIMD)**     | 256 × 16384     | 5.43 ms     | 772 Melem/s    |
-| **Additive FFT (scalar)** | 2¹⁶ · Block16   | 482.2 µs    | 136 Melem/s    |
-| **Additive FFT (packed)** | 2¹⁶ · ×8 lanes  | 1.61 ms     | 326 Melem/s    |
-| **Interpolate MSM**       | 65536 points    | 77.12 µs    | 850 Melem/s    |
-| **MLE Evaluation**        | 20 variables    | 1.27 ms     | 822 Melem/s    |
+| Operation                 | Scenario / Size | Time     | Throughput  |
+|:--------------------------|:----------------|:---------|:------------|
+| **Dense Eval (Tower)**    | 2²⁰ coeffs      | 91.93 ms | 174 MiB/s   |
+| **Dense Eval (Hardware)** | 2²⁰ coeffs      | 8.34 ms  | 1.87 GiB/s  |
+| **Batch Eval (SIMD)**     | 256 × 16384     | 5.43 ms  | 772 Melem/s |
+| **Additive FFT (scalar)** | 2¹⁶ · Block16   | 482.2 µs | 136 Melem/s |
+| **Additive FFT (packed)** | 2¹⁶ · ×8 lanes  | 1.61 ms  | 326 Melem/s |
+| **Interpolate MSM**       | 65536 points    | 77.12 µs | 850 Melem/s |
+| **MLE Evaluation**        | 20 variables    | 1.27 ms  | 822 Melem/s |
+
+Reproduce with `cargo bench` (constant-time default) or `cargo bench --features table-math`
+(LUT basis conversion; hardware arithmetic is identical under both).
 
 ## Installation
 
@@ -73,42 +80,6 @@ hekate-math = "0.8.0"
 
 ## Examples
 
-### Basics: Field Arithmetic
-
-* **Addition** is equivalent to XOR (`^`).
-* **Subtraction** is identical to Addition (since -x = x).
-* **1 + 1 = 0**. This is the defining property of Characteristic 2 fields.
-
-```rust
-use hekate_math::{Block128, TowerField};
-
-fn example_basics() {
-    // Initialize elements (Block128 represents GF(2^128))
-    let a = Block128::from(5u128); // 101
-    let b = Block128::from(3u128); // 011
-
-    // 1. Addition is XOR
-    // 5 XOR 3 = 6 (110)
-    let sum = a + b;
-    assert_eq!(sum, Block128::from(6u128));
-
-    // 2. Characteristic 2 Property
-    // Adding an element to itself results in Zero.
-    let zero = a + a;
-    assert_eq!(zero, Block128::ZERO);
-    assert_eq!(Block128::from(5u128) - a, Block128::ZERO); // Subtraction is also XOR
-
-    // 3. Multiplication
-    // This uses Galois Field arithmetic
-    // (carrying over the irreducible polynomial).
-    let product = a * b;
-
-    // In normal integers 5*3=15, but in GF(2^128)
-    // it behaves differently based on reduction.
-    println!("Basics: 5 * 3 in GF(2^128) = {:?}", product);
-}
-```
-
 ### The Isomorphic Workflow
 
 Most ZK protocols require transitioning between the **Canonical Basis** (for recursive
@@ -118,23 +89,22 @@ folding/sumcheck) and the **Polynomial Basis** (for heavy arithmetic).
 use hekate_math::{Block128, HardwareField, TowerField};
 
 fn example_isomorphism() {
-    // 1. Canonical Basis (Tower)
+    // Canonical Basis (Tower)
     let a_tower = Block128::from_uniform_bytes(&[0xaa; 32]);
     let b_tower = Block128::from_uniform_bytes(&[0xbb; 32]);
 
-    // 2. Basis Conversion -> Polynomial (Flat)
+    // Basis Conversion -> Polynomial (Flat)
     let a_flat = a_tower.to_hardware();
     let b_flat = b_tower.to_hardware();
 
-    // 3. Hardware-Accelerated Arithmetic
+    // Hardware-Accelerated Arithmetic
     let c_flat = a_flat * b_flat;
     let d_flat = a_flat + b_flat;
 
-    // 4. Return to Canonical Basis
+    // Return to Canonical
     let c_tower = c_flat.to_tower();
     let d_tower = d_flat.to_tower();
 
-    // 5. Verify Homomorphism
     assert_eq!(
         c_tower,
         a_tower * b_tower,
@@ -152,30 +122,23 @@ For throughput-critical paths, `hekate-math` provides explicit SIMD packing via 
 use hekate_math::{Block32, Flat, HardwareField, PackableField, TowerField};
 
 fn process_simd(data: &[Flat<Block32>]) {
-    // 1. Pack hardware-basis scalars into SIMD registers
+    // Pack hardware-basis scalars into SIMD registers
     // PackedBlock32 holds 4 elements (128 bits total).
-    // The data must already be in the Flat/Hardware
-    // basis for hardware-accelerated operations
-    // to be algebraically correct.
     let chunk_a = Flat::<Block32>::pack(&data[0..4]);
     let chunk_b = Flat::<Block32>::pack(&data[4..8]);
 
-    // 2. Vectorized Arithmetic
+    // Vectorized Arithmetic:
     // Performs 4 parallel field
     // multiplications in the hardware basis.
     let result_packed = chunk_a * chunk_b;
 
-    // 3. Unpack back to scalars
     let mut out_flat = [Block32::ZERO.to_hardware(); 4];
     Flat::<Block32>::unpack(result_packed, &mut out_flat);
 
-    // 4. Verification
     for i in 0..4 {
-        // Convert back to verify
-        // against standard multiplication.
+        // Convert back to Canonical
         let res_tower = out_flat[i].to_tower();
 
-        // Manual tower multiplication for comparison
         let a_tower = data[i].to_tower();
         let b_tower = data[4 + i].to_tower();
 
@@ -184,8 +147,6 @@ fn process_simd(data: &[Flat<Block32>]) {
 }
 
 fn example_simd() {
-    // Initialize data and immediately
-    // transform to Hardware Basis.
     let data: Vec<Flat<Block32>> = (0..8)
         .map(|i| Block32::from(i as u32 + 1).to_hardware())
         .collect();
@@ -212,42 +173,26 @@ fn example_fft() {
     let log_n = 10u32;
     let fft = AdditiveFft::<Block16>::new(log_n);
 
-    // Novel-basis coefficients, hardware (flat) basis.
+    // Novel-basis coefficients, hardware (flat) basis
     let coeffs: Vec<Flat<Block16>> = (0..1u32 << log_n)
         .map(|i| Block16::from(i).to_hardware())
         .collect();
 
-    // Coefficients -> evaluations on W_10, in place.
+    // Coefficients -> evaluations on W_10, in place
     let mut data = coeffs.clone();
     fft.forward_scalar(&mut data).unwrap();
 
-    // Evaluations -> coefficients.
+    // Evaluations -> coefficients
     fft.inverse_scalar(&mut data).unwrap();
 
     assert_eq!(data, coeffs);
 }
 ```
 
-## Roadmap
-
-The immediate engineering focus is establishing absolute
-hardware supremacy across both ARM and x86 backends.
-
-- **x86_64 Hardware Acceleration (Beta → Prod)**
-    - Replace software fallbacks with hand-tuned assembly/intrinsics for AVX2 and PCLMULQDQ.
-    - **Goal**: Path to x86_64 Supremacy.
-
-- **Formal Verification & Execution Path Auditing**
-    - Mathematical modeling of execution boundaries and DoS-resistant state transitions.
-    - **Goal**: Enforce strict `Result` propagation across all public interfaces for
-      enterprise-grade fault tolerance.
-
 ## Theoretical Foundation
 
 `hekate-math` implements a binary tower field architecture. The field 𝔽(2^128)
 is constructed via recursive quadratic extensions using the reduction polynomial v² + v + βᵢ.
-
-### The Tower Hierarchy
 
 The construction follows a strict recursive data layout. Higher-order blocks are composed
 of two lower-order blocks (Low, High).
@@ -268,20 +213,18 @@ of two lower-order blocks (Low, High).
   [Bit; 8]        (Atomic Unit GF(2))
 ```
 
-### Algebraic Construction
-
 The extension defines 𝔽(2^(2^(i+1))) ≅ 𝔽(2^(2^i))[v] / (v² + v + βᵢ),
 where βᵢ is the extension constant (`EXTENSION_TAU`) for that level.
 
 | Height | Field     | Implementation | Extension Constant (β)                        | Arithmetic            |
 |:-------|:----------|:---------------|:----------------------------------------------|:----------------------|
-| h=0    | 𝔽₂       | `Bit`          | N/A                                           | Boolean (XOR/AND)     |
-| h=3    | 𝔽(2^8)   | `Block8`       | *Base Field* (AES Poly)                       | Recursive / Karatsuba |
-| h=4    | 𝔽(2^16)  | `Block16`      | 0x20 ∈ Block8                                 | Recursive / Karatsuba |
-| h=5    | 𝔽(2^32)  | `Block32`      | 0x2000 ∈ Block16                              | Recursive / Karatsuba |
-| h=6    | 𝔽(2^64)  | `Block64`      | 0x20000000 ∈ Block32                          | Recursive / Karatsuba |
-| h=7    | 𝔽(2^128) | `Block128`     | 0x2000000000000000 ∈ Block64                  | Recursive / Karatsuba |
-| h=8    | 𝔽(2^256) | `Block256`     | 0x20000000000000000000000000000000 ∈ Block128 | Recursive / Karatsuba |
+| 0      | 𝔽₂       | `Bit`          | N/A                                           | Boolean (XOR/AND)     |
+| 3      | 𝔽(2^8)   | `Block8`       | *Base Field* (AES Poly)                       | Recursive / Karatsuba |
+| 4      | 𝔽(2^16)  | `Block16`      | 0x20 ∈ Block8                                 | Recursive / Karatsuba |
+| 5      | 𝔽(2^32)  | `Block32`      | 0x2000 ∈ Block16                              | Recursive / Karatsuba |
+| 6      | 𝔽(2^64)  | `Block64`      | 0x20000000 ∈ Block32                          | Recursive / Karatsuba |
+| 7      | 𝔽(2^128) | `Block128`     | 0x2000000000000000 ∈ Block64                  | Recursive / Karatsuba |
+| 8      | 𝔽(2^256) | `Block256`     | 0x20000000000000000000000000000000 ∈ Block128 | Recursive / Karatsuba |
 
 *Note: The tower is rooted at F(2^8) (AES Field) for hardware compatibility. Lower fields (Bit)
 are subfields embedded via isomorphism, making this a Hybrid Tower construction.*
@@ -293,46 +236,34 @@ system. Canonical values stay in `F`, while hardware/polynomial values are repre
 
 ### Canonical Basis (Tower)
 
-The default representation optimized for recursive algebraic operations (e.g., Sumcheck, GKR Layer folding). Elements
+The default representation optimized for recursive algebraic operations. Elements
 are structured as linear polynomials A(v) = a₁v + a₀ over the subfield.
 
-* **Structure:** Recursive coefficients (a_hi, a_lo).
-* **Operation:** Karatsuba Multiplication (3 sub-multiplications).
-* **Memory:** Standard layout (Little-Endian).
+* Recursive coefficients (a_hi, a_lo).
+* Karatsuba Multiplication (3 sub-multiplications).
+* Standard layout (Little-Endian).
 
 ### Polynomial Basis (Flat)
 
 An isomorphic representation mapping the tower structure to a dense polynomial
 basis (1, x, x²...) optimized for specific CPU instruction sets (AES-NI, PMULL, PCLMULQDQ).
 
-* **Structure:** Linear bit-packed integers (`u8`, `u64`, `u128`).
-* **Operation:** Single-cycle Carry-Less Multiplication (`CLMUL`) with hardware-accelerated reduction.
-* **Throughput:** 1.17ns per multiplication (Block128 on modern architectures).
+* Linear bit-packed integers (`u8`, `u64`, `u128`).
+* Single-cycle Carry-Less Multiplication (`CLMUL`) with hardware-accelerated reduction.
+* 1.17ns per multiplication (Block128 on modern architectures).
 
 ### Isomorphism & Interop
 
-The library strictly enforces basis separation through the type system to prevent mixing representations.
+The crate strictly enforces basis separation through the type system to prevent mixing representations.
 
 The Isomorphism φ is defined as: φ: 𝔽(Tower) ↔ 𝔽(Hardware)
 
 ```rust
 pub trait HardwareField: TowerField + PackableField {
-    /// Transform Canonical -> Flat
     fn to_hardware(self) -> Flat<Self>;
-
-    /// Transform Flat -> Canonical
     fn from_hardware(value: Flat<Self>) -> Self;
-
-    /// Sum two elements assuming they
-    /// are already in hardware basis.
     fn add_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self>;
-
-    /// Multiply two elements assuming
-    /// they are already in hardware basis.
     fn mul_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self>;
-
-    /// Extract a bit of the Tower representation
-    /// directly from the Hardware basis.
     fn tower_bit_from_hardware(value: Flat<Self>, bit_idx: usize) -> u8;
 }
 ```
@@ -340,25 +271,9 @@ pub trait HardwareField: TowerField + PackableField {
 *Change-of-basis matrices are pre-computed constant-time bit-sliced operations by default, with an optional
 `table-math` feature for cached lookups.*
 
-## Implementation Details & Safety
+## Security Model
 
-`hekate-math` prioritizes correctness and side-channel resistance over "naive" speed, enforcing strict memory layouts
-and algorithmic choices.
-
-### Memory Layout & Type Safety
-
-Field elements are zero-cost wrappers around native integer types, ensuring ABI compatibility and predictable register
-usage.
-
-* **Scalar Storage**: `#[repr(transparent)]` structs wrapping `u8`, `u16`, `u32`, `u64`, `u128`.
-* **Vector Storage**: `#[repr(C, align(N))]` SIMD-packed structs (e.g., `PackedBlock128` is 32-byte aligned for
-  AVX2/NEON compliance).
-* **Safe Rust**: `unsafe` is restricted to SIMD intrinsics and bounds-checked lookups. Isomorphisms are checked via the
-  `HardwareField` trait system.
-
-### Security Model
-
-The library operates under a configurable security model designed for cryptographic contexts where secret-dependent
+The crate operates under a configurable security model designed for cryptographic contexts where secret-dependent
 execution time is catastrophic.
 
 | Feature Flag       | Behavior                | Use Case                 | Security                          |
@@ -382,29 +297,11 @@ execution time is catastrophic.
 
 *Note: Native AVX2/PCLMULQDQ implementation for x86_64 is on the roadmap.*
 
-## Reproduce benchmarks
+## Roadmap
 
-> [!IMPORTANT]
-> Hardware arithmetic performance (e.g., mul_hardware, add_hardware) remains identical
-> regardless of the `table-math` feature. This feature specifically optimizes the Isomorphism
-> (basis conversion) and Lifting operations. The actual field arithmetic in the flat basis
-> always utilizes the fastest available hardware instructions (PMULL / PCLMULQDQ).
-
-### Secure (Default)
-
-Uses constant-time bitsliced matrix multiplication for basis conversion and lifting:
-
-```bash
-cargo bench
-```
-
-### Fast (table-math)
-
-Uses precomputed lookup tables for basis conversion:
-
-```bash
-cargo bench --features table-math
-```
+- **x86_64 Hardware Acceleration (0 -> 1)**
+    - Replace software fallbacks with hand-tuned assembly/intrinsics for AVX2 and PCLMULQDQ.
+    - Goal: Path to x86_64 Supremacy.
 
 ## License
 
