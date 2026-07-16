@@ -16,9 +16,9 @@
 // limitations under the License.
 
 //! Twin and semantics of the additive FFT (src/fft/additive.rs).
-//! The spec recursions mirror the strided in-place transforms
-//! in contiguous form; the round-trip theorem uses only the xor
-//! group, it holds for arbitrary twiddle values and any multiply.
+//! The level-loop transforms refine the recursive fwd_spec/inv_spec
+//! through a strided-gather invariant; the round-trip theorem uses
+//! only the xor group, so it holds for any twiddle and any multiply.
 
 use vstd::prelude::*;
 
@@ -52,6 +52,23 @@ pub open spec fn sigma(x: nat, k: nat) -> nat {
     xor(gf_mul(x, x, k), x)
 }
 
+// sigma iterated l times:
+// the coset chain sigma^l(offset) the level loop walks.
+pub open spec fn sigma_pow(x: nat, l: nat, k: nat) -> nat
+    decreases l
+{
+    if l == 0 {
+        x
+    } else {
+        sigma(sigma_pow(x, (l - 1) as nat, k), k)
+    }
+}
+
+proof fn sigma_pow_step(x: nat, l: nat, k: nat)
+    ensures sigma_pow(x, l + 1, k) == sigma(sigma_pow(x, l, k), k)
+{
+}
+
 pub open spec fn evens(v: Seq<nat>) -> Seq<nat> {
     Seq::new(v.len() / 2, |t: int| v[2 * t])
 }
@@ -68,9 +85,10 @@ pub open spec fn bfly_lo(p: nat, q: nat, tw: nat, k: nat) -> nat {
     xor(p, gf_mul(tw, q, k))
 }
 
-// fwd_scalar, additive.rs:185-208: recurse on the even
-// and odd sub-arrays with coset sigma(coset), then
-// butterfly pair t with twiddle coset + tws[t].
+// Recursive reference form, no production twin: recurse
+// on the even/odd sub-arrays with coset sigma(coset), then
+// butterfly pair t with twiddle coset + tws[t];
+// fwd_levels_exec refines it level by level.
 pub open spec fn fwd_spec(v: Seq<nat>, tws: Seq<nat>, d: nat, coset: nat, k: nat) -> Seq<nat>
     decreases d
 {
@@ -90,8 +108,9 @@ pub open spec fn fwd_spec(v: Seq<nat>, tws: Seq<nat>, d: nat, coset: nat, k: nat
     }
 }
 
-// inv_scalar, additive.rs:213-236: butterfly first
-// (q = o0 + o1, p = o0 + tw*q), then recurse.
+// Recursive reference form, no production twin: butterfly
+// first (q = o0 + o1, p = o0 + tw*q), then recurse;
+// inv_levels_exec refines it level by level.
 pub open spec fn inv_spec(w: Seq<nat>, tws: Seq<nat>, d: nat, coset: nat, k: nat) -> Seq<nat>
     decreases d
 {
@@ -132,6 +151,29 @@ proof fn fwd_spec_len(v: Seq<nat>, tws: Seq<nat>, d: nat, coset: nat, k: nat)
 {
     if d == 0 {
     } else {
+    }
+}
+
+proof fn inv_spec_len(w: Seq<nat>, tws: Seq<nat>, d: nat, coset: nat, k: nat)
+    requires w.len() == pow2(d),
+    ensures inv_spec(w, tws, d, coset, k).len() == pow2(d),
+    decreases d,
+{
+    if d == 0 {
+        assert(pow2(0) == 1);
+    } else {
+        let child = sigma(coset, k);
+
+        assert(pow2(d) == 2 * pow2((d - 1) as nat));
+
+        let p = Seq::new(
+            w.len() / 2,
+            |t: int| bfly_lo(w[2 * t], xor(w[2 * t], w[2 * t + 1]), xor(coset, tws[t]), k),
+        );
+        let q = Seq::new(w.len() / 2, |t: int| xor(w[2 * t], w[2 * t + 1]));
+
+        inv_spec_len(p, tws, (d - 1) as nat, child, k);
+        inv_spec_len(q, tws, (d - 1) as nat, child, k);
     }
 }
 
@@ -1066,7 +1108,7 @@ proof fn and_dec_is_sub(x: u64, j: u64)
 }
 
 // ============================================================
-// Constructor twin: new(), additive.rs:64-100, from the lift
+// Constructor twin: new(), additive.rs:78-114, from the lift
 // chain on. The solve_quadratic loop producing `lift` is
 // checked at build time; `bits` is u64 where production uses
 // usize (identical on the pinned platform).
@@ -1211,131 +1253,12 @@ impl FftTwin {
 }
 
 // ============================================================
-// Strided view: a transform at (off, stride, d) touches
-// exactly { off + i*stride : i < 2^d }; with off < stride,
-// membership is j % stride == off and j / stride < 2^d
+// Strided gather: the loop invariant's class (off, stride) of a
+// size-2^d transform reads exactly { off + i*stride : i < 2^d }.
 // ============================================================
 
 pub open spec fn gather(s: Seq<nat>, off: int, stride: int, n: nat) -> Seq<nat> {
     Seq::new(n, |i: int| s[off + i * stride])
-}
-
-pub open spec fn in_class(j: int, off: int, stride: int, n: nat) -> bool {
-    &&& j % stride == off
-    &&& j / stride < n
-}
-
-pub open spec fn pos0(off: int, stride: int, u: int) -> int {
-    off + 2 * u * stride
-}
-
-pub open spec fn pos1(off: int, stride: int, u: int) -> int {
-    off + 2 * u * stride + stride
-}
-
-proof fn class_member(off: int, stride: int, n: nat, i: int)
-    requires
-        0 <= off < stride,
-        0 <= i < n,
-    ensures
-        in_class(off + i * stride, off, stride, n),
-        (off + i * stride) / stride == i,
-{
-    let x = off + i * stride;
-
-    assert(x == i * stride + off);
-    lemma_fundamental_div_mod_converse_mod(x, stride, i, off);
-    lemma_fundamental_div_mod_converse_div(x, stride, i, off);
-}
-
-proof fn class_elim(j: int, off: int, stride: int, n: nat)
-    requires
-        0 <= off < stride,
-        j >= 0,
-        in_class(j, off, stride, n),
-    ensures ({
-        let i = j / stride;
-        0 <= i < n && j == off + i * stride
-    })
-{
-    lemma_fundamental_div_mod(j, stride);
-    lemma_mul_is_commutative(stride, j / stride);
-
-    assert(j / stride >= 0) by (nonlinear_arith)
-        requires j >= 0, stride > 0;
-}
-
-proof fn class_split(j: int, off: int, stride: int, d: nat)
-    requires
-        0 <= off < stride,
-        d >= 1,
-        j >= 0,
-    ensures
-        in_class(j, off, stride, pow2(d)) <==> (
-            in_class(j, off, 2 * stride, pow2((d - 1) as nat))
-            || in_class(j, off + stride, 2 * stride, pow2((d - 1) as nat))
-        ),
-{
-    let h = pow2((d - 1) as nat);
-    let s = stride;
-
-    assert(pow2(d) == 2 * h);
-
-    if in_class(j, off, s, pow2(d)) {
-        class_elim(j, off, s, pow2(d));
-
-        let i = j / s;
-
-        lemma_fundamental_div_mod(i, 2);
-
-        let q = i / 2;
-
-        if i % 2 == 0 {
-            assert((2 * q) * s == q * (2 * s)) by (nonlinear_arith);
-            assert(j == q * (2 * s) + off);
-            lemma_fundamental_div_mod_converse_mod(j, 2 * s, q, off);
-            lemma_fundamental_div_mod_converse_div(j, 2 * s, q, off);
-        } else {
-            assert((2 * q + 1) * s == q * (2 * s) + s) by (nonlinear_arith);
-            assert(j == q * (2 * s) + (off + s));
-            lemma_fundamental_div_mod_converse_mod(j, 2 * s, q, off + s);
-            lemma_fundamental_div_mod_converse_div(j, 2 * s, q, off + s);
-        }
-    }
-
-    if in_class(j, off, 2 * s, h) {
-        class_elim(j, off, 2 * s, h);
-
-        let q = j / (2 * s);
-
-        assert(q * (2 * s) == (2 * q) * s) by (nonlinear_arith);
-        assert(j == (2 * q) * s + off);
-        lemma_fundamental_div_mod_converse_mod(j, s, 2 * q, off);
-        lemma_fundamental_div_mod_converse_div(j, s, 2 * q, off);
-    }
-
-    if in_class(j, off + s, 2 * s, h) {
-        class_elim(j, off + s, 2 * s, h);
-
-        let q = j / (2 * s);
-
-        assert(q * (2 * s) + s == (2 * q + 1) * s) by (nonlinear_arith);
-        assert(j == (2 * q + 1) * s + off);
-        lemma_fundamental_div_mod_converse_mod(j, s, 2 * q + 1, off);
-        lemma_fundamental_div_mod_converse_div(j, s, 2 * q + 1, off);
-    }
-}
-
-proof fn idx_bound(off: int, stride: int, i: int, n: int)
-    requires
-        0 <= off < stride,
-        0 <= i < n,
-    ensures off + i * stride < n * stride,
-{
-    lemma_mul_inequality(i + 1, n, stride);
-    lemma_mul_is_commutative(i + 1, stride);
-    lemma_mul_is_distributive_add(stride, i, 1);
-    lemma_mul_is_commutative(i, stride);
 }
 
 // The strided even/odd sub-views are the two child classes.
@@ -1380,778 +1303,1179 @@ proof fn gather_ident(s: Seq<nat>, n: nat)
     assert(gather(s, 0, 1, n) =~= s);
 }
 
-impl FftTwin {
-    // fwd_scalar, additive.rs:185-208; also the index shape
-    // of fwd_packed (identical strides, packed element ops).
-    fn fwd_exec(&self, data: &mut Vec<u128>, off: usize, stride: usize, d: u32, coset: u128)
-        requires
-            self.wf(),
-            d <= self.log_n,
-            stride >= 1,
-            off < stride,
-            (stride as nat) * pow2(d as nat) <= old(data)@.len(),
-            old(data)@.len() <= usize::MAX,
-        ensures
-            final(data)@.len() == old(data)@.len(),
-            gather(nats(final(data)@), off as int, stride as int, pow2(d as nat))
-                == fwd_spec(
-                    gather(nats(old(data)@), off as int, stride as int, pow2(d as nat)),
-                    nats(self.twiddles@),
-                    d as nat,
-                    coset as nat,
-                    128,
-                ),
-            forall|j: int|
-                0 <= j < final(data)@.len()
-                    && !in_class(j, off as int, stride as int, pow2(d as nat))
-                    ==> final(data)@[j] == old(data)@[j],
-        decreases d,
-    {
-        let ghost g0 = gather(nats(old(data)@), off as int, stride as int, pow2(d as nat));
-        let ghost tws = nats(self.twiddles@);
-
-        if d == 0 {
-            proof {
-                assert(pow2(0) == 1);
-                assert(gather(nats(data@), off as int, stride as int, 1) =~= g0);
-            }
-
-            return;
-        }
-
-        let ghost dm1 = (d - 1) as nat;
-
-        proof {
-            lemma_u64_pow2_no_overflow(dm1);
-            lemma_u64_shl_is_mul(1u64, (d - 1) as u64);
-            pow2_bridge(dm1);
-        }
-
-        let half = (1u64 << (d - 1)) as usize;
-        let child = add_flat(mul_flat(coset, coset), coset);
-
-        let ghost e_seq = fwd_spec(evens(g0), tws, dm1, child as nat, 128);
-        let ghost o_seq = fwd_spec(odds(g0), tws, dm1, child as nat, 128);
-
-        proof {
-            assert(half as nat == pow2(dm1));
-            assert(child as nat == sigma(coset as nat, 128));
-            assert(pow2(d as nat) == 2 * pow2(dm1));
-            gf_model::pow2_pos(dm1);
-
-            assert((2 * (stride as nat)) * pow2(dm1) == (stride as nat) * pow2(d as nat))
-                by (nonlinear_arith)
-                requires pow2(d as nat) == 2 * pow2(dm1),
-            {}
-
-            assert((stride as nat) * 2 <= (stride as nat) * pow2(d as nat)) by (nonlinear_arith)
-                requires pow2(d as nat) == 2 * pow2(dm1), pow2(dm1) >= 1,
-            {}
-
-            gather_split(nats(old(data)@), off as int, stride as int, d as nat);
-        }
-
-        self.fwd_exec(data, off, stride * 2, d - 1, child);
-
-        let ghost s1 = nats(data@);
-
-        proof {
-            assert(gather(s1, off as int, 2 * (stride as int), pow2(dm1)) == e_seq);
-        }
-
-        self.fwd_exec(data, off + stride, stride * 2, d - 1, child);
-
-        let ghost s2 = nats(data@);
-
-        proof {
-            // Call 1 left the odd child class untouched.
-            assert forall|u: int| 0 <= u < pow2(dm1) implies
-                #[trigger] gather(s1, off + stride as int, 2 * (stride as int), pow2(dm1))[u]
-                    == gather(nats(old(data)@), off + stride as int, 2 * (stride as int),
-                        pow2(dm1))[u] by {
-                let j = off + stride as int + u * (2 * (stride as int));
-
-                class_member(off + stride as int, 2 * (stride as int), pow2(dm1), u);
-                idx_bound(off + stride as int, 2 * (stride as int), u, pow2(dm1) as int);
-
-                assert(pow2(dm1) as int * (2 * (stride as int))
-                    == (stride as int) * (pow2(d as nat) as int)) by (nonlinear_arith)
-                    requires pow2(d as nat) == 2 * pow2(dm1),
-                {}
-
-                assert(!in_class(j, off as int, 2 * (stride as int), pow2(dm1)));
-            }
-
-            assert(gather(s1, off + stride as int, 2 * (stride as int), pow2(dm1))
-                =~= gather(nats(old(data)@), off + stride as int, 2 * (stride as int),
-                    pow2(dm1)));
-            assert(gather(s2, off + stride as int, 2 * (stride as int), pow2(dm1)) == o_seq);
-
-            // Call 2 left the even child class untouched.
-            assert forall|u: int| 0 <= u < pow2(dm1) implies
-                #[trigger] gather(s2, off as int, 2 * (stride as int), pow2(dm1))[u]
-                    == gather(s1, off as int, 2 * (stride as int), pow2(dm1))[u] by {
-                let j = off as int + u * (2 * (stride as int));
-
-                class_member(off as int, 2 * (stride as int), pow2(dm1), u);
-                idx_bound(off as int, 2 * (stride as int), u, pow2(dm1) as int);
-
-                assert(pow2(dm1) as int * (2 * (stride as int))
-                    == (stride as int) * (pow2(d as nat) as int)) by (nonlinear_arith)
-                    requires pow2(d as nat) == 2 * pow2(dm1),
-                {}
-
-                assert(!in_class(j, off + stride as int, 2 * (stride as int), pow2(dm1)));
-            }
-
-            assert(gather(s2, off as int, 2 * (stride as int), pow2(dm1))
-                =~= gather(s1, off as int, 2 * (stride as int), pow2(dm1)));
-            assert(gather(s2, off as int, 2 * (stride as int), pow2(dm1)) == e_seq);
-
-            // Child gathers pointwise at parent pair positions.
-            assert forall|u: int| 0 <= u < pow2(dm1) implies
-                #[trigger] nats(data@)[pos0(off as int, stride as int, u)] == e_seq[u]
-                    && nats(data@)[pos1(off as int, stride as int, u)] == o_seq[u] by {
-                assert(2 * u * (stride as int) == u * (2 * (stride as int)))
-                    by (nonlinear_arith);
-
-                assert(gather(s2, off as int, 2 * (stride as int), pow2(dm1))[u] == e_seq[u]);
-                assert(gather(s2, off + stride as int, 2 * (stride as int), pow2(dm1))[u]
-                    == o_seq[u]);
-            }
-
-            fwd_spec_len(evens(g0), tws, dm1, child as nat, 128);
-            fwd_spec_len(odds(g0), tws, dm1, child as nat, 128);
-
-            assert forall|j: int|
-                0 <= j < data@.len()
-                    && !in_class(j, off as int, stride as int, pow2(d as nat))
-                    implies data@[j] == old(data)@[j] by {
-                class_split(j, off as int, stride as int, d as nat);
-            }
-        }
-
-        let mut t: usize = 0;
-
-        while t < half
-            invariant
-                self.wf(),
-                1 <= d <= self.log_n,
-                stride >= 1,
-                off < stride,
-                dm1 == (d - 1) as nat,
-                half as nat == pow2(dm1),
-                pow2(d as nat) == 2 * pow2(dm1),
-                (stride as nat) * pow2(d as nat) <= data@.len(),
-                data@.len() == old(data)@.len(),
-                data@.len() <= usize::MAX,
-                t <= half,
-                tws == nats(self.twiddles@),
-                g0 == gather(nats(old(data)@), off as int, stride as int, pow2(d as nat)),
-                e_seq.len() == pow2(dm1),
-                o_seq.len() == pow2(dm1),
-                forall|u: int| 0 <= u < t ==> ({
-                    let lo = bfly_lo(e_seq[u], o_seq[u], xor(coset as nat, tws[u]), 128);
-                    &&& #[trigger] nats(data@)[pos0(off as int, stride as int, u)] == lo
-                    &&& nats(data@)[pos1(off as int, stride as int, u)] == xor(lo, o_seq[u])
-                }),
-                forall|u: int| t <= u < half ==> ({
-                    &&& #[trigger] nats(data@)[pos0(off as int, stride as int, u)] == e_seq[u]
-                    &&& nats(data@)[pos1(off as int, stride as int, u)] == o_seq[u]
-                }),
-                forall|j: int|
-                    0 <= j < data@.len()
-                        && !in_class(j, off as int, stride as int, pow2(d as nat))
-                        ==> data@[j] == old(data)@[j],
-            decreases half - t,
-        {
-            proof {
-                idx_bound(off as int, stride as int, 2 * (t as int) + 1,
-                    pow2(d as nat) as int);
-
-                assert((pow2(d as nat) as int) * (stride as int)
-                    == (stride as nat) * pow2(d as nat)) by (nonlinear_arith);
-
-                assert(2 * (t as int) * (stride as int) + (stride as int)
-                    == (2 * (t as int) + 1) * (stride as int)) by (nonlinear_arith);
-
-                lemma_mul_inequality(1, stride as int, 2 * (t as int));
-                lemma_mul_is_commutative(2 * (t as int), stride as int);
-
-                assert(2 * (t as int) <= 2 * (t as int) * (stride as int));
-                assert(off as int + 2 * (t as int) * (stride as int) + (stride as int)
-                    < data@.len());
-
-                pow2_mono(dm1, (self.log_n - 1) as nat);
-            }
-
-            let tw = add_flat(coset, self.twiddles[t]);
-            let i0 = off + 2 * t * stride;
-            let i1 = i0 + stride;
-
-            let p = data[i0];
-            let q = data[i1];
-            let lo = add_flat(p, mul_flat(tw, q));
-            let hi = add_flat(lo, q);
-
-            proof {
-                assert(i0 as int == pos0(off as int, stride as int, t as int));
-                assert(i1 as int == pos1(off as int, stride as int, t as int));
-                assert(nats(data@)[pos0(off as int, stride as int, t as int)]
-                    == e_seq[t as int]);
-                assert(nats(data@)[pos1(off as int, stride as int, t as int)]
-                    == o_seq[t as int]);
-                assert(p as nat == e_seq[t as int]);
-                assert(q as nat == o_seq[t as int]);
-
-                class_member(off as int, stride as int, pow2(d as nat), 2 * (t as int));
-                class_member(off as int, stride as int, pow2(d as nat), 2 * (t as int) + 1);
-
-                assert((2 * (t as int)) * (stride as int) == 2 * (t as int) * (stride as int))
-                    by (nonlinear_arith);
-                assert((2 * (t as int) + 1) * (stride as int)
-                    == 2 * (t as int) * (stride as int) + (stride as int)) by (nonlinear_arith);
-
-                assert forall|a: int, b: int| 0 <= a < b implies
-                    off as int + #[trigger] (a * (stride as int))
-                        < off as int + #[trigger] (b * (stride as int)) by {
-                    lemma_mul_strict_inequality(a, b, stride as int);
-                }
-
-                assert(tws[t as int] == self.twiddles@[t as int] as nat);
-                assert(lo as nat == bfly_lo(
-                    e_seq[t as int], o_seq[t as int], xor(coset as nat, tws[t as int]), 128,
-                ));
-                assert(hi as nat == xor(lo as nat, o_seq[t as int]));
-            }
-
-            let ghost pre_raw = data@;
-            let ghost pre = nats(data@);
-
-            data[i0] = lo;
-            data[i1] = hi;
-
-            proof {
-                assert(data@ == pre_raw.update(i0 as int, lo).update(i1 as int, hi));
-
-                assert forall|u: int| 0 <= u < t + 1 implies ({
-                    let lou = bfly_lo(e_seq[u], o_seq[u], xor(coset as nat, tws[u]), 128);
-                    #[trigger] nats(data@)[pos0(off as int, stride as int, u)] == lou
-                        && nats(data@)[pos1(off as int, stride as int, u)]
-                            == xor(lou, o_seq[u])
-                }) by {
-                    if u < t as int {
-                        lemma_mul_strict_inequality(2 * u, 2 * (t as int), stride as int);
-                        lemma_mul_strict_inequality(2 * u + 1, 2 * (t as int), stride as int);
-                        lemma_mul_strict_inequality(2 * u, 2 * (t as int) + 1, stride as int);
-                        lemma_mul_strict_inequality(
-                            2 * u + 1, 2 * (t as int) + 1, stride as int,
-                        );
-
-                        assert((2 * u + 1) * (stride as int)
-                            == 2 * u * (stride as int) + (stride as int)) by (nonlinear_arith);
-
-                        assert(pre[pos0(off as int, stride as int, u)]
-                            == bfly_lo(e_seq[u], o_seq[u], xor(coset as nat, tws[u]), 128));
-                        assert(nats(data@)[pos0(off as int, stride as int, u)]
-                            == pre[pos0(off as int, stride as int, u)]);
-                        assert(nats(data@)[pos1(off as int, stride as int, u)]
-                            == pre[pos1(off as int, stride as int, u)]);
-                    } else {
-                        assert(u == t as int);
-                        assert(nats(data@)[i1 as int] == hi as nat);
-                        assert(nats(data@)[i0 as int] == lo as nat);
-                    }
-                }
-
-                assert forall|u: int| t + 1 <= u < half implies ({
-                    #[trigger] nats(data@)[pos0(off as int, stride as int, u)] == e_seq[u]
-                        && nats(data@)[pos1(off as int, stride as int, u)] == o_seq[u]
-                }) by {
-                    lemma_mul_strict_inequality(2 * (t as int), 2 * u, stride as int);
-                    lemma_mul_strict_inequality(2 * (t as int) + 1, 2 * u, stride as int);
-                    lemma_mul_strict_inequality(2 * (t as int), 2 * u + 1, stride as int);
-                    lemma_mul_strict_inequality(2 * (t as int) + 1, 2 * u + 1, stride as int);
-
-                    assert((2 * u + 1) * (stride as int)
-                        == 2 * u * (stride as int) + (stride as int)) by (nonlinear_arith);
-
-                    idx_bound(off as int, stride as int, 2 * u + 1, pow2(d as nat) as int);
-
-                    assert(pre[pos0(off as int, stride as int, u)] == e_seq[u]);
-                    assert(nats(data@)[pos0(off as int, stride as int, u)]
-                        == pre[pos0(off as int, stride as int, u)]);
-                    assert(nats(data@)[pos1(off as int, stride as int, u)]
-                        == pre[pos1(off as int, stride as int, u)]);
-                }
-
-                assert forall|j: int|
-                    0 <= j < data@.len()
-                        && !in_class(j, off as int, stride as int, pow2(d as nat))
-                        implies data@[j] == old(data)@[j] by {
-                    assert(in_class(i0 as int, off as int, stride as int, pow2(d as nat)));
-                    assert(in_class(i1 as int, off as int, stride as int, pow2(d as nat)));
-                    assert(data@[j] == pre_raw[j]);
-                }
-            }
-
-            t += 1;
-        }
-
-        proof {
-            let gf = gather(nats(data@), off as int, stride as int, pow2(d as nat));
-            let want = fwd_spec(g0, tws, d as nat, coset as nat, 128);
-
-            assert(g0.len() == pow2(d as nat));
-            assert((d as nat - 1) as nat == dm1);
-            assert(sigma(coset as nat, 128) == child as nat);
-            assert(want == Seq::new(g0.len(), |i: int| {
-                let u = i / 2;
-                let lo = bfly_lo(e_seq[u], o_seq[u], xor(coset as nat, tws[u]), 128);
-
-                if i % 2 == 0 { lo } else { xor(lo, o_seq[u]) }
-            }));
-
-            assert forall|i: int| 0 <= i < pow2(d as nat) implies gf[i] == want[i] by {
-                lemma_fundamental_div_mod(i, 2);
-
-                let u = i / 2;
-                let lo = bfly_lo(e_seq[u], o_seq[u], xor(coset as nat, tws[u]), 128);
-
-                assert(0 <= u < pow2(dm1));
-
-                if i % 2 == 0 {
-                    assert(i * (stride as int) == 2 * u * (stride as int))
-                        by (nonlinear_arith)
-                        requires i == 2 * u,
-                    {}
-
-                    assert(gf[i] == nats(data@)[pos0(off as int, stride as int, u)]);
-                    assert(nats(data@)[pos0(off as int, stride as int, u)] == lo);
-                } else {
-                    assert(i * (stride as int) == 2 * u * (stride as int) + (stride as int))
-                        by (nonlinear_arith)
-                        requires i == 2 * u + 1,
-                    {}
-
-                    assert(gf[i] == nats(data@)[pos1(off as int, stride as int, u)]);
-                    assert(nats(data@)[pos0(off as int, stride as int, u)] == lo);
-                    assert(nats(data@)[pos1(off as int, stride as int, u)] == xor(lo, o_seq[u]));
-                }
-            }
-
-            assert(gf =~= want);
+proof fn interleave_evens(a: Seq<nat>, b: Seq<nat>)
+    requires a.len() == b.len(),
+    ensures
+        evens(interleave(a, b)) == a,
+        odds(interleave(a, b)) == b,
+{
+    let g = interleave(a, b);
+
+    assert forall|t: int| 0 <= t < a.len() implies evens(g)[t] == a[t] && odds(g)[t] == b[t] by {}
+
+    assert(evens(g) =~= a);
+    assert(odds(g) =~= b);
+}
+
+proof fn interleave_evens_odds(g: Seq<nat>)
+    requires g.len() % 2 == 0,
+    ensures interleave(evens(g), odds(g)) == g,
+{
+    assert forall|i: int| 0 <= i < g.len() implies interleave(evens(g), odds(g))[i] == g[i] by {
+        if i % 2 == 0 {
+            assert(2 * (i / 2) == i);
+        } else {
+            assert(2 * (i / 2) + 1 == i);
         }
     }
 
-    // inv_scalar, additive.rs:213-236; also the index shape
-    // of inv_packed.
-    fn inv_exec(&self, data: &mut Vec<u128>, off: usize, stride: usize, d: u32, coset: u128)
+    assert(interleave(evens(g), odds(g)) =~= g);
+}
+
+// The level loop's inductive step: once a node's even/odd
+// children hold their fwd_spec and one butterfly pass has run
+// over the pair (g_pre[2t], g_pre[2t+1]) with twiddle
+// xor(coset, tws[t]), the node holds fwd_spec at depth d.
+proof fn fwd_combine(
+    g_pre: Seq<nat>,
+    g_post: Seq<nat>,
+    old_g: Seq<nat>,
+    tws: Seq<nat>,
+    d: nat,
+    coset: nat,
+    k: nat,
+)
+    requires
+        d >= 1,
+        g_pre.len() == pow2(d),
+        g_post.len() == pow2(d),
+        old_g.len() == pow2(d),
+        evens(g_pre) == fwd_spec(evens(old_g), tws, (d - 1) as nat, sigma(coset, k), k),
+        odds(g_pre) == fwd_spec(odds(old_g), tws, (d - 1) as nat, sigma(coset, k), k),
+        forall|t: int| 0 <= t < pow2((d - 1) as nat) ==> {
+            &&& #[trigger] g_post[2 * t] == bfly_lo(
+                g_pre[2 * t],
+                g_pre[2 * t + 1],
+                xor(coset, tws[t]),
+                k,
+            )
+            &&& g_post[2 * t + 1] == xor(g_post[2 * t], g_pre[2 * t + 1])
+        },
+    ensures
+        g_post == fwd_spec(old_g, tws, d, coset, k),
+{
+    let child = sigma(coset, k);
+    let e = fwd_spec(evens(old_g), tws, (d - 1) as nat, child, k);
+    let o = fwd_spec(odds(old_g), tws, (d - 1) as nat, child, k);
+    let w = fwd_spec(old_g, tws, d, coset, k);
+
+    fwd_spec_len(evens(old_g), tws, (d - 1) as nat, child, k);
+    fwd_spec_len(odds(old_g), tws, (d - 1) as nat, child, k);
+
+    assert(pow2(d) == 2 * pow2((d - 1) as nat));
+
+    assert forall|i: int| 0 <= i < pow2(d) implies g_post[i] == w[i] by {
+        let t = i / 2;
+
+        assert(0 <= t < pow2((d - 1) as nat)) by (nonlinear_arith)
+            requires 0 <= i < 2 * pow2((d - 1) as nat), t == i / 2;
+
+        assert(evens(g_pre)[t] == g_pre[2 * t]);
+        assert(odds(g_pre)[t] == g_pre[2 * t + 1]);
+        assert(g_pre[2 * t] == e[t]);
+        assert(g_pre[2 * t + 1] == o[t]);
+
+        assert(g_post[2 * t] == bfly_lo(g_pre[2 * t], g_pre[2 * t + 1], xor(coset, tws[t]), k));
+        assert(g_post[2 * t + 1] == xor(g_post[2 * t], g_pre[2 * t + 1]));
+
+        let lo = bfly_lo(e[t], o[t], xor(coset, tws[t]), k);
+
+        if i % 2 == 0 {
+            assert(i == 2 * t);
+            assert(w[i] == lo);
+        } else {
+            assert(i == 2 * t + 1);
+            assert(w[i] == xor(lo, o[t]));
+        }
+    }
+
+    assert(g_post =~= w);
+}
+
+// One level pass advances the invariant:
+// Inv(lev) plus the stride-2^(lev-1) butterfly pass
+// gives Inv(lev-1). Pure re-indexing over gather_split,
+// node-wise via fwd_combine.
+proof fn fwd_pass_step(
+    pre: Seq<nat>,
+    post: Seq<nat>,
+    orig: Seq<nat>,
+    tws: Seq<nat>,
+    n: nat,
+    lev: nat,
+    coset: nat,
+    k: nat,
+)
+    requires
+        1 <= lev <= n,
+        pre.len() == pow2(n),
+        post.len() == pow2(n),
+        orig.len() == pow2(n),
+        forall|off: int| 0 <= off < pow2(lev) ==>
+            #[trigger] gather(pre, off, pow2(lev) as int, pow2((n - lev) as nat))
+                == fwd_spec(
+                    gather(orig, off, pow2(lev) as int, pow2((n - lev) as nat)),
+                    tws,
+                    (n - lev) as nat,
+                    sigma(coset, k),
+                    k,
+                ),
+        forall|b: int, r: int|
+            0 <= b < pow2((n - lev) as nat) && 0 <= r < pow2((lev - 1) as nat) ==> {
+                &&& #[trigger] post[b * pow2(lev) + r] == bfly_lo(
+                    pre[b * pow2(lev) + r],
+                    pre[b * pow2(lev) + pow2((lev - 1) as nat) + r],
+                    xor(coset, tws[b]),
+                    k,
+                )
+                &&& post[b * pow2(lev) + pow2((lev - 1) as nat) + r] == xor(
+                    post[b * pow2(lev) + r],
+                    pre[b * pow2(lev) + pow2((lev - 1) as nat) + r],
+                )
+            },
+    ensures
+        forall|off: int| 0 <= off < pow2((lev - 1) as nat) ==>
+            #[trigger] gather(post, off, pow2((lev - 1) as nat) as int, pow2((n - lev + 1) as nat))
+                == fwd_spec(
+                    gather(orig, off, pow2((lev - 1) as nat) as int, pow2((n - lev + 1) as nat)),
+                    tws,
+                    (n - lev + 1) as nat,
+                    coset,
+                    k,
+                ),
+{
+    let snew = pow2((lev - 1) as nat);
+    let slev = pow2(lev);
+    let mlow = pow2((n - lev) as nat);
+    let m = pow2((n - lev + 1) as nat);
+    let dd = (n - lev + 1) as nat;
+
+    assert(slev == 2 * snew);
+    assert(m == 2 * mlow);
+    assert((dd - 1) as nat == (n - lev) as nat);
+
+    assert forall|off: int| 0 <= off < snew implies gather(post, off, snew as int, m) == fwd_spec(
+        gather(orig, off, snew as int, m),
+        tws,
+        dd,
+        coset,
+        k,
+    ) by {
+        let g_pre = gather(pre, off, snew as int, m);
+        let g_post = gather(post, off, snew as int, m);
+        let old_g = gather(orig, off, snew as int, m);
+
+        gather_split(pre, off, snew as int, dd);
+        gather_split(orig, off, snew as int, dd);
+
+        assert(off < slev);
+        assert(off + snew < slev);
+
+        assert(evens(g_pre) == fwd_spec(evens(old_g), tws, (dd - 1) as nat, sigma(coset, k), k));
+        assert(odds(g_pre) == fwd_spec(odds(old_g), tws, (dd - 1) as nat, sigma(coset, k), k));
+
+        assert forall|t: int| 0 <= t < pow2((dd - 1) as nat) implies {
+            &&& #[trigger] g_post[2 * t] == bfly_lo(g_pre[2 * t], g_pre[2 * t + 1], xor(coset, tws[t]), k)
+            &&& g_post[2 * t + 1] == xor(g_post[2 * t], g_pre[2 * t + 1])
+        } by {
+            assert(2 * t * snew == t * slev) by (nonlinear_arith) requires slev == 2 * snew;
+            assert((2 * t + 1) * snew == t * slev + snew) by (nonlinear_arith) requires slev == 2
+                * snew;
+
+            assert(g_pre[2 * t] == pre[t * slev + off]);
+            assert(g_pre[2 * t + 1] == pre[t * slev + snew + off]);
+            assert(g_post[2 * t] == post[t * slev + off]);
+            assert(g_post[2 * t + 1] == post[t * slev + snew + off]);
+        }
+
+        fwd_combine(g_pre, g_post, old_g, tws, dd, coset, k);
+    }
+}
+
+// Inverse level step: Inv(lev) (each class still owes its
+// depth-(n-lev) inv_spec to reach fin) plus the inverse pass
+// gives Inv(lev+1). interleave splits a node's remaining work
+// onto its even/odd children.
+proof fn inv_pass_step(
+    pre: Seq<nat>,
+    post: Seq<nat>,
+    fin: Seq<nat>,
+    tws: Seq<nat>,
+    n: nat,
+    lev: nat,
+    coset: nat,
+    k: nat,
+)
+    requires
+        lev < n,
+        pre.len() == pow2(n),
+        post.len() == pow2(n),
+        fin.len() == pow2(n),
+        forall|off: int| 0 <= off < pow2(lev) ==> #[trigger] inv_spec(
+            gather(pre, off, pow2(lev) as int, pow2((n - lev) as nat)),
+            tws,
+            (n - lev) as nat,
+            coset,
+            k,
+        ) == gather(fin, off, pow2(lev) as int, pow2((n - lev) as nat)),
+        forall|b: int, r: int|
+            0 <= b < pow2((n - lev - 1) as nat) && 0 <= r < pow2(lev) ==> {
+                &&& #[trigger] post[b * pow2((lev + 1) as nat) + r] == bfly_lo(
+                    pre[b * pow2((lev + 1) as nat) + r],
+                    xor(
+                        pre[b * pow2((lev + 1) as nat) + r],
+                        pre[b * pow2((lev + 1) as nat) + pow2(lev) + r],
+                    ),
+                    xor(coset, tws[b]),
+                    k,
+                )
+                &&& post[b * pow2((lev + 1) as nat) + pow2(lev) + r] == xor(
+                    pre[b * pow2((lev + 1) as nat) + r],
+                    pre[b * pow2((lev + 1) as nat) + pow2(lev) + r],
+                )
+            },
+    ensures
+        forall|off: int| 0 <= off < pow2((lev + 1) as nat) ==> #[trigger] inv_spec(
+            gather(post, off, pow2((lev + 1) as nat) as int, pow2((n - lev - 1) as nat)),
+            tws,
+            (n - lev - 1) as nat,
+            sigma(coset, k),
+            k,
+        ) == gather(fin, off, pow2((lev + 1) as nat) as int, pow2((n - lev - 1) as nat)),
+{
+    let sL = pow2(lev);
+    let sL1 = pow2((lev + 1) as nat);
+    let mlow = pow2((n - lev - 1) as nat);
+    let mhi = pow2((n - lev) as nat);
+    let d = (n - lev) as nat;
+    let child = sigma(coset, k);
+
+    assert(sL1 == 2 * sL);
+    assert(mhi == 2 * mlow);
+    assert((d - 1) as nat == (n - lev - 1) as nat);
+
+    assert forall|off: int|
+        #![trigger inv_spec(gather(post, off, sL1 as int, mlow), tws, (n - lev - 1) as nat, child, k)]
+        #![trigger inv_spec(gather(post, off + sL, sL1 as int, mlow), tws, (n - lev - 1) as nat, child, k)]
+        0 <= off < sL implies {
+        &&& inv_spec(gather(post, off, sL1 as int, mlow), tws, (n - lev - 1) as nat, child, k)
+            == gather(fin, off, sL1 as int, mlow)
+        &&& inv_spec(gather(post, off + sL, sL1 as int, mlow), tws, (n - lev - 1) as nat, child, k)
+            == gather(fin, off + sL, sL1 as int, mlow)
+    } by {
+        let g_pre = gather(pre, off, sL as int, mhi);
+        let g_post = gather(post, off, sL as int, mhi);
+        let g_fin = gather(fin, off, sL as int, mhi);
+
+        gather_split(pre, off, sL as int, d);
+        gather_split(post, off, sL as int, d);
+        gather_split(fin, off, sL as int, d);
+
+        assert forall|t: int|
+            #![trigger g_post[2 * t]]
+            #![trigger g_post[2 * t + 1]]
+            0 <= t < mlow implies {
+            &&& g_post[2 * t] == bfly_lo(
+                g_pre[2 * t],
+                xor(g_pre[2 * t], g_pre[2 * t + 1]),
+                xor(coset, tws[t]),
+                k,
+            )
+            &&& g_post[2 * t + 1] == xor(g_pre[2 * t], g_pre[2 * t + 1])
+        } by {
+            assert(2 * t * sL == t * sL1) by (nonlinear_arith) requires sL1 == 2 * sL;
+            assert((2 * t + 1) * sL == t * sL1 + sL) by (nonlinear_arith) requires sL1 == 2 * sL;
+
+            assert(g_pre[2 * t] == pre[t * sL1 + off]);
+            assert(g_pre[2 * t + 1] == pre[t * sL1 + sL + off]);
+            assert(g_post[2 * t] == post[t * sL1 + off]);
+            assert(g_post[2 * t + 1] == post[t * sL1 + sL + off]);
+        }
+
+        let p = Seq::new(
+            mlow,
+            |t: int| bfly_lo(g_pre[2 * t], xor(g_pre[2 * t], g_pre[2 * t + 1]), xor(coset, tws[t]), k),
+        );
+        let q = Seq::new(mlow, |t: int| xor(g_pre[2 * t], g_pre[2 * t + 1]));
+
+        assert(evens(g_post) =~= p);
+        assert(odds(g_post) =~= q);
+
+        assert(inv_spec(p, tws, (d - 1) as nat, child, k) == inv_spec(
+            p,
+            tws,
+            (n - lev - 1) as nat,
+            child,
+            k,
+        ));
+        assert(inv_spec(q, tws, (d - 1) as nat, child, k) == inv_spec(
+            q,
+            tws,
+            (n - lev - 1) as nat,
+            child,
+            k,
+        ));
+
+        assert(inv_spec(g_pre, tws, d, coset, k) == interleave(
+            inv_spec(p, tws, (n - lev - 1) as nat, child, k),
+            inv_spec(q, tws, (n - lev - 1) as nat, child, k),
+        ));
+
+        inv_spec_len(p, tws, (n - lev - 1) as nat, child, k);
+        inv_spec_len(q, tws, (n - lev - 1) as nat, child, k);
+
+        interleave_evens_odds(g_fin);
+        interleave_evens(
+            inv_spec(p, tws, (n - lev - 1) as nat, child, k),
+            inv_spec(q, tws, (n - lev - 1) as nat, child, k),
+        );
+    }
+
+    assert forall|off_p: int| 0 <= off_p < sL1 implies #[trigger] inv_spec(
+        gather(post, off_p, sL1 as int, mlow),
+        tws,
+        (n - lev - 1) as nat,
+        child,
+        k,
+    ) == gather(fin, off_p, sL1 as int, mlow) by {
+        if off_p < sL {
+            assert(inv_spec(gather(post, off_p, sL1 as int, mlow), tws, (n - lev - 1) as nat, child, k)
+                == gather(fin, off_p, sL1 as int, mlow));
+        } else {
+            let off = off_p - sL;
+
+            assert(0 <= off < sL);
+            assert(off + sL == off_p);
+            assert(inv_spec(gather(post, off, sL1 as int, mlow), tws, (n - lev - 1) as nat, child, k)
+                == gather(fin, off, sL1 as int, mlow));
+            assert(inv_spec(
+                gather(post, off + sL, sL1 as int, mlow),
+                tws,
+                (n - lev - 1) as nat,
+                child,
+                k,
+            ) == gather(fin, off + sL, sL1 as int, mlow));
+        }
+    }
+}
+
+impl FftTwin {
+    // fwd_butterflies, additive.rs:295-307:
+    // pair r in [0,s) as (base+r, base+s+r);
+    // writes stay inside [base, base+2s).
+    fn fwd_bfly_block(&self, data: &mut Vec<u128>, base: usize, s: usize, tw: u128)
         requires
-            self.wf(),
-            d <= self.log_n,
-            stride >= 1,
-            off < stride,
-            (stride as nat) * pow2(d as nat) <= old(data)@.len(),
+            s >= 1,
+            base + 2 * s <= old(data)@.len(),
             old(data)@.len() <= usize::MAX,
         ensures
             final(data)@.len() == old(data)@.len(),
-            gather(nats(final(data)@), off as int, stride as int, pow2(d as nat))
-                == inv_spec(
-                    gather(nats(old(data)@), off as int, stride as int, pow2(d as nat)),
-                    nats(self.twiddles@),
-                    d as nat,
-                    coset as nat,
+            forall|r: int| 0 <= r < s ==> {
+                &&& #[trigger] final(data)@[base + r] as nat == bfly_lo(
+                    old(data)@[base + r] as nat,
+                    old(data)@[base + s + r] as nat,
+                    tw as nat,
                     128,
-                ),
+                )
+                &&& final(data)@[base + s + r] as nat == xor(
+                    final(data)@[base + r] as nat,
+                    old(data)@[base + s + r] as nat,
+                )
+            },
             forall|j: int|
-                0 <= j < final(data)@.len()
-                    && !in_class(j, off as int, stride as int, pow2(d as nat))
+                0 <= j < final(data)@.len() && (j < base || base + 2 * s <= j)
                     ==> final(data)@[j] == old(data)@[j],
-        decreases d,
     {
-        let ghost g0 = gather(nats(old(data)@), off as int, stride as int, pow2(d as nat));
-        let ghost tws = nats(self.twiddles@);
+        let mut r: usize = 0;
 
-        if d == 0 {
-            proof {
-                assert(pow2(0) == 1);
-                assert(gather(nats(data@), off as int, stride as int, 1) =~= g0);
-            }
-
-            return;
-        }
-
-        let ghost dm1 = (d - 1) as nat;
-
-        proof {
-            lemma_u64_pow2_no_overflow(dm1);
-            lemma_u64_shl_is_mul(1u64, (d - 1) as u64);
-            pow2_bridge(dm1);
-        }
-
-        let half = (1u64 << (d - 1)) as usize;
-        let child = add_flat(mul_flat(coset, coset), coset);
-
-        let ghost q_seq = Seq::new(pow2(dm1), |u: int| xor(g0[2 * u], g0[2 * u + 1]));
-        let ghost p_seq = Seq::new(
-            pow2(dm1),
-            |u: int| bfly_lo(
-                g0[2 * u],
-                xor(g0[2 * u], g0[2 * u + 1]),
-                xor(coset as nat, tws[u]),
-                128,
-            ),
-        );
-
-        proof {
-            assert(half as nat == pow2(dm1));
-            assert(child as nat == sigma(coset as nat, 128));
-            assert(pow2(d as nat) == 2 * pow2(dm1));
-            gf_model::pow2_pos(dm1);
-
-            assert((2 * (stride as nat)) * pow2(dm1) == (stride as nat) * pow2(d as nat))
-                by (nonlinear_arith)
-                requires pow2(d as nat) == 2 * pow2(dm1),
-            {}
-
-            assert((stride as nat) * 2 <= (stride as nat) * pow2(d as nat)) by (nonlinear_arith)
-                requires pow2(d as nat) == 2 * pow2(dm1), pow2(dm1) >= 1,
-            {}
-
-            // Original pair values at parent positions.
-            assert forall|u: int| 0 <= u < pow2(dm1) implies
-                #[trigger] nats(data@)[pos0(off as int, stride as int, u)] == g0[2 * u]
-                    && nats(data@)[pos1(off as int, stride as int, u)] == g0[2 * u + 1] by {
-                assert((2 * u) * (stride as int) == 2 * u * (stride as int))
-                    by (nonlinear_arith);
-                assert((2 * u + 1) * (stride as int)
-                    == 2 * u * (stride as int) + (stride as int)) by (nonlinear_arith);
-
-                assert(data@ == old(data)@);
-                assert(g0[2 * u]
-                    == nats(old(data)@)[off as int + (2 * u) * (stride as int)]);
-                assert(g0[2 * u + 1]
-                    == nats(old(data)@)[off as int + (2 * u + 1) * (stride as int)]);
-            }
-        }
-
-        let mut t: usize = 0;
-
-        while t < half
+        while r < s
             invariant
-                self.wf(),
-                1 <= d <= self.log_n,
-                stride >= 1,
-                off < stride,
-                dm1 == (d - 1) as nat,
-                half as nat == pow2(dm1),
-                pow2(d as nat) == 2 * pow2(dm1),
-                (stride as nat) * pow2(d as nat) <= data@.len(),
+                s >= 1,
+                base + 2 * s <= data@.len(),
                 data@.len() == old(data)@.len(),
                 data@.len() <= usize::MAX,
-                t <= half,
-                tws == nats(self.twiddles@),
-                g0 == gather(nats(old(data)@), off as int, stride as int, pow2(d as nat)),
-                q_seq.len() == pow2(dm1),
-                p_seq.len() == pow2(dm1),
-                q_seq == Seq::new(pow2(dm1), |u: int| xor(g0[2 * u], g0[2 * u + 1])),
-                p_seq == Seq::new(
-                    pow2(dm1),
-                    |u: int| bfly_lo(
-                        g0[2 * u],
-                        xor(g0[2 * u], g0[2 * u + 1]),
-                        xor(coset as nat, tws[u]),
+                r <= s,
+                forall|u: int| 0 <= u < r ==> {
+                    &&& #[trigger] data@[base + u] as nat == bfly_lo(
+                        old(data)@[base + u] as nat,
+                        old(data)@[base + s + u] as nat,
+                        tw as nat,
                         128,
-                    ),
-                ),
-                forall|u: int| 0 <= u < t ==> ({
-                    &&& #[trigger] nats(data@)[pos0(off as int, stride as int, u)] == p_seq[u]
-                    &&& nats(data@)[pos1(off as int, stride as int, u)] == q_seq[u]
-                }),
-                forall|u: int| t <= u < half ==> ({
-                    &&& #[trigger] nats(data@)[pos0(off as int, stride as int, u)] == g0[2 * u]
-                    &&& nats(data@)[pos1(off as int, stride as int, u)] == g0[2 * u + 1]
-                }),
+                    )
+                    &&& data@[base + s + u] as nat == xor(
+                        data@[base + u] as nat,
+                        old(data)@[base + s + u] as nat,
+                    )
+                },
                 forall|j: int|
-                    0 <= j < data@.len()
-                        && !in_class(j, off as int, stride as int, pow2(d as nat))
-                        ==> data@[j] == old(data)@[j],
-            decreases half - t,
+                    0 <= j < data@.len() && !(base <= j < base + r) && !(base + s <= j < base + s
+                        + r) ==> data@[j] == old(data)@[j],
+            decreases s - r,
+        {
+            let lo_i = base + r;
+            let hi_i = base + s + r;
+
+            let p = data[lo_i];
+            let q = data[hi_i];
+            let v = add_flat(p, mul_flat(q, tw));
+
+            proof {
+                gf_mul_comm(tw as nat, q as nat, 128);
+            }
+
+            data.set(lo_i, v);
+            data.set(hi_i, add_flat(v, q));
+
+            r += 1;
+        }
+    }
+
+    // blocks_serial, additive.rs:284-293:
+    // whole-array pass at stride s;
+    // block b (width 2s) twiddled by xor(coset, tws[b]).
+    fn pass_fwd_exec(&self, data: &mut Vec<u128>, coset: u128, s: usize, nblocks: usize)
+        requires
+            self.wf(),
+            s >= 1,
+            s <= usize::MAX / 2,
+            nblocks * (2 * s) == old(data)@.len(),
+            nblocks <= self.twiddles@.len(),
+            old(data)@.len() <= usize::MAX,
+        ensures
+            final(data)@.len() == old(data)@.len(),
+            forall|b: int, r: int|
+                0 <= b < nblocks && 0 <= r < s ==> {
+                    &&& #[trigger] final(data)@[b * (2 * s) + r] as nat == bfly_lo(
+                        old(data)@[b * (2 * s) + r] as nat,
+                        old(data)@[b * (2 * s) + s + r] as nat,
+                        xor(coset as nat, self.twiddles@[b] as nat),
+                        128,
+                    )
+                    &&& final(data)@[b * (2 * s) + s + r] as nat == xor(
+                        final(data)@[b * (2 * s) + r] as nat,
+                        old(data)@[b * (2 * s) + s + r] as nat,
+                    )
+                },
+    {
+        let mut b: usize = 0;
+        let mut base: usize = 0;
+
+        while b < nblocks
+            invariant
+                self.wf(),
+                s >= 1,
+                s <= usize::MAX / 2,
+                data@.len() == old(data)@.len(),
+                nblocks * (2 * s) == data@.len(),
+                nblocks <= self.twiddles@.len(),
+                b <= nblocks,
+                base == b * (2 * s),
+                data@.len() <= usize::MAX,
+                forall|bb: int, r: int|
+                    0 <= bb < b && 0 <= r < s ==> {
+                        &&& #[trigger] data@[bb * (2 * s) + r] as nat == bfly_lo(
+                            old(data)@[bb * (2 * s) + r] as nat,
+                            old(data)@[bb * (2 * s) + s + r] as nat,
+                            xor(coset as nat, self.twiddles@[bb] as nat),
+                            128,
+                        )
+                        &&& data@[bb * (2 * s) + s + r] as nat == xor(
+                            data@[bb * (2 * s) + r] as nat,
+                            old(data)@[bb * (2 * s) + s + r] as nat,
+                        )
+                    },
+                forall|j: int| base <= j < data@.len() ==> data@[j] == old(data)@[j],
+            decreases nblocks - b,
         {
             proof {
-                idx_bound(off as int, stride as int, 2 * (t as int) + 1,
-                    pow2(d as nat) as int);
+                lemma_mul_inequality((b + 1) as int, nblocks as int, (2 * s) as int);
 
-                assert((pow2(d as nat) as int) * (stride as int)
-                    == (stride as nat) * pow2(d as nat)) by (nonlinear_arith);
-
-                assert(2 * (t as int) * (stride as int) + (stride as int)
-                    == (2 * (t as int) + 1) * (stride as int)) by (nonlinear_arith);
-
-                lemma_mul_inequality(1, stride as int, 2 * (t as int));
-                lemma_mul_is_commutative(2 * (t as int), stride as int);
-
-                assert(2 * (t as int) <= 2 * (t as int) * (stride as int));
-                assert(off as int + 2 * (t as int) * (stride as int) + (stride as int)
-                    < data@.len());
-
-                pow2_mono(dm1, (self.log_n - 1) as nat);
+                assert((b + 1) * (2 * s) == base + 2 * s) by (nonlinear_arith)
+                    requires base == b * (2 * s);
             }
 
-            let tw = add_flat(coset, self.twiddles[t]);
-            let i0 = off + 2 * t * stride;
-            let i1 = i0 + stride;
+            let tw = add_flat(coset, self.twiddles[b]);
+            let ghost pre = data@;
 
-            let o0 = data[i0];
-            let o1 = data[i1];
-            let qv = add_flat(o0, o1);
-            let pv = add_flat(o0, mul_flat(tw, qv));
+            self.fwd_bfly_block(data, base, s, tw);
 
             proof {
-                assert(i0 as int == pos0(off as int, stride as int, t as int));
-                assert(i1 as int == pos1(off as int, stride as int, t as int));
-                assert(nats(data@)[pos0(off as int, stride as int, t as int)]
-                    == g0[2 * (t as int)]);
-                assert(nats(data@)[pos1(off as int, stride as int, t as int)]
-                    == g0[2 * (t as int) + 1]);
-                assert(o0 as nat == g0[2 * (t as int)]);
-                assert(o1 as nat == g0[2 * (t as int) + 1]);
-                assert(pv as nat == p_seq[t as int]);
-                assert(qv as nat == q_seq[t as int]);
-
-                class_member(off as int, stride as int, pow2(d as nat), 2 * (t as int));
-                class_member(off as int, stride as int, pow2(d as nat), 2 * (t as int) + 1);
-
-                assert((2 * (t as int)) * (stride as int) == 2 * (t as int) * (stride as int))
-                    by (nonlinear_arith);
-                assert((2 * (t as int) + 1) * (stride as int)
-                    == 2 * (t as int) * (stride as int) + (stride as int)) by (nonlinear_arith);
-
-                assert forall|a: int, b: int| 0 <= a < b implies
-                    off as int + #[trigger] (a * (stride as int))
-                        < off as int + #[trigger] (b * (stride as int)) by {
-                    lemma_mul_strict_inequality(a, b, stride as int);
-                }
-
-                assert(tws[t as int] == self.twiddles@[t as int] as nat);
-            }
-
-            let ghost pre_raw = data@;
-            let ghost pre = nats(data@);
-
-            data[i0] = pv;
-            data[i1] = qv;
-
-            proof {
-                assert(data@ == pre_raw.update(i0 as int, pv).update(i1 as int, qv));
-
-                assert forall|u: int| 0 <= u < t + 1 implies ({
-                    #[trigger] nats(data@)[pos0(off as int, stride as int, u)] == p_seq[u]
-                        && nats(data@)[pos1(off as int, stride as int, u)] == q_seq[u]
-                }) by {
-                    if u < t as int {
-                        lemma_mul_strict_inequality(2 * u, 2 * (t as int), stride as int);
-                        lemma_mul_strict_inequality(2 * u + 1, 2 * (t as int), stride as int);
-                        lemma_mul_strict_inequality(2 * u, 2 * (t as int) + 1, stride as int);
-                        lemma_mul_strict_inequality(
-                            2 * u + 1, 2 * (t as int) + 1, stride as int,
-                        );
-
-                        assert((2 * u + 1) * (stride as int)
-                            == 2 * u * (stride as int) + (stride as int)) by (nonlinear_arith);
-
-                        assert(pre[pos0(off as int, stride as int, u)] == p_seq[u]);
-                        assert(nats(data@)[pos0(off as int, stride as int, u)]
-                            == pre[pos0(off as int, stride as int, u)]);
-                        assert(nats(data@)[pos1(off as int, stride as int, u)]
-                            == pre[pos1(off as int, stride as int, u)]);
+                assert forall|bb: int, r: int| 0 <= bb < b + 1 && 0 <= r < s implies {
+                    &&& #[trigger] data@[bb * (2 * s) + r] as nat == bfly_lo(
+                        old(data)@[bb * (2 * s) + r] as nat,
+                        old(data)@[bb * (2 * s) + s + r] as nat,
+                        xor(coset as nat, self.twiddles@[bb] as nat),
+                        128,
+                    )
+                    &&& data@[bb * (2 * s) + s + r] as nat == xor(
+                        data@[bb * (2 * s) + r] as nat,
+                        old(data)@[bb * (2 * s) + s + r] as nat,
+                    )
+                } by {
+                    if bb < b {
+                        assert(bb * (2 * s) + 2 * s == (bb + 1) * (2 * s)) by (nonlinear_arith);
+                        assert((bb + 1) * (2 * s) <= b * (2 * s)) by (nonlinear_arith)
+                            requires bb + 1 <= b, s >= 1;
+                        assert(bb * (2 * s) + r < base);
+                        assert(bb * (2 * s) + s + r < base);
                     } else {
-                        assert(u == t as int);
-                        assert(nats(data@)[i1 as int] == qv as nat);
-                        assert(nats(data@)[i0 as int] == pv as nat);
+                        assert(bb == b);
+                        assert(bb * (2 * s) == base) by (nonlinear_arith)
+                            requires bb == b, base == b * (2 * s);
+                        assert(base + 2 * s == (b + 1) * (2 * s)) by (nonlinear_arith)
+                            requires base == b * (2 * s);
+                        assert(base <= bb * (2 * s) + r < data@.len());
+                        assert(base <= bb * (2 * s) + s + r < data@.len());
                     }
                 }
 
-                // Restate in the invariant's exact shape:
-                // the end-of-body check matches it verbatim.
-                assert(forall|u: int| 0 <= u < t + 1 ==> ({
-                    &&& #[trigger] nats(data@)[pos0(off as int, stride as int, u)] == p_seq[u]
-                    &&& nats(data@)[pos1(off as int, stride as int, u)] == q_seq[u]
-                }));
-
-                assert forall|u: int| t + 1 <= u < half implies ({
-                    #[trigger] nats(data@)[pos0(off as int, stride as int, u)] == g0[2 * u]
-                        && nats(data@)[pos1(off as int, stride as int, u)] == g0[2 * u + 1]
-                }) by {
-                    lemma_mul_strict_inequality(2 * (t as int), 2 * u, stride as int);
-                    lemma_mul_strict_inequality(2 * (t as int) + 1, 2 * u, stride as int);
-                    lemma_mul_strict_inequality(2 * (t as int), 2 * u + 1, stride as int);
-                    lemma_mul_strict_inequality(2 * (t as int) + 1, 2 * u + 1, stride as int);
-
-                    assert((2 * u + 1) * (stride as int)
-                        == 2 * u * (stride as int) + (stride as int)) by (nonlinear_arith);
-
-                    idx_bound(off as int, stride as int, 2 * u + 1, pow2(d as nat) as int);
-
-                    assert(pre[pos0(off as int, stride as int, u)] == g0[2 * u]);
-                    assert(pre[pos1(off as int, stride as int, u)] == g0[2 * u + 1]);
-                    assert(nats(data@)[pos0(off as int, stride as int, u)]
-                        == pre[pos0(off as int, stride as int, u)]);
-                    assert(nats(data@)[pos1(off as int, stride as int, u)]
-                        == pre[pos1(off as int, stride as int, u)]);
-                }
-
-                assert forall|j: int|
-                    0 <= j < data@.len()
-                        && !in_class(j, off as int, stride as int, pow2(d as nat))
-                        implies data@[j] == old(data)@[j] by {
-                    assert(in_class(i0 as int, off as int, stride as int, pow2(d as nat)));
-                    assert(in_class(i1 as int, off as int, stride as int, pow2(d as nat)));
-                    assert(data@[j] == pre_raw[j]);
-                }
+                assert forall|j: int| base + 2 * s <= j < data@.len() implies data@[j] == old(data)@[j] by {}
             }
 
-            t += 1;
+            b = b + 1;
+            base = base + 2 * s;
         }
+    }
 
-        let ghost s1 = nats(data@);
+    // fwd_levels, additive.rs:197-215: passes at stride 2^L for
+    // L = log_n-1 down to 0, coset sigma^L(offset). Loop invariant:
+    // each stride-2^L class holds fwd_spec at depth log_n-L.
+    fn fwd_levels_exec(&self, data: &mut Vec<u128>, offset: u128)
+        requires
+            self.wf(),
+            old(data)@.len() == pow2(self.log_n as nat),
+        ensures
+            nats(final(data)@) == fwd_spec(
+                nats(old(data)@),
+                nats(self.twiddles@),
+                self.log_n as nat,
+                offset as nat,
+                128,
+            ),
+    {
+        let n = self.log_n;
+        let dlen = data.len();
 
-        proof {
-            gather_split(s1, off as int, stride as int, d as nat);
+        let mut chain: Vec<u128> = Vec::new();
+        let mut c = offset;
+        let mut l: u32 = 0;
 
-            // The even child class now holds p_seq, the odd q_seq.
-            assert forall|u: int| 0 <= u < pow2(dm1) implies
-                #[trigger] gather(s1, off as int, 2 * (stride as int), pow2(dm1))[u]
-                    == p_seq[u] by {
-                assert(2 * u * (stride as int) == u * (2 * (stride as int)))
-                    by (nonlinear_arith);
-
-                assert(nats(data@)[pos0(off as int, stride as int, u)] == p_seq[u]);
-            }
-
-            assert forall|u: int| 0 <= u < pow2(dm1) implies
-                #[trigger] gather(s1, off + stride as int, 2 * (stride as int), pow2(dm1))[u]
-                    == q_seq[u] by {
-                assert(2 * u * (stride as int) == u * (2 * (stride as int)))
-                    by (nonlinear_arith);
-
-                assert(nats(data@)[pos0(off as int, stride as int, u)] == p_seq[u]);
-                assert(nats(data@)[pos1(off as int, stride as int, u)] == q_seq[u]);
-            }
-
-            assert(gather(s1, off as int, 2 * (stride as int), pow2(dm1)) =~= p_seq);
-            assert(gather(s1, off + stride as int, 2 * (stride as int), pow2(dm1)) =~= q_seq);
-        }
-
-        self.inv_exec(data, off, stride * 2, d - 1, child);
-
-        let ghost s2 = nats(data@);
-
-        proof {
-            assert(gather(s2, off as int, 2 * (stride as int), pow2(dm1))
-                == inv_spec(p_seq, tws, dm1, child as nat, 128));
-
-            // Call 1 left the odd child class untouched.
-            assert forall|u: int| 0 <= u < pow2(dm1) implies
-                #[trigger] gather(s2, off + stride as int, 2 * (stride as int), pow2(dm1))[u]
-                    == gather(s1, off + stride as int, 2 * (stride as int), pow2(dm1))[u] by {
-                let j = off + stride as int + u * (2 * (stride as int));
-
-                class_member(off + stride as int, 2 * (stride as int), pow2(dm1), u);
-                idx_bound(off + stride as int, 2 * (stride as int), u, pow2(dm1) as int);
-
-                assert(pow2(dm1) as int * (2 * (stride as int))
-                    == (stride as nat) * pow2(d as nat)) by (nonlinear_arith)
-                    requires pow2(d as nat) == 2 * pow2(dm1),
-                {}
-
-                assert(!in_class(j, off as int, 2 * (stride as int), pow2(dm1)));
-            }
-
-            assert(gather(s2, off + stride as int, 2 * (stride as int), pow2(dm1)) =~= q_seq);
-        }
-
-        self.inv_exec(data, off + stride, stride * 2, d - 1, child);
-
-        let ghost s3 = nats(data@);
-
-        proof {
-            assert(gather(s3, off + stride as int, 2 * (stride as int), pow2(dm1))
-                == inv_spec(q_seq, tws, dm1, child as nat, 128));
-
-            // Call 2 left the even child class untouched.
-            assert forall|u: int| 0 <= u < pow2(dm1) implies
-                #[trigger] gather(s3, off as int, 2 * (stride as int), pow2(dm1))[u]
-                    == gather(s2, off as int, 2 * (stride as int), pow2(dm1))[u] by {
-                let j = off as int + u * (2 * (stride as int));
-
-                class_member(off as int, 2 * (stride as int), pow2(dm1), u);
-                idx_bound(off as int, 2 * (stride as int), u, pow2(dm1) as int);
-
-                assert(pow2(dm1) as int * (2 * (stride as int))
-                    == (stride as nat) * pow2(d as nat)) by (nonlinear_arith)
-                    requires pow2(d as nat) == 2 * pow2(dm1),
-                {}
-
-                assert(!in_class(j, off + stride as int, 2 * (stride as int), pow2(dm1)));
-            }
-
-            assert(gather(s3, off as int, 2 * (stride as int), pow2(dm1))
-                =~= gather(s2, off as int, 2 * (stride as int), pow2(dm1)));
-
-            let ie = inv_spec(p_seq, tws, dm1, child as nat, 128);
-            let io = inv_spec(q_seq, tws, dm1, child as nat, 128);
-            let gf = gather(s3, off as int, stride as int, pow2(d as nat));
-            let want = inv_spec(g0, tws, d as nat, coset as nat, 128);
-
-            // inv_spec's internal pair seqs are p_seq / q_seq.
-            assert(Seq::new(g0.len() / 2, |u: int| xor(g0[2 * u], g0[2 * u + 1])) =~= q_seq);
-            assert(Seq::new(
-                g0.len() / 2,
-                |u: int| bfly_lo(
-                    g0[2 * u],
-                    xor(g0[2 * u], g0[2 * u + 1]),
-                    xor(coset as nat, tws[u]),
+        while l < n
+            invariant
+                chain@.len() == l,
+                l <= n,
+                c as nat == sigma_pow(offset as nat, l as nat, 128),
+                forall|j: int| 0 <= j < l ==> #[trigger] chain@[j] as nat == sigma_pow(
+                    offset as nat,
+                    j as nat,
                     128,
                 ),
-            ) =~= p_seq);
+            decreases n - l,
+        {
+            chain.push(c);
 
-            assert(want == interleave(ie, io));
+            let sq = mul_flat(c, c);
 
-            gather_split(s3, off as int, stride as int, d as nat);
+            proof {
+                sigma_pow_step(offset as nat, l as nat, 128);
+            }
 
-            assert forall|i: int| 0 <= i < pow2(d as nat) implies gf[i] == want[i] by {
-                lemma_fundamental_div_mod(i, 2);
+            c = add_flat(sq, c);
+            l = l + 1;
+        }
 
-                let u = i / 2;
+        proof {
+            assert(dlen == data@.len());
+            assert(data@.len() == pow2(n as nat));
+            assert(data@.len() <= usize::MAX);
 
-                if i % 2 == 0 {
-                    assert(i * (stride as int) == u * (2 * (stride as int)))
-                        by (nonlinear_arith)
-                        requires i == 2 * u,
-                    {}
+            assert forall|off: int| 0 <= off < pow2(n as nat) implies #[trigger] gather(
+                nats(data@),
+                off,
+                pow2(n as nat) as int,
+                pow2((n - n) as nat),
+            ) == fwd_spec(
+                gather(nats(old(data)@), off, pow2(n as nat) as int, pow2((n - n) as nat)),
+                nats(self.twiddles@),
+                (n - n) as nat,
+                sigma_pow(offset as nat, n as nat, 128),
+                128,
+            ) by {
+                assert((n - n) as nat == 0);
+                assert(pow2(0) == 1);
+            }
+        }
 
-                    assert(gf[i] == gather(s3, off as int, 2 * (stride as int), pow2(dm1))[u]);
-                } else {
-                    assert(i * (stride as int)
-                        == u * (2 * (stride as int)) + (stride as int)) by (nonlinear_arith)
-                        requires i == 2 * u + 1,
-                    {}
+        let mut lev: u32 = n;
 
-                    assert(gf[i]
-                        == gather(s3, off + stride as int, 2 * (stride as int), pow2(dm1))[u]);
+        while lev > 0
+            invariant
+                self.wf(),
+                n == self.log_n,
+                data@.len() == pow2(n as nat),
+                data@.len() <= usize::MAX,
+                old(data)@.len() == pow2(n as nat),
+                chain@.len() == n,
+                forall|j: int| 0 <= j < n ==> #[trigger] chain@[j] as nat == sigma_pow(
+                    offset as nat,
+                    j as nat,
+                    128,
+                ),
+                lev <= n,
+                forall|off: int| 0 <= off < pow2(lev as nat) ==> #[trigger] gather(
+                    nats(data@),
+                    off,
+                    pow2(lev as nat) as int,
+                    pow2((n - lev) as nat),
+                ) == fwd_spec(
+                    gather(nats(old(data)@), off, pow2(lev as nat) as int, pow2((n - lev) as nat)),
+                    nats(self.twiddles@),
+                    (n - lev) as nat,
+                    sigma_pow(offset as nat, lev as nat, 128),
+                    128,
+                ),
+            decreases lev,
+        {
+            let new_l = lev - 1;
+
+            proof {
+                lemma_u64_pow2_no_overflow(new_l as nat);
+                lemma_u64_shl_is_mul(1u64, new_l as u64);
+                pow2_bridge(new_l as nat);
+
+                lemma_u64_pow2_no_overflow((n - lev) as nat);
+                lemma_u64_shl_is_mul(1u64, (n - lev) as u64);
+                pow2_bridge((n - lev) as nat);
+
+                assert(pow2(lev as nat) == 2 * pow2(new_l as nat));
+                gf_model::pow2_add((n - lev) as nat, lev as nat);
+                assert((n - lev) + lev == n);
+                pow2_mono(lev as nat, n as nat);
+                pow2_mono((n - lev) as nat, (n - 1) as nat);
+                gf_model::pow2_pos(new_l as nat);
+            }
+
+            let s = (1u64 << new_l) as usize;
+            let nblocks = (1u64 << (n - lev)) as usize;
+
+            proof {
+                assert(nblocks * (2 * s) == pow2((n - lev) as nat) * pow2(lev as nat));
+                assert(2 * s <= usize::MAX);
+                assert(s <= usize::MAX / 2);
+            }
+
+            let ghost pre = data@;
+
+            assert(forall|off: int| 0 <= off < pow2(lev as nat) ==> #[trigger] gather(
+                nats(pre),
+                off,
+                pow2(lev as nat) as int,
+                pow2((n - lev) as nat),
+            ) == fwd_spec(
+                gather(nats(old(data)@), off, pow2(lev as nat) as int, pow2((n - lev) as nat)),
+                nats(self.twiddles@),
+                (n - lev) as nat,
+                sigma_pow(offset as nat, lev as nat, 128),
+                128,
+            ));
+
+            self.pass_fwd_exec(data, chain[new_l as usize], s, nblocks);
+
+            proof {
+                assert forall|b: int, r: int|
+                    0 <= b < pow2((n - lev) as nat) && 0 <= r < pow2((lev - 1) as nat) implies {
+                    &&& #[trigger] nats(data@)[b * pow2(lev as nat) + r] == bfly_lo(
+                        nats(pre)[b * pow2(lev as nat) + r],
+                        nats(pre)[b * pow2(lev as nat) + pow2((lev - 1) as nat) + r],
+                        xor(sigma_pow(offset as nat, new_l as nat, 128), nats(self.twiddles@)[b]),
+                        128,
+                    )
+                    &&& nats(data@)[b * pow2(lev as nat) + pow2((lev - 1) as nat) + r] == xor(
+                        nats(data@)[b * pow2(lev as nat) + r],
+                        nats(pre)[b * pow2(lev as nat) + pow2((lev - 1) as nat) + r],
+                    )
+                } by {
+                    assert(b < nblocks);
+                    assert(pow2(lev as nat) == 2 * (s as nat));
+                    assert(pow2((lev - 1) as nat) == s as nat);
+                    assert(nblocks * (2 * s) == pow2(n as nat));
+
+                    lemma_mul_inequality((b + 1) as int, nblocks as int, (2 * s) as int);
+
+                    assert(b * pow2(lev as nat) == b * (2 * s)) by (nonlinear_arith)
+                        requires pow2(lev as nat) == 2 * (s as nat);
+                    assert((b + 1) * (2 * s) == b * (2 * s) + 2 * s) by (nonlinear_arith);
+
+                    assert(0 <= b * (2 * s) + r < data@.len());
+                    assert(0 <= b * (2 * s) + s + r < data@.len());
+                    assert(chain@[new_l as int] as nat == sigma_pow(offset as nat, new_l as nat, 128));
                 }
+
+                sigma_pow_step(offset as nat, new_l as nat, 128);
+
+                assert(nats(pre).len() == pow2(n as nat));
+                assert(nats(data@).len() == pow2(n as nat));
+                assert(old(data)@.len() == pow2(self.log_n as nat));
+                assert(self.log_n as nat == n as nat);
+                assert(pow2(self.log_n as nat) == pow2(n as nat));
+                assert(nats(old(data)@).len() == pow2(n as nat));
+                assert((new_l as nat) + 1 == lev as nat);
+
+                fwd_pass_step(
+                    nats(pre),
+                    nats(data@),
+                    nats(old(data)@),
+                    nats(self.twiddles@),
+                    n as nat,
+                    lev as nat,
+                    sigma_pow(offset as nat, new_l as nat, 128),
+                    128,
+                );
+
+                assert(forall|off: int| 0 <= off < pow2(new_l as nat) ==> #[trigger] gather(
+                    nats(data@),
+                    off,
+                    pow2(new_l as nat) as int,
+                    pow2((n - new_l) as nat),
+                ) == fwd_spec(
+                    gather(nats(old(data)@), off, pow2(new_l as nat) as int, pow2((n - new_l) as nat)),
+                    nats(self.twiddles@),
+                    (n - new_l) as nat,
+                    sigma_pow(offset as nat, new_l as nat, 128),
+                    128,
+                )) by {
+                    assert(new_l as nat == (lev - 1) as nat);
+                    assert((n - new_l) as nat == (n - lev + 1) as nat);
+                };
             }
 
-            assert(gf =~= want);
+            lev = new_l;
+        }
 
-            assert forall|j: int|
-                0 <= j < data@.len()
-                    && !in_class(j, off as int, stride as int, pow2(d as nat))
-                    implies data@[j] == old(data)@[j] by {
-                class_split(j, off as int, stride as int, d as nat);
+        proof {
+            assert(lev == 0);
+
+            assert(gather(nats(data@), 0, pow2(lev as nat) as int, pow2((n - lev) as nat))
+                == fwd_spec(
+                gather(nats(old(data)@), 0, pow2(lev as nat) as int, pow2((n - lev) as nat)),
+                nats(self.twiddles@),
+                (n - lev) as nat,
+                sigma_pow(offset as nat, lev as nat, 128),
+                128,
+            ));
+
+            assert(pow2(lev as nat) == 1);
+            assert((n - lev) as nat == n as nat);
+            assert(sigma_pow(offset as nat, lev as nat, 128) == offset as nat);
+            assert(self.log_n as nat == n as nat);
+            assert(old(data)@.len() == pow2(n as nat));
+
+            gather_ident(nats(old(data)@), pow2(n as nat));
+            gather_ident(nats(data@), pow2(n as nat));
+
+            assert(gather(nats(data@), 0, pow2(lev as nat) as int, pow2((n - lev) as nat))
+                == nats(data@));
+            assert(gather(nats(old(data)@), 0, pow2(lev as nat) as int, pow2((n - lev) as nat))
+                == nats(old(data)@));
+        }
+    }
+
+    // inv_butterflies, additive.rs:309-319:
+    // qv = lo+hi, lo = bfly_lo(lo, qv, tw), hi = qv;
+    // writes stay in [base,base+2s).
+    fn inv_bfly_block(&self, data: &mut Vec<u128>, base: usize, s: usize, tw: u128)
+        requires
+            s >= 1,
+            base + 2 * s <= old(data)@.len(),
+            old(data)@.len() <= usize::MAX,
+        ensures
+            final(data)@.len() == old(data)@.len(),
+            forall|r: int| 0 <= r < s ==> {
+                &&& #[trigger] final(data)@[base + r] as nat == bfly_lo(
+                    old(data)@[base + r] as nat,
+                    xor(old(data)@[base + r] as nat, old(data)@[base + s + r] as nat),
+                    tw as nat,
+                    128,
+                )
+                &&& final(data)@[base + s + r] as nat == xor(
+                    old(data)@[base + r] as nat,
+                    old(data)@[base + s + r] as nat,
+                )
+            },
+            forall|j: int|
+                0 <= j < final(data)@.len() && (j < base || base + 2 * s <= j)
+                    ==> final(data)@[j] == old(data)@[j],
+    {
+        let mut r: usize = 0;
+
+        while r < s
+            invariant
+                s >= 1,
+                base + 2 * s <= data@.len(),
+                data@.len() == old(data)@.len(),
+                data@.len() <= usize::MAX,
+                r <= s,
+                forall|u: int| 0 <= u < r ==> {
+                    &&& #[trigger] data@[base + u] as nat == bfly_lo(
+                        old(data)@[base + u] as nat,
+                        xor(old(data)@[base + u] as nat, old(data)@[base + s + u] as nat),
+                        tw as nat,
+                        128,
+                    )
+                    &&& data@[base + s + u] as nat == xor(
+                        old(data)@[base + u] as nat,
+                        old(data)@[base + s + u] as nat,
+                    )
+                },
+                forall|j: int|
+                    0 <= j < data@.len() && !(base <= j < base + r) && !(base + s <= j < base + s
+                        + r) ==> data@[j] == old(data)@[j],
+            decreases s - r,
+        {
+            let lo_i = base + r;
+            let hi_i = base + s + r;
+
+            let a = data[lo_i];
+            let b = data[hi_i];
+            let qv = add_flat(a, b);
+
+            proof {
+                gf_mul_comm(tw as nat, qv as nat, 128);
             }
+
+            data.set(lo_i, add_flat(a, mul_flat(qv, tw)));
+            data.set(hi_i, qv);
+
+            r += 1;
+        }
+    }
+
+    // blocks_serial, additive.rs:284-293: inverse whole-array
+    // pass at stride s; block b twiddled by xor(coset, tws[b]).
+    fn pass_inv_exec(&self, data: &mut Vec<u128>, coset: u128, s: usize, nblocks: usize)
+        requires
+            self.wf(),
+            s >= 1,
+            s <= usize::MAX / 2,
+            nblocks * (2 * s) == old(data)@.len(),
+            nblocks <= self.twiddles@.len(),
+            old(data)@.len() <= usize::MAX,
+        ensures
+            final(data)@.len() == old(data)@.len(),
+            forall|b: int, r: int|
+                0 <= b < nblocks && 0 <= r < s ==> {
+                    &&& #[trigger] final(data)@[b * (2 * s) + r] as nat == bfly_lo(
+                        old(data)@[b * (2 * s) + r] as nat,
+                        xor(
+                            old(data)@[b * (2 * s) + r] as nat,
+                            old(data)@[b * (2 * s) + s + r] as nat,
+                        ),
+                        xor(coset as nat, self.twiddles@[b] as nat),
+                        128,
+                    )
+                    &&& final(data)@[b * (2 * s) + s + r] as nat == xor(
+                        old(data)@[b * (2 * s) + r] as nat,
+                        old(data)@[b * (2 * s) + s + r] as nat,
+                    )
+                },
+    {
+        let mut b: usize = 0;
+        let mut base: usize = 0;
+
+        while b < nblocks
+            invariant
+                self.wf(),
+                s >= 1,
+                s <= usize::MAX / 2,
+                data@.len() == old(data)@.len(),
+                nblocks * (2 * s) == data@.len(),
+                nblocks <= self.twiddles@.len(),
+                b <= nblocks,
+                base == b * (2 * s),
+                data@.len() <= usize::MAX,
+                forall|bb: int, r: int|
+                    0 <= bb < b && 0 <= r < s ==> {
+                        &&& #[trigger] data@[bb * (2 * s) + r] as nat == bfly_lo(
+                            old(data)@[bb * (2 * s) + r] as nat,
+                            xor(
+                                old(data)@[bb * (2 * s) + r] as nat,
+                                old(data)@[bb * (2 * s) + s + r] as nat,
+                            ),
+                            xor(coset as nat, self.twiddles@[bb] as nat),
+                            128,
+                        )
+                        &&& data@[bb * (2 * s) + s + r] as nat == xor(
+                            old(data)@[bb * (2 * s) + r] as nat,
+                            old(data)@[bb * (2 * s) + s + r] as nat,
+                        )
+                    },
+                forall|j: int| base <= j < data@.len() ==> data@[j] == old(data)@[j],
+            decreases nblocks - b,
+        {
+            proof {
+                lemma_mul_inequality((b + 1) as int, nblocks as int, (2 * s) as int);
+
+                assert((b + 1) * (2 * s) == base + 2 * s) by (nonlinear_arith)
+                    requires base == b * (2 * s);
+            }
+
+            let tw = add_flat(coset, self.twiddles[b]);
+            let ghost pre = data@;
+
+            self.inv_bfly_block(data, base, s, tw);
+
+            proof {
+                assert forall|bb: int, r: int| 0 <= bb < b + 1 && 0 <= r < s implies {
+                    &&& #[trigger] data@[bb * (2 * s) + r] as nat == bfly_lo(
+                        old(data)@[bb * (2 * s) + r] as nat,
+                        xor(
+                            old(data)@[bb * (2 * s) + r] as nat,
+                            old(data)@[bb * (2 * s) + s + r] as nat,
+                        ),
+                        xor(coset as nat, self.twiddles@[bb] as nat),
+                        128,
+                    )
+                    &&& data@[bb * (2 * s) + s + r] as nat == xor(
+                        old(data)@[bb * (2 * s) + r] as nat,
+                        old(data)@[bb * (2 * s) + s + r] as nat,
+                    )
+                } by {
+                    if bb < b {
+                        assert(bb * (2 * s) + 2 * s == (bb + 1) * (2 * s)) by (nonlinear_arith);
+                        assert((bb + 1) * (2 * s) <= b * (2 * s)) by (nonlinear_arith)
+                            requires bb + 1 <= b, s >= 1;
+                        assert(bb * (2 * s) + r < base);
+                        assert(bb * (2 * s) + s + r < base);
+                    } else {
+                        assert(bb == b);
+                        assert(bb * (2 * s) == base) by (nonlinear_arith)
+                            requires bb == b, base == b * (2 * s);
+                        assert(base + 2 * s == (b + 1) * (2 * s)) by (nonlinear_arith)
+                            requires base == b * (2 * s);
+                        assert(base <= bb * (2 * s) + r < data@.len());
+                        assert(base <= bb * (2 * s) + s + r < data@.len());
+                    }
+                }
+
+                assert forall|j: int| base + 2 * s <= j < data@.len() implies data@[j] == old(data)@[j] by {}
+            }
+
+            b = b + 1;
+            base = base + 2 * s;
+        }
+    }
+
+    // inv_levels, additive.rs:219-229: passes at stride 2^L for
+    // L = 0 up to log_n-1, coset sigma^L(offset). Loop invariant:
+    // each stride-2^L class still owes its depth-(log_n-L) inv_spec
+    // to reach fin = inv_spec(input).
+    fn inv_levels_exec(&self, data: &mut Vec<u128>, offset: u128)
+        requires
+            self.wf(),
+            old(data)@.len() == pow2(self.log_n as nat),
+        ensures
+            nats(final(data)@) == inv_spec(
+                nats(old(data)@),
+                nats(self.twiddles@),
+                self.log_n as nat,
+                offset as nat,
+                128,
+            ),
+    {
+        let n = self.log_n;
+        let dlen = data.len();
+
+        let ghost fin = inv_spec(
+            nats(old(data)@),
+            nats(self.twiddles@),
+            n as nat,
+            offset as nat,
+            128,
+        );
+
+        proof {
+            assert(dlen == data@.len());
+            assert(data@.len() == pow2(n as nat));
+            assert(data@.len() <= usize::MAX);
+            inv_spec_len(nats(old(data)@), nats(self.twiddles@), n as nat, offset as nat, 128);
+            gather_ident(nats(data@), pow2(n as nat));
+            gather_ident(fin, pow2(n as nat));
+
+            assert forall|off: int| 0 <= off < pow2(0) implies #[trigger] inv_spec(
+                gather(nats(data@), off, pow2(0) as int, pow2((n - 0) as nat)),
+                nats(self.twiddles@),
+                (n - 0) as nat,
+                sigma_pow(offset as nat, 0, 128),
+                128,
+            ) == gather(fin, off, pow2(0) as int, pow2((n - 0) as nat)) by {
+                assert(pow2(0) == 1);
+                assert(off == 0);
+                assert(sigma_pow(offset as nat, 0, 128) == offset as nat);
+            }
+        }
+
+        let mut c = offset;
+        let mut lev: u32 = 0;
+
+        while lev < n
+            invariant
+                self.wf(),
+                n == self.log_n,
+                data@.len() == pow2(n as nat),
+                data@.len() <= usize::MAX,
+                old(data)@.len() == pow2(n as nat),
+                fin.len() == pow2(n as nat),
+                fin == inv_spec(
+                    nats(old(data)@),
+                    nats(self.twiddles@),
+                    n as nat,
+                    offset as nat,
+                    128,
+                ),
+                lev <= n,
+                c as nat == sigma_pow(offset as nat, lev as nat, 128),
+                forall|off: int| 0 <= off < pow2(lev as nat) ==> #[trigger] inv_spec(
+                    gather(nats(data@), off, pow2(lev as nat) as int, pow2((n - lev) as nat)),
+                    nats(self.twiddles@),
+                    (n - lev) as nat,
+                    sigma_pow(offset as nat, lev as nat, 128),
+                    128,
+                ) == gather(fin, off, pow2(lev as nat) as int, pow2((n - lev) as nat)),
+            decreases n - lev,
+        {
+            proof {
+                lemma_u64_pow2_no_overflow(lev as nat);
+                lemma_u64_shl_is_mul(1u64, lev as u64);
+                pow2_bridge(lev as nat);
+
+                lemma_u64_pow2_no_overflow((n - lev - 1) as nat);
+                lemma_u64_shl_is_mul(1u64, (n - lev - 1) as u64);
+                pow2_bridge((n - lev - 1) as nat);
+
+                assert(pow2((lev + 1) as nat) == 2 * pow2(lev as nat));
+                gf_model::pow2_add((n - lev - 1) as nat, (lev + 1) as nat);
+                assert((n - lev - 1) + (lev + 1) == n);
+                pow2_mono((lev + 1) as nat, n as nat);
+                pow2_mono((n - lev - 1) as nat, (n - 1) as nat);
+                gf_model::pow2_pos(lev as nat);
+            }
+
+            let s = (1u64 << lev) as usize;
+            let nblocks = (1u64 << (n - lev - 1)) as usize;
+
+            proof {
+                assert(nblocks * (2 * s) == pow2((n - lev - 1) as nat) * pow2((lev + 1) as nat));
+                assert(2 * s <= usize::MAX);
+                assert(s <= usize::MAX / 2);
+            }
+
+            let ghost pre = data@;
+
+            assert(forall|off: int| 0 <= off < pow2(lev as nat) ==> #[trigger] inv_spec(
+                gather(nats(pre), off, pow2(lev as nat) as int, pow2((n - lev) as nat)),
+                nats(self.twiddles@),
+                (n - lev) as nat,
+                sigma_pow(offset as nat, lev as nat, 128),
+                128,
+            ) == gather(fin, off, pow2(lev as nat) as int, pow2((n - lev) as nat)));
+
+            self.pass_inv_exec(data, c, s, nblocks);
+
+            proof {
+                assert forall|b: int, r: int|
+                    0 <= b < pow2((n - lev - 1) as nat) && 0 <= r < pow2(lev as nat) implies {
+                    &&& #[trigger] nats(data@)[b * pow2((lev + 1) as nat) + r] == bfly_lo(
+                        nats(pre)[b * pow2((lev + 1) as nat) + r],
+                        xor(
+                            nats(pre)[b * pow2((lev + 1) as nat) + r],
+                            nats(pre)[b * pow2((lev + 1) as nat) + pow2(lev as nat) + r],
+                        ),
+                        xor(sigma_pow(offset as nat, lev as nat, 128), nats(self.twiddles@)[b]),
+                        128,
+                    )
+                    &&& nats(data@)[b * pow2((lev + 1) as nat) + pow2(lev as nat) + r] == xor(
+                        nats(pre)[b * pow2((lev + 1) as nat) + r],
+                        nats(pre)[b * pow2((lev + 1) as nat) + pow2(lev as nat) + r],
+                    )
+                } by {
+                    assert(b < nblocks);
+                    assert(pow2((lev + 1) as nat) == 2 * (s as nat));
+                    assert(pow2(lev as nat) == s as nat);
+                    assert(nblocks * (2 * s) == pow2(n as nat));
+
+                    lemma_mul_inequality((b + 1) as int, nblocks as int, (2 * s) as int);
+
+                    assert(b * pow2((lev + 1) as nat) == b * (2 * s)) by (nonlinear_arith)
+                        requires pow2((lev + 1) as nat) == 2 * (s as nat);
+                    assert((b + 1) * (2 * s) == b * (2 * s) + 2 * s) by (nonlinear_arith);
+
+                    assert(0 <= b * (2 * s) + r < data@.len());
+                    assert(0 <= b * (2 * s) + s + r < data@.len());
+                }
+
+                sigma_pow_step(offset as nat, lev as nat, 128);
+
+                assert(nats(pre).len() == pow2(n as nat));
+                assert(nats(data@).len() == pow2(n as nat));
+
+                inv_pass_step(
+                    nats(pre),
+                    nats(data@),
+                    fin,
+                    nats(self.twiddles@),
+                    n as nat,
+                    lev as nat,
+                    sigma_pow(offset as nat, lev as nat, 128),
+                    128,
+                );
+
+                assert(forall|off: int| 0 <= off < pow2((lev + 1) as nat) ==> #[trigger] inv_spec(
+                    gather(
+                        nats(data@),
+                        off,
+                        pow2((lev + 1) as nat) as int,
+                        pow2((n - lev - 1) as nat),
+                    ),
+                    nats(self.twiddles@),
+                    (n - lev - 1) as nat,
+                    sigma_pow(offset as nat, (lev + 1) as nat, 128),
+                    128,
+                ) == gather(fin, off, pow2((lev + 1) as nat) as int, pow2((n - lev - 1) as nat)));
+            }
+
+            c = add_flat(mul_flat(c, c), c);
+            lev = lev + 1;
+        }
+
+        proof {
+            assert(lev == n);
+
+            assert forall|off: int| 0 <= off < pow2(n as nat) implies nats(data@)[off] == fin[off] by {
+                assert(inv_spec(
+                    gather(nats(data@), off, pow2(lev as nat) as int, pow2((n - lev) as nat)),
+                    nats(self.twiddles@),
+                    (n - lev) as nat,
+                    sigma_pow(offset as nat, lev as nat, 128),
+                    128,
+                ) == gather(fin, off, pow2(lev as nat) as int, pow2((n - lev) as nat)));
+
+                assert((n - lev) as nat == 0);
+                assert(pow2((n - lev) as nat) == 1);
+                assert(gather(nats(data@), off, pow2(lev as nat) as int, 1)[0] == nats(data@)[off]);
+                assert(gather(fin, off, pow2(lev as nat) as int, 1)[0] == fin[off]);
+            }
+
+            assert(nats(data@) =~= fin);
         }
     }
 
@@ -2181,17 +2505,7 @@ impl FftTwin {
             return Err(());
         }
 
-        proof {
-            assert((1 as nat) * pow2(self.log_n as nat) == pow2(self.log_n as nat))
-                by (nonlinear_arith);
-        }
-
-        self.fwd_exec(data, 0, 1, self.log_n, offset);
-
-        proof {
-            gather_ident(nats(old(data)@), pow2(self.log_n as nat));
-            gather_ident(nats(data@), pow2(self.log_n as nat));
-        }
+        self.fwd_levels_exec(data, offset);
 
         Ok(())
     }
@@ -2222,17 +2536,7 @@ impl FftTwin {
             return Err(());
         }
 
-        proof {
-            assert((1 as nat) * pow2(self.log_n as nat) == pow2(self.log_n as nat))
-                by (nonlinear_arith);
-        }
-
-        self.inv_exec(data, 0, 1, self.log_n, offset);
-
-        proof {
-            gather_ident(nats(old(data)@), pow2(self.log_n as nat));
-            gather_ident(nats(data@), pow2(self.log_n as nat));
-        }
+        self.inv_levels_exec(data, offset);
 
         Ok(())
     }

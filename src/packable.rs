@@ -33,7 +33,8 @@ pub trait PackableField: Sized + Copy + Clone + Default {
         + MulAssign
         + Copy
         + Clone
-        + Default;
+        + Default
+        + Send;
 
     /// How many elements fit in one packed vector.
     const WIDTH: usize;
