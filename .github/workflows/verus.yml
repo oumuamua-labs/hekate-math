@@ -34,6 +34,11 @@ jobs:
           unzip -q verus.zip -d verus-toolchain
           rm verus.zip
 
+      # A Verus release links one exact rustc;
+      # 0.2026.07.05 requires 1.96.0.
+      - name: Install the Verus-pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal
+
       - name: Locate verus binary
         id: verus-bin
         run: |
