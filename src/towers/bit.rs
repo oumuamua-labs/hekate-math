@@ -16,8 +16,8 @@
 // limitations under the License.
 
 use crate::{
-    Block8, CanonicalDeserialize, CanonicalSerialize, Flat, FlatPromote, HardwareField,
-    PackableField, PackedFlat, TowerField,
+    CanonicalDeserialize, CanonicalSerialize, Flat, HardwareField, PackableField, PackedFlat,
+    TowerField,
 };
 use core::ops::{Add, AddAssign, BitAnd, BitXor, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
@@ -27,13 +27,28 @@ use zeroize::Zeroize;
 // BIT (GF(2))
 // ==================================
 
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Zeroize)]
+/// GF(2) element; the inner byte is invariantly 0 or 1.
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Zeroize)]
 #[repr(transparent)]
-pub struct Bit(pub u8);
+pub struct Bit(u8);
 
 impl Bit {
+    #[inline]
     pub const fn new(val: u8) -> Self {
-        Self(val & 1) // Self(val.bitand(1))
+        Self(val & 1)
+    }
+
+    #[inline]
+    pub const fn try_new(val: u8) -> Option<Self> {
+        match val {
+            0 | 1 => Some(Self(val)),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub const fn get(self) -> u8 {
+        self.0
     }
 }
 
@@ -136,6 +151,26 @@ impl CanonicalDeserialize for Bit {
         }
 
         Ok(Self(bytes[0]))
+    }
+}
+
+impl Serialize for Bit {
+    #[inline]
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_u8(self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for Bit {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = u8::deserialize(deserializer)?;
+        Self::try_new(raw).ok_or_else(|| serde::de::Error::custom("Bit must be 0 or 1"))
     }
 }
 
@@ -394,14 +429,6 @@ impl HardwareField for Bit {
     }
 }
 
-impl FlatPromote<Block8> for Bit {
-    #[inline(always)]
-    fn promote_flat(val: Flat<Block8>) -> Flat<Self> {
-        // Take LSB
-        Flat::from_raw(Bit(val.into_raw().0 & 1))
-    }
-}
-
 // ===========================================
 // SIMD INSTRUCTIONS
 // ===========================================
@@ -480,6 +507,20 @@ mod tests {
         assert_eq!(zero * zero, zero);
         assert_eq!(zero * one, zero);
         assert_eq!(one * one, one);
+    }
+
+    #[test]
+    fn invariant_constructors() {
+        assert_eq!(Bit::try_new(0), Some(Bit::ZERO));
+        assert_eq!(Bit::try_new(1), Some(Bit::ONE));
+
+        for v in 2u8..=255 {
+            assert_eq!(Bit::try_new(v), None, "try_new admitted {v}");
+        }
+
+        for v in 0u8..=255 {
+            assert!(Bit::new(v).get() <= 1, "new escaped GF(2) at {v}");
+        }
     }
 
     #[test]

@@ -1,0 +1,53 @@
+name: Verus Proofs
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  VERUS_VERSION: "0.2026.07.05.49b8806"
+
+jobs:
+  verify:
+    name: Verus verification
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Cache Verus toolchain
+        id: cache-verus
+        uses: actions/cache@v4
+        with:
+          path: verus-toolchain
+          key: verus-${{ env.VERUS_VERSION }}-x86-linux
+
+      - name: Download Verus
+        if: steps.cache-verus.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          url="https://github.com/verus-lang/verus/releases/download/release/${VERUS_VERSION}/verus-${VERUS_VERSION}-x86-linux.zip"
+          echo "Downloading $url"
+          curl -fSL "$url" -o verus.zip
+          mkdir -p verus-toolchain
+          unzip -q verus.zip -d verus-toolchain
+          rm verus.zip
+
+      # A Verus release links one exact rustc;
+      # 0.2026.07.05 requires 1.96.0.
+      - name: Install the Verus-pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal
+
+      - name: Locate verus binary
+        id: verus-bin
+        run: |
+          set -euo pipefail
+          bin="$(find "$PWD/verus-toolchain" -type f -name verus | head -n1)"
+          test -n "$bin" || { echo "verus binary not found under verus-toolchain/"; exit 1; }
+          chmod +x "$bin"
+          echo "bin=$bin" >> "$GITHUB_OUTPUT"
+          "$bin" --version
+
+      - name: Verify proofs
+        run: VERUS="${{ steps.verus-bin.outputs.bin }}" ./verus/verify.sh

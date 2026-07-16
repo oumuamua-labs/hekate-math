@@ -210,7 +210,7 @@ impl From<u128> for Block32 {
 impl From<Bit> for Block32 {
     #[inline(always)]
     fn from(val: Bit) -> Self {
-        Self(val.0 as u32)
+        Self(val.get() as u32)
     }
 }
 
@@ -564,6 +564,8 @@ mod neon {
     use super::*;
     use core::arch::aarch64::*;
     use core::mem::transmute;
+
+    const _: () = assert!(constants::POLY_32 == 0x8d, "verus twins hardcode R = 0x8d");
 
     #[inline(always)]
     pub fn add_packed_32(lhs: PackedBlock32, rhs: PackedBlock32) -> PackedBlock32 {

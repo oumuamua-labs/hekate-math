@@ -53,7 +53,7 @@ impl CantorBasis {
                 return false;
             }
 
-            if (b.trace() == Bit(1)) != (i == Self::DIM - 1) {
+            if (b.trace() == Bit::ONE) != (i == Self::DIM - 1) {
                 return false;
             }
 

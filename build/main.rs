@@ -20,10 +20,20 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
-// Mirror Block8::EXTENSION_TAU and constants::POLY_8/16;
-// write_algebra_extras_16 pins them at build time.
+#[allow(dead_code)]
+mod gf_oracle {
+    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/build/gf_oracle.rs"));
+}
+
+// Mirror constants::POLY_* and Block8::EXTENSION_TAU.
+// x^k + POLY_k is the flat-basis modulus; verify_isomorphism_*
+// and write_algebra_extras_16 pin them against the oracle at build time.
 const POLY_8: u8 = 0x1b;
 const POLY_16: u16 = 0x2b;
+const POLY_32: u32 = 0x8d;
+const POLY_64: u64 = 0x1b;
+const POLY_128: u128 = 0x87;
+
 const EXTENSION_TAU_8: u8 = 0x20;
 
 // === 8 BIT CONSTANTS ===
@@ -803,6 +813,7 @@ macro_rules! impl_write_nibble_promote_tables_to_128 {
             file: &mut File,
             prefix: &str,
             flat_to_tower_from: &[$from_type; <$from_type>::BITS as usize],
+            tower_to_flat_from: &[$from_type; <$from_type>::BITS as usize],
         ) {
             for nib_idx in 0..$n_nibbles {
                 // Precompute full 128-bit lift for all
@@ -815,6 +826,21 @@ macro_rules! impl_write_nibble_promote_tables_to_128 {
                     let tower_128 = tower_from as u128;
 
                     lifted[nibble as usize] = apply_128(tower_128, &TOWER_TO_FLAT_128);
+
+                    // Every entry round-trips through the mutually-inverse
+                    // matrices at both widths: pins the tables against
+                    // a corrupted matrix or transport, independent of
+                    // the generating direction.
+                    assert_eq!(
+                        apply_128(lifted[nibble as usize], &FLAT_TO_TOWER_128),
+                        tower_128,
+                        "{prefix}: 128-side round-trip broken at nib {nib_idx}, value {nibble}"
+                    );
+                    assert_eq!(
+                        $apply_from(tower_from, tower_to_flat_from),
+                        from_val,
+                        "{prefix}: source-side round-trip broken at nib {nib_idx}, value {nibble}"
+                    );
                 }
 
                 writeln!(
@@ -1005,6 +1031,296 @@ fn gf2_rank_16(vals: &[u16; 16]) -> usize {
     rank
 }
 
+// Flat reference product, per gf_model.rs:
+// gf_mul(a, b, k) = pmod(clmul(a, b), x^k + POLY_k).
+// pmod folds each high bit down by POLY_k to a strictly
+// lower position, one descending sweep clears hi.
+macro_rules! impl_gf_mul_flat {
+    ($clmul:ident, $pmod:ident, $gf_mul_flat:ident, $type:ty, $size:expr, $poly:expr) => {
+        fn $clmul(a: $type, b: $type) -> ($type, $type) {
+            let mut lo: $type = 0;
+            let mut hi: $type = 0;
+
+            for i in 0..$size {
+                if (b >> i) & 1 == 1 {
+                    if i == 0 {
+                        lo ^= a;
+                    } else {
+                        lo ^= a << i;
+                        hi ^= a >> ($size - i);
+                    }
+                }
+            }
+
+            (lo, hi)
+        }
+
+        fn $pmod(mut lo: $type, mut hi: $type) -> $type {
+            for pos in (0..$size).rev() {
+                if (hi >> pos) & 1 == 1 {
+                    hi ^= (1 as $type) << pos;
+
+                    if pos == 0 {
+                        lo ^= $poly;
+                    } else {
+                        lo ^= $poly << pos;
+                        hi ^= $poly >> ($size - pos);
+                    }
+                }
+            }
+
+            lo
+        }
+
+        fn $gf_mul_flat(a: $type, b: $type) -> $type {
+            let (lo, hi) = $clmul(a, b);
+            $pmod(lo, hi)
+        }
+    };
+}
+
+impl_gf_mul_flat!(clmul_8, pmod_8, gf_mul_flat_8, u8, 8, POLY_8);
+impl_gf_mul_flat!(clmul_16, pmod_16, gf_mul_flat_16, u16, 16, POLY_16);
+impl_gf_mul_flat!(clmul_32, pmod_32, gf_mul_flat_32, u32, 32, POLY_32);
+impl_gf_mul_flat!(clmul_64, pmod_64, gf_mul_flat_64, u64, 64, POLY_64);
+impl_gf_mul_flat!(clmul_128, pmod_128, gf_mul_flat_128, u128, 128, POLY_128);
+
+macro_rules! impl_verify_iso {
+    ($func:ident, $type:ty, $size:expr, $gf_mul_flat:ident, $apply:ident,
+     $schoolbook:path, $tower_to_flat:ident, $flat_to_tower:ident) => {
+        fn $func() {
+            for i in 0..$size {
+                let e = (1 as $type) << i;
+
+                assert_eq!(
+                    $gf_mul_flat(1, e),
+                    e,
+                    "GF(2^{}): flat 1 is not identity",
+                    $size
+                );
+                assert_eq!(
+                    $gf_mul_flat(e, 0),
+                    0,
+                    "GF(2^{}): flat 0 is not absorbing",
+                    $size
+                );
+                assert_eq!(
+                    $schoolbook(1, e),
+                    e,
+                    "GF(2^{}): tower 1 is not identity",
+                    $size
+                );
+
+                assert_eq!(
+                    $apply($apply(e, &$tower_to_flat), &$flat_to_tower),
+                    e,
+                    "GF(2^{}): FLAT_TO_TOWER not inverse of TOWER_TO_FLAT (bit {})",
+                    $size,
+                    i
+                );
+                assert_eq!(
+                    $apply($apply(e, &$flat_to_tower), &$tower_to_flat),
+                    e,
+                    "GF(2^{}): TOWER_TO_FLAT not inverse of FLAT_TO_TOWER (bit {})",
+                    $size,
+                    i
+                );
+            }
+
+            for i in 0..$size {
+                let phi_ei = $apply((1 as $type) << i, &$tower_to_flat);
+
+                for j in 0..$size {
+                    let phi_ej = $apply((1 as $type) << j, &$tower_to_flat);
+                    let via_tower = $apply(
+                        $schoolbook((1 as $type) << i, (1 as $type) << j),
+                        &$tower_to_flat,
+                    );
+                    let via_flat = $gf_mul_flat(phi_ei, phi_ej);
+
+                    assert_eq!(
+                        via_tower, via_flat,
+                        "GF(2^{}): change-of-basis not multiplicative at ({}, {})",
+                        $size, i, j
+                    );
+                }
+            }
+        }
+    };
+}
+
+impl_verify_iso!(
+    verify_isomorphism_8,
+    u8,
+    8,
+    gf_mul_flat_8,
+    apply_8,
+    gf_oracle::schoolbook8,
+    TOWER_TO_FLAT_8,
+    FLAT_TO_TOWER_8
+);
+impl_verify_iso!(
+    verify_isomorphism_16,
+    u16,
+    16,
+    gf_mul_flat_16,
+    apply_16,
+    gf_oracle::schoolbook16,
+    TOWER_TO_FLAT_16,
+    FLAT_TO_TOWER_16
+);
+impl_verify_iso!(
+    verify_isomorphism_32,
+    u32,
+    32,
+    gf_mul_flat_32,
+    apply_32,
+    gf_oracle::schoolbook32,
+    TOWER_TO_FLAT_32,
+    FLAT_TO_TOWER_32
+);
+impl_verify_iso!(
+    verify_isomorphism_64,
+    u64,
+    64,
+    gf_mul_flat_64,
+    apply_64,
+    gf_oracle::schoolbook64,
+    TOWER_TO_FLAT_64,
+    FLAT_TO_TOWER_64
+);
+impl_verify_iso!(
+    verify_isomorphism_128,
+    u128,
+    128,
+    gf_mul_flat_128,
+    apply_128,
+    gf_oracle::schoolbook128,
+    TOWER_TO_FLAT_128,
+    FLAT_TO_TOWER_128
+);
+
+// Build-time discharge of verus/axioms_t.rs::norm_nonzero: the norm N(a) has
+// no nonzero root (GF(2^{2m}) is a field) iff X^2+X+tau_m is irreducible over GF(2^m)
+// iff Tr_{GF(2^m)/GF(2)}(tau_m) = 1 (Artin-Schreier). tau_m is EXTENSION_TAU in
+// the tower basis (see gf_oracle::schoolbook*); 1 is the tower identity.
+fn verify_norm_anisotropy() {
+    let (mut t, mut p) = (0u8, 0x20u8);
+    for _ in 0..8 {
+        t ^= p;
+        p = gf_oracle::sb8(p, p);
+    }
+
+    assert_eq!(
+        t, 1,
+        "GF(2^16) not a field: Tr(tau_8) != 1 (X^2+X+0x20 reducible over GF(2^8))"
+    );
+
+    let (mut t, mut p) = (0u16, 0x2000u16);
+    for _ in 0..16 {
+        t ^= p;
+        p = gf_oracle::schoolbook16(p, p);
+    }
+
+    assert_eq!(
+        t, 1,
+        "GF(2^32) not a field: Tr(tau_16) != 1 (X^2+X+tau_16 reducible over GF(2^16))"
+    );
+
+    let (mut t, mut p) = (0u32, 0x2000_0000u32);
+    for _ in 0..32 {
+        t ^= p;
+        p = gf_oracle::schoolbook32(p, p);
+    }
+
+    assert_eq!(
+        t, 1,
+        "GF(2^64) not a field: Tr(tau_32) != 1 (X^2+X+tau_32 reducible over GF(2^32))"
+    );
+
+    let (mut t, mut p) = (0u64, 0x2000_0000_0000_0000u64);
+    for _ in 0..64 {
+        t ^= p;
+        p = gf_oracle::schoolbook64(p, p);
+    }
+
+    assert_eq!(
+        t, 1,
+        "GF(2^128) not a field: Tr(tau_64) != 1 (X^2+X+tau_64 reducible over GF(2^64))"
+    );
+
+    let (mut t, mut p) = (0u128, 0x20u128 << 120);
+    for _ in 0..128 {
+        t ^= p;
+        p = gf_oracle::schoolbook128(p, p);
+    }
+
+    assert_eq!(
+        t, 1,
+        "GF(2^256) not a field: Tr(tau_128) != 1 (X^2+X+tau_128 reducible over GF(2^128))"
+    );
+}
+
+// Build-time discharge of verus/axioms_t.rs::frobenius_order_gen:
+// e_i^(2^m) = e_i for every single-bit generator of GF(2^m),
+// squaring through the same shared gf_oracle::schoolbook*.
+fn verify_frobenius_order() {
+    for i in 0..8 {
+        let e = 1u8 << i;
+
+        let mut p = e;
+        for _ in 0..8 {
+            p = gf_oracle::sb8(p, p);
+        }
+
+        assert_eq!(p, e, "GF(2^8): e_{i} not fixed by x^(2^8)");
+    }
+
+    for i in 0..16 {
+        let e = 1u16 << i;
+
+        let mut p = e;
+        for _ in 0..16 {
+            p = gf_oracle::schoolbook16(p, p);
+        }
+
+        assert_eq!(p, e, "GF(2^16): e_{i} not fixed by x^(2^16)");
+    }
+
+    for i in 0..32 {
+        let e = 1u32 << i;
+
+        let mut p = e;
+        for _ in 0..32 {
+            p = gf_oracle::schoolbook32(p, p);
+        }
+
+        assert_eq!(p, e, "GF(2^32): e_{i} not fixed by x^(2^32)");
+    }
+
+    for i in 0..64 {
+        let e = 1u64 << i;
+
+        let mut p = e;
+        for _ in 0..64 {
+            p = gf_oracle::schoolbook64(p, p);
+        }
+
+        assert_eq!(p, e, "GF(2^64): e_{i} not fixed by x^(2^64)");
+    }
+
+    for i in 0..128 {
+        let e = 1u128 << i;
+
+        let mut p = e;
+        for _ in 0..128 {
+            p = gf_oracle::schoolbook128(p, p);
+        }
+
+        assert_eq!(p, e, "GF(2^128): e_{i} not fixed by x^(2^128)");
+    }
+}
+
 fn write_algebra_extras_16(file: &mut File) {
     // FIPS-197 §4.2 worked example pins POLY_8.
     assert_eq!(gf8_mul(0x57, 0x83), 0xc1, "gf8_mul is not the AES field");
@@ -1113,26 +1429,47 @@ fn write_algebra_extras_16(file: &mut File) {
         }
     }
 
+    // The FFT applies sigma in the flat basis; pin the chain
+    // there too, independent of the isomorphism transport.
+    let mut prev_flat = apply_16(cantor_tower[0], &TOWER_TO_FLAT_16);
+    assert_eq!(prev_flat, 1, "flat Cantor basis must start at 1");
+
+    for &beta in cantor_tower.iter().skip(1) {
+        let bf = apply_16(beta, &TOWER_TO_FLAT_16);
+
+        assert_eq!(
+            flat_sq_16(bf) ^ bf,
+            prev_flat,
+            "flat Cantor chain broken: sigma_flat(beta_i) != beta_(i-1)"
+        );
+
+        prev_flat = bf;
+    }
+
     write_raw_16(file, "CANTOR_BASIS_TOWER_16", &cantor_tower);
 }
 
 fn main() {
+    verify_isomorphism_8();
+    verify_isomorphism_16();
+    verify_isomorphism_32();
+    verify_isomorphism_64();
+    verify_isomorphism_128();
+    verify_norm_anisotropy();
+    verify_frobenius_order();
+
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("generated_constants.rs");
 
     let mut file = File::create(&dest_path).unwrap();
 
-    writeln!(file, "// AUTO-GENERATED BY build.rs").unwrap();
+    writeln!(file, "// AUTO-GENERATED BY build/main.rs").unwrap();
 
     writeln!(file, "pub const POLY_8: u8 = 0x{POLY_8:02x};").unwrap();
     writeln!(file, "pub const POLY_16: u16 = 0x{POLY_16:04x};").unwrap();
-    writeln!(file, "pub const POLY_32: u32 = 0x0000008d;").unwrap();
-    writeln!(file, "pub const POLY_64: u64 = 0x000000000000001b;").unwrap();
-    writeln!(
-        file,
-        "pub const POLY_128: u128 = 0x00000000000000000000000000000087;\n"
-    )
-    .unwrap();
+    writeln!(file, "pub const POLY_32: u32 = 0x{POLY_32:08x};").unwrap();
+    writeln!(file, "pub const POLY_64: u64 = 0x{POLY_64:016x};").unwrap();
+    writeln!(file, "pub const POLY_128: u128 = 0x{POLY_128:032x};\n").unwrap();
 
     // 8 bit
     write_table_8(&mut file, "FLAT_TO_TOWER_8", &FLAT_TO_TOWER_8);
@@ -1228,10 +1565,31 @@ fn main() {
 
     // Nibble-decomposed promote tables
     // for CT NEON promotion to Block128.
-    write_nibble_promote_8_to_128(&mut file, "NIBBLE_PROMOTE_8", &FLAT_TO_TOWER_8);
-    write_nibble_promote_16_to_128(&mut file, "NIBBLE_PROMOTE_16", &FLAT_TO_TOWER_16);
-    write_nibble_promote_32_to_128(&mut file, "NIBBLE_PROMOTE_32", &FLAT_TO_TOWER_32);
-    write_nibble_promote_64_to_128(&mut file, "NIBBLE_PROMOTE_64", &FLAT_TO_TOWER_64);
+    write_nibble_promote_8_to_128(
+        &mut file,
+        "NIBBLE_PROMOTE_8",
+        &FLAT_TO_TOWER_8,
+        &TOWER_TO_FLAT_8,
+    );
+    write_nibble_promote_16_to_128(
+        &mut file,
+        "NIBBLE_PROMOTE_16",
+        &FLAT_TO_TOWER_16,
+        &TOWER_TO_FLAT_16,
+    );
+    write_nibble_promote_32_to_128(
+        &mut file,
+        "NIBBLE_PROMOTE_32",
+        &FLAT_TO_TOWER_32,
+        &TOWER_TO_FLAT_32,
+    );
+    write_nibble_promote_64_to_128(
+        &mut file,
+        "NIBBLE_PROMOTE_64",
+        &FLAT_TO_TOWER_64,
+        &TOWER_TO_FLAT_64,
+    );
 
-    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=build/main.rs");
+    println!("cargo:rerun-if-changed=build/gf_oracle.rs");
 }

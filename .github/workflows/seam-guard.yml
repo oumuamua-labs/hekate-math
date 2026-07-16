@@ -1,0 +1,22 @@
+name: Twin-Seam Guard
+
+# labeled/unlabeled: the 'seam-ack' override label must
+# re-trigger the check; re-runs reuse stale event payloads.
+on:
+  pull_request:
+    branches: [ main ]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+jobs:
+  seam-guard:
+    name: Twin-seam guard
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Check twin seams
+        env:
+          SEAM_ACK: ${{ contains(github.event.pull_request.labels.*.name, 'seam-ack') && '1' || '0' }}
+        run: ./verus/seam_guard.sh "origin/${{ github.base_ref }}"

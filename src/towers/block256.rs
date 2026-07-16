@@ -198,7 +198,7 @@ impl From<u128> for Block256 {
 impl From<Bit> for Block256 {
     #[inline(always)]
     fn from(val: Bit) -> Self {
-        Self([val.0 as u128, 0])
+        Self([val.get() as u128, 0])
     }
 }
 

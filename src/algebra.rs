@@ -51,7 +51,7 @@ pub trait BinaryFieldExtras: TowerField {
             p = p.square();
         }
 
-        Bit((acc == Self::ONE) as u8)
+        Bit::new((acc == Self::ONE) as u8)
     }
 
     /// A root of `x^2 + x = c`, or `None` iff
