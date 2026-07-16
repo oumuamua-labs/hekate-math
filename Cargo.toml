@@ -47,9 +47,5 @@ name = "poly_arithmetic"
 harness = false
 
 [[bench]]
-name = "spmv"
-harness = false
-
-[[bench]]
 name = "promote"
 harness = false

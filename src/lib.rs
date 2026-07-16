@@ -28,7 +28,6 @@ mod hardware;
 mod packable;
 
 pub mod fft;
-pub mod matrix;
 
 pub use algebra::BinaryFieldExtras;
 pub use fft::{AdditiveFft, CantorBasis, FftError, ReedSolomon, RsError};

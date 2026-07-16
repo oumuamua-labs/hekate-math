@@ -33,8 +33,8 @@ else
 
   # Silent-shrink guard:
   # bump when adding or removing a proof file.
-  if [ "$N" -ne 17 ]; then
-    echo "error: expected 17 verus files, found $N" >&2
+  if [ "$N" -ne 16 ]; then
+    echo "error: expected 16 verus files, found $N" >&2
     exit 2
   fi
 
