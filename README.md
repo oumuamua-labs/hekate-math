@@ -64,16 +64,6 @@ Efficiency of polynomial operations in 𝔽(2^128).
 | **Interpolate MSM**       | 65536 points    | 77.12 µs    | 850 Melem/s    |
 | **MLE Evaluation**        | 20 variables    | 1.27 ms     | 822 Melem/s    |
 
-### Sparse Matrix-Vector Multiplication (SpMV)
-
-Benchmarks for `Block128` SpMV with fixed degree 16 (typical for Brakedown/Binius).
-
-| Matrix Size   | Time (M3 Max) | Throughput   | Memory Bandwidth (est.) |
-|:--------------|:--------------|:-------------|:------------------------|
-| **64K Rows**  | ~171 µs       | 6.14 Gelem/s | ~98 GB/s                |
-| **256K Rows** | ~628 µs       | 6.68 Gelem/s | ~107 GB/s               |
-| **1M Rows**   | ~5.17 ms      | 3.25 Gelem/s | ~52 GB/s                |
-
 ## Installation
 
 ```toml
@@ -204,38 +194,37 @@ fn example_simd() {
 }
 ```
 
-### Sparse Matrix-Vector Multiplication (SpMV)
+### Additive FFT (Gao–Mateer, Cantor Basis)
 
-A core primitive for Brakedown, Binius, and linear-code based commitments. `ByteSparseMatrix` holds
-binary weights (`0`/`1`) packed as `u8` and applies them to a hardware-basis vector by branch-gated
-XOR, no per-weight field multiply. The vector comes from any `VectorSource`, so dense slices and
-zero-allocation algorithmic generators share a single code path.
+In-place transforms over the 2^log_n-point subspace W_log_n,
+`F: BinaryFieldExtras + HardwareField` (Block16 through Block128): forward evaluates
+novel-basis coefficients, inverse interpolates. Scalar and packed (`F::WIDTH` lanes)
+variants, each with a coset form. Buffers of 1 MiB and up run on Rayon (`parallel`
+feature), bit-identical to serial.
 
-Random expander sampling, drawing the matrix from a seed, lives in the consumer, not here: which
-oracle samples the code is a PCS soundness parameter, not field arithmetic.
+`ReedSolomon<F>` builds systematic RS[n, k, n−k+1] on these transforms:
+`encode(msg)[..k] == msg`.
 
 ```rust
-use hekate_math::matrix::ByteSparseMatrix;
-use hekate_math::{Block128, Flat, HardwareField};
+use hekate_math::{AdditiveFft, Block16, Flat, HardwareField, TowerField};
 
-fn example_spmv() {
-    // 2 rows, 3 cols, degree 2. Binary weights only.
-    // Row 0 = col0 + col2,  Row 1 = col1 + col0.
-    let weights = vec![1u8, 1, 1, 1];
-    let col_indices = vec![0, 2, 1, 0];
-    let matrix = ByteSparseMatrix::new(2, 3, 2, weights, col_indices);
+fn example_fft() {
+    let log_n = 10u32;
+    let fft = AdditiveFft::<Block16>::new(log_n);
 
-    // Input vector in the hardware (flat) basis.
-    let x0 = Block128::from(10u128).to_hardware();
-    let x1 = Block128::from(100u128).to_hardware();
-    let x2 = Block128::from(255u128).to_hardware();
-    let input: Vec<Flat<Block128>> = vec![x0, x1, x2];
+    // Novel-basis coefficients, hardware (flat) basis.
+    let coeffs: Vec<Flat<Block16>> = (0..1u32 << log_n)
+        .map(|i| Block16::from(i).to_hardware())
+        .collect();
 
-    let output = matrix.spmv(input.as_slice());
+    // Coefficients -> evaluations on W_10, in place.
+    let mut data = coeffs.clone();
+    fft.forward_scalar(&mut data).unwrap();
 
-    // Addition in a binary field is XOR.
-    assert_eq!(output[0], x0 + x2);
-    assert_eq!(output[1], x1 + x0);
+    // Evaluations -> coefficients.
+    fft.inverse_scalar(&mut data).unwrap();
+
+    assert_eq!(data, coeffs);
 }
 ```
 
