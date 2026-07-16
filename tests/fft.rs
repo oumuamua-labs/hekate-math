@@ -17,8 +17,8 @@
 
 use hekate_math::fft::vanish_eval;
 use hekate_math::{
-    AdditiveFft, BinaryFieldExtras, Block16, CantorBasis, FftError, Flat, HardwareField,
-    PackableField, PackedFlat, TowerField,
+    AdditiveFft, BinaryFieldExtras, Block16, Block32, Block64, Block128, CantorBasis, FftError,
+    Flat, HardwareField, PackableField, PackedFlat, TowerField,
 };
 use rand::{RngExt, SeedableRng, rng, rngs::StdRng};
 
@@ -116,6 +116,25 @@ fn lanewise_differential(
     }
 }
 
+fn roundtrip_scalar<F: BinaryFieldExtras + HardwareField>(log_n: u32, mut mk: impl FnMut() -> F) {
+    let n = 1usize << log_n;
+    let fft = AdditiveFft::<F>::new(log_n);
+
+    let orig: Vec<Flat<F>> = (0..n).map(|_| mk().to_hardware()).collect();
+
+    let mut data = orig.clone();
+    fft.forward_scalar(&mut data).unwrap();
+    fft.inverse_scalar(&mut data).unwrap();
+
+    assert_eq!(data, orig, "inverse∘forward != id");
+
+    let mut data2 = orig.clone();
+    fft.inverse_scalar(&mut data2).unwrap();
+    fft.forward_scalar(&mut data2).unwrap();
+
+    assert_eq!(data2, orig, "forward∘inverse != id");
+}
+
 #[test]
 fn cantor_self_check() {
     assert!(CantorBasis::self_check());
@@ -169,27 +188,8 @@ fn additive_fft_eq_horner() {
 
 #[test]
 fn additive_fft_roundtrip_scalar() {
-    let log_n = 10u32;
-    let n = 1usize << log_n;
-    let fft = AdditiveFft::<Block16>::new(log_n);
-
-    let mut r = rng();
-
-    let orig: Vec<Flat<Block16>> = (0..n)
-        .map(|_| Flat::from_raw(Block16(r.random())))
-        .collect();
-
-    let mut data = orig.clone();
-    fft.forward_scalar(&mut data).unwrap();
-    fft.inverse_scalar(&mut data).unwrap();
-
-    assert_eq!(data, orig, "inverse∘forward != id");
-
-    let mut data2 = orig.clone();
-    fft.inverse_scalar(&mut data2).unwrap();
-    fft.forward_scalar(&mut data2).unwrap();
-
-    assert_eq!(data2, orig, "forward∘inverse != id");
+    let mut r = StdRng::seed_from_u64(0x5eed_ff70_0016);
+    roundtrip_scalar(10, || Block16(r.random()));
 }
 
 #[test]
@@ -534,4 +534,75 @@ fn fft_error_display_carries_lengths() {
         msg.contains("256") && msg.contains('7'),
         "uninformative: {msg}"
     );
+}
+
+#[test]
+fn additive_fft_roundtrip_block32() {
+    let mut r = StdRng::seed_from_u64(0x5eed_ff70_0032);
+    roundtrip_scalar(8, || Block32(r.random()));
+}
+
+#[test]
+fn additive_fft_roundtrip_block64() {
+    let mut r = StdRng::seed_from_u64(0x5eed_ff70_0064);
+    roundtrip_scalar(8, || Block64(r.random()));
+}
+
+#[test]
+fn additive_fft_roundtrip_block128() {
+    let mut r = StdRng::seed_from_u64(0x5eed_ff70_0128);
+    roundtrip_scalar(10, || Block128(r.random()));
+}
+
+#[test]
+fn additive_fft_coset_roundtrip_block128() {
+    let log_n = 8u32;
+    let n = 1usize << log_n;
+    let fft = AdditiveFft::<Block128>::new(log_n);
+
+    let mut r = StdRng::seed_from_u64(0x5eed_ff70_c128);
+
+    let offset = Flat::from_raw(Block128(r.random()));
+    let orig: Vec<Flat<Block128>> = (0..n)
+        .map(|_| Flat::from_raw(Block128(r.random())))
+        .collect();
+
+    let mut data = orig.clone();
+    fft.forward_coset_scalar(&mut data, offset).unwrap();
+    fft.inverse_coset_scalar(&mut data, offset).unwrap();
+
+    assert_eq!(data, orig, "coset inverse∘forward != id");
+}
+
+#[test]
+fn additive_fft_roundtrip_block128_packed() {
+    const WIDTH: usize = 4;
+    assert_eq!(<Flat<Block128> as PackableField>::WIDTH, WIDTH);
+
+    let log_n = 8u32;
+    let n = 1usize << log_n;
+    let fft = AdditiveFft::<Block128>::new(log_n);
+
+    let mut r = StdRng::seed_from_u64(0x5eed_ff70_a128);
+
+    let orig: Vec<PackedFlat<Block128>> = (0..n)
+        .map(|_| {
+            let lanes: [Flat<Block128>; WIDTH] =
+                core::array::from_fn(|_| Flat::from_raw(Block128(r.random())));
+            <Flat<Block128> as PackableField>::pack(&lanes)
+        })
+        .collect();
+
+    let mut data = orig.clone();
+    fft.forward(&mut data).unwrap();
+    fft.inverse(&mut data).unwrap();
+
+    assert_eq!(data, orig, "packed inverse∘forward != id");
+}
+
+#[test]
+#[ignore = "release-scale: 2^20 Block128 elements"]
+fn additive_fft_roundtrip_block128_2p20() {
+    let mut r = StdRng::seed_from_u64(0x5eed_ff70_2020);
+    roundtrip_scalar(20, || Block128(r.random()));
 }

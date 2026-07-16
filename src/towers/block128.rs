@@ -16,14 +16,15 @@
 // limitations under the License.
 
 //! BLOCK 128 (GF(2^128))
+use crate::algebra::impl_binary_field_extras;
 use crate::towers::bit::Bit;
 use crate::towers::block8::Block8;
 use crate::towers::block16::Block16;
 use crate::towers::block32::Block32;
 use crate::towers::block64::Block64;
 use crate::{
-    CanonicalDeserialize, CanonicalSerialize, Flat, FlatPromote, HardwareField, PackableField,
-    PackedFlat, TowerField, constants,
+    BinaryFieldExtras, CanonicalDeserialize, CanonicalSerialize, Flat, FlatPromote, HardwareField,
+    PackableField, PackedFlat, TowerField, constants,
 };
 use core::ops::{Add, AddAssign, BitXor, BitXorAssign, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
@@ -745,6 +746,18 @@ impl FlatPromote<Block64> for Block128 {
 }
 
 // ===========================================
+// Binary Field Extras
+// ===========================================
+
+impl_binary_field_extras!(
+    Block128,
+    Block64,
+    map_ct_128_split,
+    TRACE_MASK_128,
+    SOLVE_QUADRATIC_BASIS_128
+);
+
+// ===========================================
 // UTILS
 // ===========================================
 
@@ -766,7 +779,6 @@ pub fn apply_matrix_128(val: Block128, table: &[u128; 4096]) -> Block128 {
     Block128(res)
 }
 
-#[cfg(not(feature = "table-math"))]
 #[inline(always)]
 fn map_ct_128_split(x: u128, basis: &[u128; 128]) -> u128 {
     let mut acc_lo = 0u64;
@@ -791,8 +803,8 @@ fn map_ct_128_split(x: u128, basis: &[u128; 128]) -> u128 {
 #[inline(always)]
 fn lift_ct<const N: usize>(x: u64, basis: &'static [u128; N]) -> u128 {
     let mut acc = 0u128;
-
     let mut i = 0usize;
+
     while i < N {
         let bit = (x >> i) & 1;
         let mask = 0u128.wrapping_sub(bit as u128);

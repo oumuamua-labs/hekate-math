@@ -16,12 +16,13 @@
 // limitations under the License.
 
 //! BLOCK 32 (GF(2^32))
+use crate::algebra::impl_binary_field_extras;
 use crate::towers::bit::Bit;
 use crate::towers::block8::Block8;
 use crate::towers::block16::Block16;
 use crate::{
-    CanonicalDeserialize, CanonicalSerialize, Flat, FlatPromote, HardwareField, PackableField,
-    PackedFlat, TowerField, constants,
+    BinaryFieldExtras, CanonicalDeserialize, CanonicalSerialize, Flat, FlatPromote, HardwareField,
+    PackableField, PackedFlat, TowerField, constants,
 };
 use core::ops::{Add, AddAssign, BitXor, BitXorAssign, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
@@ -510,6 +511,18 @@ impl FlatPromote<Block8> for Block32 {
 }
 
 // ===========================================
+// Binary Field Extras
+// ===========================================
+
+impl_binary_field_extras!(
+    Block32,
+    Block16,
+    map_ct_32,
+    TRACE_MASK_32,
+    SOLVE_QUADRATIC_BASIS_32
+);
+
+// ===========================================
 // UTILS
 // ===========================================
 
@@ -539,7 +552,6 @@ pub fn apply_matrix_32(val: Block32, table: &[u32; 1024]) -> Block32 {
     Block32(res)
 }
 
-#[cfg(not(feature = "table-math"))]
 #[inline(always)]
 fn map_ct_32(x: u32, basis: &[u32; 32]) -> u32 {
     let mut acc = 0u32;

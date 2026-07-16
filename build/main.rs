@@ -938,98 +938,112 @@ fn flat_sq_16(a: u16) -> u16 {
     acc as u16
 }
 
-fn trace_of_16(x: u16) -> u16 {
-    let mut acc = 0u16;
-    let mut p = x;
-    let mut i = 0;
+macro_rules! impl_algebra_helpers {
+    ($trace_of:ident, $invert:ident, $rank:ident, $vanish:ident, $ty:ty, $bits:expr, $sq:ident) => {
+        fn $trace_of(x: $ty) -> $ty {
+            let mut acc: $ty = 0;
+            let mut p = x;
+            let mut i = 0;
 
-    while i < 16 {
-        acc ^= p;
-        p = sq16_tower(p);
-        i += 1;
-    }
-
-    acc
-}
-
-// cols[k] and the result are column-image form:
-// column k is the image of basis vector e_k.
-fn gf2_invert_16(cols: &[u16; 16]) -> [u16; 16] {
-    let mut rows = [0u16; 16];
-    let mut inv = [0u16; 16];
-
-    for (i, slot) in inv.iter_mut().enumerate() {
-        *slot = 1 << i;
-    }
-
-    for (i, row) in rows.iter_mut().enumerate() {
-        for (k, &col) in cols.iter().enumerate() {
-            *row |= ((col >> i) & 1) << k;
-        }
-    }
-
-    for col in 0..16 {
-        let mut piv = col;
-        while piv < 16 && (rows[piv] >> col) & 1 == 0 {
-            piv += 1;
-        }
-
-        assert!(
-            piv < 16,
-            "Artin-Schreier operator is singular: field constants are inconsistent"
-        );
-
-        rows.swap(col, piv);
-        inv.swap(col, piv);
-
-        for r in 0..16 {
-            if r != col && (rows[r] >> col) & 1 == 1 {
-                rows[r] ^= rows[col];
-                inv[r] ^= inv[col];
-            }
-        }
-    }
-
-    let mut out = [0u16; 16];
-    for (k, slot) in out.iter_mut().enumerate() {
-        for (i, &v) in inv.iter().enumerate() {
-            *slot |= ((v >> k) & 1) << i;
-        }
-    }
-
-    out
-}
-
-fn vanish_build(i: usize, x: u16) -> u16 {
-    let mut t = x;
-    for _ in 0..i {
-        t = sq16_tower(t) ^ t;
-    }
-
-    t
-}
-
-fn gf2_rank_16(vals: &[u16; 16]) -> usize {
-    let mut piv = [0u16; 16];
-    let mut rank = 0;
-
-    for &v in vals.iter() {
-        let mut x = v;
-        while x != 0 {
-            let b = x.trailing_zeros() as usize;
-            if piv[b] == 0 {
-                piv[b] = x;
-                rank += 1;
-
-                break;
+            while i < $bits {
+                acc ^= p;
+                p = $sq(p);
+                i += 1;
             }
 
-            x ^= piv[b];
+            acc
         }
-    }
 
-    rank
+        // cols[k] and the result are column-image form:
+        // column k is the image of basis vector e_k.
+        fn $invert(cols: &[$ty; $bits]) -> [$ty; $bits] {
+            let mut rows = [0 as $ty; $bits];
+            let mut inv = [0 as $ty; $bits];
+
+            for (i, slot) in inv.iter_mut().enumerate() {
+                *slot = (1 as $ty) << i;
+            }
+
+            for (i, row) in rows.iter_mut().enumerate() {
+                for (k, &col) in cols.iter().enumerate() {
+                    *row |= ((col >> i) & 1) << k;
+                }
+            }
+
+            for col in 0..$bits {
+                let mut piv = col;
+                while piv < $bits && (rows[piv] >> col) & 1 == 0 {
+                    piv += 1;
+                }
+
+                assert!(
+                    piv < $bits,
+                    "Artin-Schreier operator is singular: field constants are inconsistent"
+                );
+
+                rows.swap(col, piv);
+                inv.swap(col, piv);
+
+                for r in 0..$bits {
+                    if r != col && (rows[r] >> col) & 1 == 1 {
+                        rows[r] ^= rows[col];
+                        inv[r] ^= inv[col];
+                    }
+                }
+            }
+
+            let mut out = [0 as $ty; $bits];
+            for (k, slot) in out.iter_mut().enumerate() {
+                for (i, &v) in inv.iter().enumerate() {
+                    *slot |= ((v >> k) & 1) << i;
+                }
+            }
+
+            out
+        }
+
+        fn $vanish(i: usize, x: $ty) -> $ty {
+            let mut t = x;
+            for _ in 0..i {
+                t = $sq(t) ^ t;
+            }
+
+            t
+        }
+
+        fn $rank(vals: &[$ty; $bits]) -> usize {
+            let mut piv = [0 as $ty; $bits];
+            let mut rank = 0;
+
+            for &v in vals.iter() {
+                let mut x = v;
+                while x != 0 {
+                    let b = x.trailing_zeros() as usize;
+                    if piv[b] == 0 {
+                        piv[b] = x;
+                        rank += 1;
+
+                        break;
+                    }
+
+                    x ^= piv[b];
+                }
+            }
+
+            rank
+        }
+    };
 }
+
+impl_algebra_helpers!(
+    trace_of_16,
+    gf2_invert_16,
+    gf2_rank_16,
+    vanish_build_16,
+    u16,
+    16,
+    sq16_tower
+);
 
 // Flat reference product, per gf_model.rs:
 // gf_mul(a, b, k) = pmod(clmul(a, b), x^k + POLY_k).
@@ -1084,6 +1098,71 @@ impl_gf_mul_flat!(clmul_16, pmod_16, gf_mul_flat_16, u16, 16, POLY_16);
 impl_gf_mul_flat!(clmul_32, pmod_32, gf_mul_flat_32, u32, 32, POLY_32);
 impl_gf_mul_flat!(clmul_64, pmod_64, gf_mul_flat_64, u64, 64, POLY_64);
 impl_gf_mul_flat!(clmul_128, pmod_128, gf_mul_flat_128, u128, 128, POLY_128);
+
+// verify_isomorphism_N pins these matrices and
+// the flat product against the tower oracle.
+macro_rules! impl_sq_transport {
+    ($sq:ident, $ty:ty, $apply:ident, $mul_flat:ident, $t2f:ident, $f2t:ident) => {
+        fn $sq(x: $ty) -> $ty {
+            let f = $apply(x, &$t2f);
+
+            $apply($mul_flat(f, f), &$f2t)
+        }
+    };
+}
+
+impl_sq_transport!(
+    sq32_tower,
+    u32,
+    apply_32,
+    gf_mul_flat_32,
+    TOWER_TO_FLAT_32,
+    FLAT_TO_TOWER_32
+);
+impl_sq_transport!(
+    sq64_tower,
+    u64,
+    apply_64,
+    gf_mul_flat_64,
+    TOWER_TO_FLAT_64,
+    FLAT_TO_TOWER_64
+);
+impl_sq_transport!(
+    sq128_tower,
+    u128,
+    apply_128,
+    gf_mul_flat_128,
+    TOWER_TO_FLAT_128,
+    FLAT_TO_TOWER_128
+);
+
+impl_algebra_helpers!(
+    trace_of_32,
+    gf2_invert_32,
+    gf2_rank_32,
+    vanish_build_32,
+    u32,
+    32,
+    sq32_tower
+);
+impl_algebra_helpers!(
+    trace_of_64,
+    gf2_invert_64,
+    gf2_rank_64,
+    vanish_build_64,
+    u64,
+    64,
+    sq64_tower
+);
+impl_algebra_helpers!(
+    trace_of_128,
+    gf2_invert_128,
+    gf2_rank_128,
+    vanish_build_128,
+    u128,
+    128,
+    sq128_tower
+);
 
 macro_rules! impl_verify_iso {
     ($func:ident, $type:ty, $size:expr, $gf_mul_flat:ident, $apply:ident,
@@ -1411,7 +1490,7 @@ fn write_algebra_extras_16(file: &mut File) {
     assert_eq!(cantor_tower[0], 1, "beta_0 must be 1");
 
     for i in 0..16 {
-        assert_eq!(vanish_build(i, cantor_tower[i]), 1, "s_i(beta_i) != 1");
+        assert_eq!(vanish_build_16(i, cantor_tower[i]), 1, "s_i(beta_i) != 1");
 
         let tr = (cantor_tower[i] & trace_mask).count_ones() & 1;
         if i < 15 {
@@ -1448,6 +1527,178 @@ fn write_algebra_extras_16(file: &mut File) {
 
     write_raw_16(file, "CANTOR_BASIS_TOWER_16", &cantor_tower);
 }
+
+fn xorshift64(s: &mut u64) -> u64 {
+    *s ^= *s << 13;
+    *s ^= *s >> 7;
+    *s ^= *s << 17;
+
+    *s
+}
+
+macro_rules! impl_write_algebra_extras_wide {
+    ($fname:ident, $ty:ty, $bits:expr, $hexw:expr, $sq:ident, $apply:ident,
+     $invert:ident, $rank:ident, $vanish:ident, $trace_of:ident, $write_raw:ident,
+     $mask_name:literal, $basis_name:literal, $seed:literal) => {
+        fn $fname(file: &mut File) {
+            let mut trace_mask: $ty = 0;
+            for k in 0..$bits {
+                if $trace_of((1 as $ty) << k) == 1 {
+                    trace_mask |= (1 as $ty) << k;
+                }
+            }
+
+            assert_ne!(
+                trace_mask, 0,
+                "trace functional is identically zero: field is broken"
+            );
+            assert_eq!(
+                $trace_of(1),
+                0,
+                "Tr(1) must vanish in an even-degree extension"
+            );
+
+            let d: $ty = (1 as $ty) << trace_mask.trailing_zeros();
+            assert_eq!((d & trace_mask).count_ones() & 1, 1, "Tr(d) must be 1");
+
+            let mut l_tilde = [0 as $ty; $bits];
+            for (k, slot) in l_tilde.iter_mut().enumerate() {
+                let e = (1 as $ty) << k;
+                let l_k = $sq(e) ^ e;
+                *slot = l_k ^ if k == 0 { d } else { 0 };
+            }
+
+            let solve_basis = $invert(&l_tilde);
+
+            for k in 0..$bits {
+                let e = (1 as $ty) << k;
+
+                assert_eq!(
+                    $apply(l_tilde[k], &solve_basis),
+                    e,
+                    "solve o L~ != id on basis vector {}",
+                    k
+                );
+                assert_eq!(
+                    $apply(solve_basis[k], &l_tilde),
+                    e,
+                    "L~ o solve != id on basis vector {}",
+                    k
+                );
+            }
+
+            // Roots of y^2 + y = x^2 + x are exactly {x, x + 1}
+            let mut s: u64 = $seed;
+            for _ in 0..64 {
+                let x =
+                    (((xorshift64(&mut s) as u128) << 64) | (xorshift64(&mut s) as u128)) as $ty;
+                let c = $sq(x) ^ x;
+
+                assert_eq!(
+                    (c & trace_mask).count_ones() & 1,
+                    0,
+                    "Tr(x^2 + x) must vanish"
+                );
+
+                let root = $apply(c, &solve_basis);
+                assert!(
+                    root == x || root == (x ^ 1),
+                    "solve returned a value outside the root pair"
+                );
+                assert_eq!($sq(root) ^ root, c, "solve round-trip failed");
+            }
+
+            let mut chain = [0 as $ty; $bits];
+            chain[0] = 1;
+
+            for i in 1..$bits {
+                chain[i] = $apply(chain[i - 1], &solve_basis);
+            }
+
+            assert_eq!($rank(&chain), $bits, "Cantor basis is GF(2)-dependent");
+
+            for (i, &b) in chain.iter().enumerate() {
+                assert_eq!($vanish(i, b), 1, "s_i(beta_i) != 1");
+
+                let tr = (b & trace_mask).count_ones() & 1;
+                assert_eq!(
+                    tr == 1,
+                    i == $bits - 1,
+                    "Cantor chain trace pattern broken at {}",
+                    i
+                );
+
+                if i >= 1 {
+                    assert_eq!(
+                        $sq(b) ^ b,
+                        chain[i - 1],
+                        "Cantor chain broken: sigma(beta_i) != beta_(i-1)"
+                    );
+                }
+            }
+
+            writeln!(
+                file,
+                "pub const {}: {} = 0x{:0w$x};\n",
+                $mask_name,
+                stringify!($ty),
+                trace_mask,
+                w = $hexw
+            )
+            .unwrap();
+            $write_raw(file, $basis_name, &solve_basis);
+        }
+    };
+}
+
+impl_write_algebra_extras_wide!(
+    write_algebra_extras_32,
+    u32,
+    32,
+    8,
+    sq32_tower,
+    apply_32,
+    gf2_invert_32,
+    gf2_rank_32,
+    vanish_build_32,
+    trace_of_32,
+    write_raw_32,
+    "TRACE_MASK_32",
+    "SOLVE_QUADRATIC_BASIS_32",
+    0x7365_6564_5f72_7333u64
+);
+impl_write_algebra_extras_wide!(
+    write_algebra_extras_64,
+    u64,
+    64,
+    16,
+    sq64_tower,
+    apply_64,
+    gf2_invert_64,
+    gf2_rank_64,
+    vanish_build_64,
+    trace_of_64,
+    write_raw_64,
+    "TRACE_MASK_64",
+    "SOLVE_QUADRATIC_BASIS_64",
+    0x7365_6564_5f72_7336u64
+);
+impl_write_algebra_extras_wide!(
+    write_algebra_extras_128,
+    u128,
+    128,
+    32,
+    sq128_tower,
+    apply_128,
+    gf2_invert_128,
+    gf2_rank_128,
+    vanish_build_128,
+    trace_of_128,
+    write_raw_128,
+    "TRACE_MASK_128",
+    "SOLVE_QUADRATIC_BASIS_128",
+    0x7365_6564_5f72_7331u64
+);
 
 fn main() {
     verify_isomorphism_8();
@@ -1508,6 +1759,8 @@ fn main() {
     write_raw_32(&mut file, "RAW_FLAT_TO_TOWER_32", &FLAT_TO_TOWER_32);
     write_raw_32(&mut file, "RAW_TOWER_TO_FLAT_32", &TOWER_TO_FLAT_32);
 
+    write_algebra_extras_32(&mut file);
+
     // 64 bit
     write_table_64(&mut file, "FLAT_TO_TOWER_64", &FLAT_TO_TOWER_64);
     write_table_64(&mut file, "TOWER_TO_FLAT_64", &TOWER_TO_FLAT_64);
@@ -1522,6 +1775,8 @@ fn main() {
     write_raw_64(&mut file, "RAW_FLAT_TO_TOWER_64", &FLAT_TO_TOWER_64);
     write_raw_64(&mut file, "RAW_TOWER_TO_FLAT_64", &TOWER_TO_FLAT_64);
 
+    write_algebra_extras_64(&mut file);
+
     // 128 bit
     write_table_128(&mut file, "FLAT_TO_TOWER_128", &FLAT_TO_TOWER_128);
     write_table_128(&mut file, "TOWER_TO_FLAT_128", &TOWER_TO_FLAT_128);
@@ -1535,6 +1790,8 @@ fn main() {
     );
     write_raw_128(&mut file, "RAW_FLAT_TO_TOWER_128", &FLAT_TO_TOWER_128);
     write_raw_128(&mut file, "RAW_TOWER_TO_FLAT_128", &TOWER_TO_FLAT_128);
+
+    write_algebra_extras_128(&mut file);
 
     // Extra lifting bases for
     // FlatPromote in Block128.

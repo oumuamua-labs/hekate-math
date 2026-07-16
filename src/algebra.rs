@@ -61,3 +61,36 @@ pub trait BinaryFieldExtras: TowerField {
     /// only the `Some`/`None` choice reveals `Tr(c)`.
     fn solve_quadratic(c: Self) -> Option<Self>;
 }
+
+macro_rules! impl_binary_field_extras {
+    ($block:ty, $sub:ty, $map_ct:ident, $trace_mask:ident, $solve_basis:ident) => {
+        impl BinaryFieldExtras for $block {
+            #[inline(always)]
+            fn square(&self) -> Self {
+                // char 2:
+                // (lo + hi·X)^2 = lo^2 + hi^2·X^2,
+                // no cross term.
+                let (lo, hi) = self.split();
+                let hi2 = hi.square();
+
+                Self::new(lo.square() + hi2 * <$sub>::EXTENSION_TAU, hi2)
+            }
+
+            #[inline(always)]
+            fn trace(&self) -> Bit {
+                Bit::new(((self.0 & constants::$trace_mask).count_ones() & 1) as u8)
+            }
+
+            #[inline(always)]
+            fn solve_quadratic(c: Self) -> Option<Self> {
+                if c.trace() != Bit::ZERO {
+                    return None;
+                }
+
+                Some(Self($map_ct(c.0, &constants::$solve_basis)))
+            }
+        }
+    };
+}
+
+pub(crate) use impl_binary_field_extras;

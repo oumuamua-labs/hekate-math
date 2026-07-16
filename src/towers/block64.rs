@@ -16,14 +16,15 @@
 // limitations under the License.
 
 //! BLOCK 64 (GF(2^64))
+use crate::algebra::impl_binary_field_extras;
 use crate::constants::FLAT_TO_TOWER_BIT_MASKS_64;
 use crate::towers::bit::Bit;
 use crate::towers::block8::Block8;
 use crate::towers::block16::Block16;
 use crate::towers::block32::Block32;
 use crate::{
-    CanonicalDeserialize, CanonicalSerialize, Flat, FlatPromote, HardwareField, PackableField,
-    PackedFlat, TowerField, constants,
+    BinaryFieldExtras, CanonicalDeserialize, CanonicalSerialize, Flat, FlatPromote, HardwareField,
+    PackableField, PackedFlat, TowerField, constants,
 };
 use core::ops::{Add, AddAssign, BitXor, BitXorAssign, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
@@ -514,6 +515,18 @@ impl FlatPromote<Block8> for Block64 {
 }
 
 // ===========================================
+// Binary Field Extras
+// ===========================================
+
+impl_binary_field_extras!(
+    Block64,
+    Block32,
+    map_ct_64,
+    TRACE_MASK_64,
+    SOLVE_QUADRATIC_BASIS_64
+);
+
+// ===========================================
 // UTILS
 // ===========================================
 
@@ -544,7 +557,6 @@ pub fn apply_matrix_64(val: Block64, table: &[u64; 2048]) -> Block64 {
     Block64(res)
 }
 
-#[cfg(not(feature = "table-math"))]
 #[inline(always)]
 fn map_ct_64(x: u64, basis: &[u64; 64]) -> u64 {
     let mut acc = 0u64;

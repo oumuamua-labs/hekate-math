@@ -453,7 +453,7 @@ proof fn pack32(l: u16, h: u16)
 }
 
 // Lift 16 -> 32 (tau_tower(16) = 0x2000).
-proof fn bridge32(a: u32, b: u32)
+pub proof fn bridge32(a: u32, b: u32)
     ensures schoolbook32(a, b) as nat == gf_mul_tower(a as nat, b as nat, 32),
 {
     let a0 = (a & 0xffff) as u16;
@@ -502,7 +502,7 @@ proof fn pack64(l: u32, h: u32)
 }
 
 // Lift 32 -> 64 (tau_tower(32) = 0x2000_0000).
-proof fn bridge64(a: u64, b: u64)
+pub proof fn bridge64(a: u64, b: u64)
     ensures schoolbook64(a, b) as nat == gf_mul_tower(a as nat, b as nat, 64),
 {
     let a0 = (a & 0xffffffff) as u32;
@@ -584,7 +584,7 @@ proof fn pack128(l: u64, h: u64)
 }
 
 // Lift 64 -> 128 (tau_tower(64) = 0x2000_0000_0000_0000).
-proof fn bridge128(a: u128, b: u128)
+pub proof fn bridge128(a: u128, b: u128)
     ensures schoolbook128(a, b) as nat == gf_mul_tower(a as nat, b as nat, 128),
 {
     let a0 = (a & 0xffffffffffffffff) as u64;

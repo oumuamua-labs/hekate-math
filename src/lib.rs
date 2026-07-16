@@ -31,7 +31,7 @@ pub mod fft;
 pub mod matrix;
 
 pub use algebra::BinaryFieldExtras;
-pub use fft::{AdditiveFft, CantorBasis, FftError};
+pub use fft::{AdditiveFft, CantorBasis, FftError, ReedSolomon, RsError};
 pub use field::*;
 pub use hardware::{Flat, FlatPromote, HardwareField};
 pub use packable::{PackableField, PackedFlat};

@@ -18,8 +18,10 @@
 //! Additive FFT over GF(2^N) (Cantor basis).
 
 mod additive;
+mod reed_solomon;
 
 pub use additive::{AdditiveFft, FftError};
+pub use reed_solomon::{ReedSolomon, RsError};
 
 use crate::{BinaryFieldExtras, Bit, Block16, TowerField, constants};
 

@@ -15,7 +15,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use hekate_math::{BinaryFieldExtras, Bit, Block16, TowerField};
+use hekate_math::{BinaryFieldExtras, Bit, Block16, Block32, Block64, Block128, TowerField};
+use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 // Independent trace oracle:
 // the squaring-chain definition.
@@ -29,6 +30,45 @@ fn trace_via_squaring<F: BinaryFieldExtras>(x: F) -> Bit {
     }
 
     Bit::new((acc == F::ONE) as u8)
+}
+
+fn wide_field_laws<F: BinaryFieldExtras>(mut mk: impl FnMut() -> F) {
+    let mut seen_trace_one = false;
+    for _ in 0..4096 {
+        let x = mk();
+
+        assert_eq!(x.square(), x * x, "square != mul");
+        assert_eq!(x.square(), x.frobenius(1), "square != frobenius(1)");
+        assert_eq!(
+            x.trace(),
+            trace_via_squaring(x),
+            "mask trace != squaring chain"
+        );
+        assert_eq!(
+            x.square().trace(),
+            x.trace(),
+            "trace not Frobenius-invariant"
+        );
+
+        let c = x.square() + x;
+        assert_eq!(c.trace(), Bit::ZERO, "Tr(x^2 + x) != 0");
+
+        let r = F::solve_quadratic(c).expect("Tr = 0 must be solvable");
+
+        assert!(r == x || r == x + F::ONE, "root outside {{x, x + 1}}");
+        assert_eq!(r.square() + r, c, "solve round-trip failed");
+
+        if x.trace() == Bit::ONE {
+            seen_trace_one = true;
+
+            assert!(F::solve_quadratic(x).is_none(), "solved c with Tr = 1");
+        }
+    }
+
+    assert!(
+        seen_trace_one,
+        "trace never 1 in 4096 samples: mask is broken"
+    );
 }
 
 #[test]
@@ -168,4 +208,22 @@ fn block16_solve_quadratic_iff_trace_zero() {
     }
 
     assert_eq!(solvable, 32768, "exactly half of GF(2^16) must be solvable");
+}
+
+#[test]
+fn block32_field_laws() {
+    let mut r = StdRng::seed_from_u64(0x5eed_a15e_0b7a_0032);
+    wide_field_laws(|| Block32(r.random()));
+}
+
+#[test]
+fn block64_field_laws() {
+    let mut r = StdRng::seed_from_u64(0x5eed_a15e_0b7a_0064);
+    wide_field_laws(|| Block64(r.random()));
+}
+
+#[test]
+fn block128_field_laws() {
+    let mut r = StdRng::seed_from_u64(0x5eed_a15e_0b7a_0128);
+    wide_field_laws(|| Block128(r.random()));
 }
