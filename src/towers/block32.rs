@@ -552,7 +552,6 @@ pub fn apply_matrix_32(val: Block32, table: &[u32; 1024]) -> Block32 {
     Block32(res)
 }
 
-#[cfg(not(feature = "table-math"))]
 #[inline(always)]
 fn map_ct_32(x: u32, basis: &[u32; 32]) -> u32 {
     let mut acc = 0u32;

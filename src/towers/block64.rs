@@ -557,7 +557,6 @@ pub fn apply_matrix_64(val: Block64, table: &[u64; 2048]) -> Block64 {
     Block64(res)
 }
 
-#[cfg(not(feature = "table-math"))]
 #[inline(always)]
 fn map_ct_64(x: u64, basis: &[u64; 64]) -> u64 {
     let mut acc = 0u64;

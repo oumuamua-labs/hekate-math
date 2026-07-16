@@ -779,7 +779,6 @@ pub fn apply_matrix_128(val: Block128, table: &[u128; 4096]) -> Block128 {
     Block128(res)
 }
 
-#[cfg(not(feature = "table-math"))]
 #[inline(always)]
 fn map_ct_128_split(x: u128, basis: &[u128; 128]) -> u128 {
     let mut acc_lo = 0u64;
@@ -804,8 +803,8 @@ fn map_ct_128_split(x: u128, basis: &[u128; 128]) -> u128 {
 #[inline(always)]
 fn lift_ct<const N: usize>(x: u64, basis: &'static [u128; N]) -> u128 {
     let mut acc = 0u128;
-
     let mut i = 0usize;
+
     while i < N {
         let bit = (x >> i) & 1;
         let mask = 0u128.wrapping_sub(bit as u128);
