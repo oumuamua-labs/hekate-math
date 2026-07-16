@@ -75,7 +75,7 @@ Reproduce with `cargo bench` (constant-time default) or `cargo bench --features 
 
 ```toml
 [dependencies]
-hekate-math = "0.8.0"
+hekate-math = "0.9.0"
 ```
 
 ## Examples
