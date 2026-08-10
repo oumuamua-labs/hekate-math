@@ -397,12 +397,29 @@ impl HardwareField for Block256 {
         let l = lhs.into_raw();
         let r = rhs.into_raw();
 
-        Flat::from_raw(Block256([l.0[0] ^ r.0[0], l.0[1] ^ r.0[1]]))
+        let c_lo = Block128::add_hardware(
+            Flat::from_raw(Block128(l.0[0])),
+            Flat::from_raw(Block128(r.0[0])),
+        );
+        let c_hi = Block128::add_hardware(
+            Flat::from_raw(Block128(l.0[1])),
+            Flat::from_raw(Block128(r.0[1])),
+        );
+
+        Flat::from_raw(Block256([c_lo.into_raw().0, c_hi.into_raw().0]))
     }
 
     #[inline(always)]
     fn add_hardware_packed(lhs: PackedFlat<Self>, rhs: PackedFlat<Self>) -> PackedFlat<Self> {
-        PackedFlat::from_raw(lhs.into_raw() + rhs.into_raw())
+        let lhs = lhs.into_raw().0;
+        let rhs = rhs.into_raw().0;
+
+        let mut res = [Block256::ZERO; PACKED_WIDTH_256];
+        for i in 0..PACKED_WIDTH_256 {
+            res[i] = Self::add_hardware(Flat::from_raw(lhs[i]), Flat::from_raw(rhs[i])).into_raw();
+        }
+
+        PackedFlat::from_raw(PackedBlock256(res))
     }
 
     #[inline(always)]
