@@ -35,8 +35,8 @@ use bridge::gf_model::{
 };
 use bridge::neon_model::{clmul8_lane, hi8, hi64, lo8, lo64, vdup_m8, vmull_p8_m, vmull_p64_m};
 use bridge::{
-    clmul_bound, clmul_shift_limb, clmul8_bridge, clmul64_bridge, fold_step, karatsuba_clmul,
-    pmod_below, r_poly, u128_pack, u128_split, xor8_reflect, xor16_reflect, xor32_reflect,
+    clmul_bound, clmul_shift_limb, clmul8_bridge, clmul64_bridge, fold_step, pmod_below, r_poly,
+    schoolbook_clmul, u128_pack, u128_split, xor8_reflect, xor16_reflect, xor32_reflect,
     xor64_reflect, xor128_reflect,
 };
 use vstd::arithmetic::mul::{
@@ -401,7 +401,7 @@ pub proof fn mul_8_correct(a: u8, b: u8)
 }
 
 // ============================================================
-// mul_flat_64, block64.rs:635-665
+// mul_flat_64, block64.rs:639-661
 // ============================================================
 
 pub open spec fn mul_flat_64_twin(a: u64, b: u64) -> u64 {
@@ -483,8 +483,8 @@ pub proof fn mul_flat_64_correct(a: u64, b: u64)
 }
 
 // ============================================================
-// mul_flat_128, block128.rs:838-905: two-limb
-// Karatsuba, three PMULLs, two-stage 0x87 fold
+// mul_flat_128, block128.rs:873-918: two-limb
+// schoolbook, four product PMULLs, two-stage 0x87 fold
 // ============================================================
 
 pub open spec fn mul_flat_128_twin(a: u128, b: u128) -> u128 {
@@ -495,9 +495,10 @@ pub open spec fn mul_flat_128_twin(a: u128, b: u128) -> u128 {
 
     let d0 = vmull_p64_m(a0, b0);
     let d2 = vmull_p64_m(a1, b1);
-    let d1 = vmull_p64_m(a0 ^ a1, b0 ^ b1);
+    let x0 = vmull_p64_m(a0, b1);
+    let x1 = vmull_p64_m(a1, b0);
 
-    let mid = d1 ^ (d0 ^ d2);
+    let mid = x0 ^ x1;
 
     let c0 = lo64(d0);
     let c1 = hi64(d0) ^ lo64(mid);
@@ -514,9 +515,10 @@ pub open spec fn mul_flat_128_twin(a: u128, b: u128) -> u128 {
     let final_0 = c0 ^ folded_0;
     let final_1 = c1 ^ folded_1;
 
-    let carry_res = lo64(vmull_p64_m(carry, 0x87));
+    // deg(carry·R) < 14; the high lane is zero.
+    let carry_mul = vmull_p64_m(carry, 0x87);
 
-    ((final_0 ^ carry_res) as u128) | ((final_1 as u128) << 64)
+    (((final_0 as u128) | ((final_1 as u128) << 64))) ^ carry_mul
 }
 
 proof fn mul_comm_p64(x: nat)
@@ -547,32 +549,30 @@ pub proof fn mul_flat_128_correct(a: u128, b: u128)
     mul_comm_p64(a1 as nat);
     mul_comm_p64(b1 as nat);
 
-    // Karatsuba at the clmul level
-    karatsuba_clmul(a0 as nat, a1 as nat, b0 as nat, b1 as nat, 64);
+    // Schoolbook at the clmul level
+    schoolbook_clmul(a0 as nat, a1 as nat, b0 as nat, b1 as nat, 64);
 
     let d0 = vmull_p64_m(a0, b0);
     let d2 = vmull_p64_m(a1, b1);
-    let d1 = vmull_p64_m(a0 ^ a1, b0 ^ b1);
+    let x0 = vmull_p64_m(a0, b1);
+    let x1 = vmull_p64_m(a1, b0);
     let dd0 = clmul(a0 as nat, b0 as nat);
     let dd2 = clmul(a1 as nat, b1 as nat);
-    let dd1 = clmul(xor(a0 as nat, a1 as nat), xor(b0 as nat, b1 as nat));
-    let midn = xor(dd1, xor(dd0, dd2));
+    let midn = xor(clmul(a0 as nat, b1 as nat), clmul(a1 as nat, b0 as nat));
 
     clmul64_bridge(a0, b0);
     clmul64_bridge(a1, b1);
-    clmul64_bridge(a0 ^ a1, b0 ^ b1);
-    xor64_reflect(a0, a1);
-    xor64_reflect(b0, b1);
+    clmul64_bridge(a0, b1);
+    clmul64_bridge(a1, b0);
 
     let prn = clmul(a as nat, b as nat);
 
     assert(prn == xor(dd0, xor(midn * p, dd2 * p * p)));
 
-    // The three products in u128 lane view
-    let mid = d1 ^ (d0 ^ d2);
+    // The four products in u128 lane view
+    let mid = x0 ^ x1;
 
-    xor128_reflect(d0, d2);
-    xor128_reflect(d1, d0 ^ d2);
+    xor128_reflect(x0, x1);
 
     assert(mid as nat == midn);
 
@@ -759,8 +759,16 @@ pub proof fn mul_flat_128_correct(a: u128, b: u128)
 
     let carry_res = lo64(cr);
     let res_lo = final_0 ^ carry_res;
+    let packed = (final_0 as u128) | ((final_1 as u128) << 64);
 
     xor64_reflect(final_0, carry_res);
+
+    // cr < 2^64; the xor lands entirely in the low lane.
+    assert(packed ^ cr == (res_lo as u128) | ((final_1 as u128) << 64)) by (bit_vector)
+        requires
+            packed == (final_0 as u128) | ((final_1 as u128) << 64),
+            res_lo == final_0 ^ (cr as u64),
+            cr < 0x1_0000_0000_0000_0000u128;
 
     // Reassociate the low-lane carry into F0
     assert(xor(xor(ff0, p * ff1), crn) == xor(res_lo as nat, p * ff1)) by {
