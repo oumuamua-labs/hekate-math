@@ -602,6 +602,9 @@ mod neon {
         unsafe {
             let ap: poly64x2_t = transmute(lhs.0);
             let bp: poly64x2_t = transmute(rhs.0);
+
+            // vdupq_n_p64, not [c; 2]: the repeat
+            // form lowers to a memcpy libcall.
             let rv: poly64x2_t = vdupq_n_p64(constants::POLY_64);
 
             // Both lanes per stage: PMULL/PMULL2 pairs,
@@ -638,6 +641,8 @@ mod neon {
     #[inline(always)]
     pub fn mul_flat_64(a: Block64, b: Block64) -> Block64 {
         unsafe {
+            // vdupq_n_p64, not [c; 2]: the repeat
+            // form lowers to a memcpy libcall.
             let rv: poly64x2_t = vdupq_n_p64(constants::POLY_64);
 
             // Reduction P(x) = x^64 + R(x), R(x) = 0x1b

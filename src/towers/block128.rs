@@ -896,7 +896,9 @@ mod neon {
             let lo = veorq_u8(d0, vextq_u8::<8>(zero, mid));
             let hi = veorq_u8(d2, vextq_u8::<8>(mid, zero));
 
-            // Reduction P(x) = x^128 + R(x), R(x) = 0x87
+            // Reduction P(x) = x^128 + R(x), R(x) = 0x87;
+            // vdupq_n_p64, not [c; 2]: the repeat
+            // form lowers to a memcpy libcall.
             let rv: poly64x2_t = vdupq_n_p64(constants::POLY_128 as u64);
             let hip: poly64x2_t = transmute(hi);
 
