@@ -444,7 +444,18 @@ impl HardwareField for Block128 {
 
     #[inline(always)]
     fn add_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self> {
-        Flat::from_raw(lhs.into_raw() + rhs.into_raw())
+        let lhs = lhs.into_raw();
+        let rhs = rhs.into_raw();
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            Flat::from_raw(neon::add_flat_128(lhs, rhs))
+        }
+
+        #[cfg(not(target_arch = "aarch64"))]
+        {
+            Flat::from_raw(lhs + rhs)
+        }
     }
 
     #[inline(always)]
@@ -847,73 +858,62 @@ mod neon {
     }
 
     #[inline(always)]
+    pub fn add_flat_128(a: Block128, b: Block128) -> Block128 {
+        unsafe {
+            // veor, not u128 ^:
+            // stays in the mul kernel's register file.
+            let l: uint8x16_t = transmute(a.0);
+            let r: uint8x16_t = transmute(b.0);
+
+            Block128(transmute::<uint8x16_t, u128>(veorq_u8(l, r)))
+        }
+    }
+
+    #[inline(always)]
     pub fn mul_flat_128(a: Block128, b: Block128) -> Block128 {
         unsafe {
-            // Treat inputs as pairs of u64
-            let a_vec: uint64x2_t = transmute(a.0);
-            let b_vec: uint64x2_t = transmute(b.0);
+            let a8: uint8x16_t = transmute(a.0);
+            let b8: uint8x16_t = transmute(b.0);
+            let ap: poly64x2_t = transmute(a8);
+            let bp: poly64x2_t = transmute(b8);
 
-            let a0 = vgetq_lane_u64(a_vec, 0);
-            let a1 = vgetq_lane_u64(a_vec, 1);
-            let b0 = vgetq_lane_u64(b_vec, 0);
-            let b1 = vgetq_lane_u64(b_vec, 1);
+            // Schoolbook, not Karatsuba:
+            // issue width binds, not PMULL count.
+            let bs: poly64x2_t = transmute(vextq_u8::<8>(b8, b8));
 
-            // Karatsuba Multiplication using PMULL (64x64 -> 128)
-            // vmull_p64 takes poly64_t (which is u64)
-            let d0 = vmull_p64(a0, b0);
-            let d2 = vmull_p64(a1, b1);
-            let d1 = vmull_p64(a0 ^ a1, b0 ^ b1);
+            let d0: uint8x16_t =
+                transmute(vmull_p64(vgetq_lane_p64::<0>(ap), vgetq_lane_p64::<0>(bp)));
+            let d2: uint8x16_t = transmute(vmull_high_p64(ap, bp));
+            let x0: uint8x16_t =
+                transmute(vmull_p64(vgetq_lane_p64::<0>(ap), vgetq_lane_p64::<0>(bs)));
+            let x1: uint8x16_t = transmute(vmull_high_p64(ap, bs));
 
-            // Mid term = D1 ^ D0 ^ D2 (128-bit XOR)
-            // Since d0, d1, d2 are poly128_t,
-            // cast to uint128-like (uint8x16_t) to XOR
-            let d0_v: uint8x16_t = transmute(d0);
-            let d1_v: uint8x16_t = transmute(d1);
-            let d2_v: uint8x16_t = transmute(d2);
+            let mid = veorq_u8(x0, x1);
 
-            let mid_v = veorq_u8(d1_v, veorq_u8(d0_v, d2_v));
+            // 256-bit product limbs:
+            // lo = [c0, c1], hi = [c2, c3].
+            let zero = vdupq_n_u8(0);
+            let lo = veorq_u8(d0, vextq_u8::<8>(zero, mid));
+            let hi = veorq_u8(d2, vextq_u8::<8>(mid, zero));
 
-            // Convert results to u64 parts for reduction
-            let d0_u64: uint64x2_t = transmute(d0);
-            let mid_u64: uint64x2_t = transmute(mid_v);
-            let d2_u64: uint64x2_t = transmute(d2);
+            // Reduction P(x) = x^128 + R(x), R(x) = 0x87
+            let rv: poly64x2_t = vdupq_n_p64(constants::POLY_128 as u64);
+            let hip: poly64x2_t = transmute(hi);
 
-            let c0 = vgetq_lane_u64(d0_u64, 0);
-            let c1 = vgetq_lane_u64(d0_u64, 1) ^ vgetq_lane_u64(mid_u64, 0);
-            let c2 = vgetq_lane_u64(d2_u64, 0) ^ vgetq_lane_u64(mid_u64, 1);
-            let c3 = vgetq_lane_u64(d2_u64, 1);
+            let p0: uint8x16_t =
+                transmute(vmull_p64(vgetq_lane_p64::<0>(hip), vgetq_lane_p64::<0>(rv)));
+            let p1: uint8x16_t = transmute(vmull_high_p64(hip, rv));
+            let p1p: poly64x2_t = transmute(p1);
 
-            // Reduction P(x) = x^128 + R(x).
-            // R(x) = 0x87 (fits in u64)
-            let r_val = constants::POLY_128 as u64;
+            let fold = veorq_u8(p0, vextq_u8::<8>(zero, p1));
 
-            // Fold H = [C2, C3]
-            // Multiply C2 and C3 by R(x)
-            let p0 = vmull_p64(c2, r_val);
-            let p1 = vmull_p64(c3, r_val);
+            // carry = hi lane of p1 < 2^7;
+            // deg(carry·R) < 14: fits the low lane, no third fold.
+            let carry_mul: uint8x16_t = transmute(vmull_high_p64(p1p, rv));
 
-            let p0_u64: uint64x2_t = transmute(p0);
-            let p1_u64: uint64x2_t = transmute(p1);
+            let res = veorq_u8(veorq_u8(lo, fold), carry_mul);
 
-            let folded_0 = vgetq_lane_u64(p0_u64, 0);
-            let folded_1 = vgetq_lane_u64(p0_u64, 1) ^ vgetq_lane_u64(p1_u64, 0);
-            let carry = vgetq_lane_u64(p1_u64, 1);
-
-            let final_0 = c0 ^ folded_0;
-            let final_1 = c1 ^ folded_1;
-
-            // Second reduction for carry
-            let carry_mul = vmull_p64(carry, r_val);
-
-            // Use transmute to convert the opaque
-            // poly128_t to something we can read.
-            let carry_res_vec: uint64x2_t = transmute(carry_mul);
-            let carry_res = vgetq_lane_u64(carry_res_vec, 0);
-
-            let res_lo = final_0 ^ carry_res;
-            let res_hi = final_1;
-
-            Block128((res_lo as u128) | ((res_hi as u128) << 64))
+            Block128(transmute::<uint8x16_t, u128>(res))
         }
     }
 
