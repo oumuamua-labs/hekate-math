@@ -13,7 +13,6 @@ description = "A high-performance, constant-time implementation of binary tower 
 keywords = ["cryptography", "zk", "binary-fields", "simd", "binius"]
 categories = ["cryptography", "no-std", "mathematics", "algorithms", "science"]
 license = "Apache-2.0"
-exclude = ["verus"]
 
 [lib]
 crate-type = ["rlib"]
