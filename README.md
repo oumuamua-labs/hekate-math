@@ -9,14 +9,12 @@
 
 Hardware-accelerated binary tower fields for zero-knowledge proofs.
 
-`hekate-math` provides a high-performance, constant-time implementation of binary tower fields (𝔽(2^k))
-optimized for Sumcheck, GKR-based provers, and Binius protocols. The library implements a rigorous algebraic tower
-construction up to 𝔽(2^256), leveraging basis isomorphism to utilize native CPU hardware instructions:
-PMULL (ARMv8 NEON) and PCLMULQDQ (x86_64 AVX2).
+`hekate-math` implements constant-time binary tower fields (𝔽(2^k)) for Sumcheck, GKR-based
+provers, and Binius protocols. The tower runs to 𝔽(2^256). A basis isomorphism maps tower
+elements onto CPU carry-less multiply instructions: PMULL (ARMv8 NEON) and PCLMULQDQ (x86_64 AVX2).
 
-Designed for low-level cryptographic engineering, the crate is `no-std` compatible and defaults to constant-time
-(unproved yet) execution paths to mitigate side-channel attacks. It enforces strict type safety between canonical
-(tower) and polynomial (flat/hardware) representations.
+`no-std` compatible. Default execution paths are constant-time (unproved) against side-channel
+attacks. The type system separates canonical (tower) from polynomial (flat/hardware) representations.
 
 This is the mathematical core of the [Hekate ZK Engine](https://github.com/oumuamua-labs/hekate).
 
@@ -33,49 +31,49 @@ USE AT YOUR OWN RISK!
 ## Performance Metrics
 
 > [!NOTE]
-> Current benchmarks are reported with the `table-math` feature enabled
-> to reflect peak performance for public-data scenarios. For private-key
-> operations, use the default constant-time backend.
+> Tables below are the `table-math` build. That feature uses lookup
+> tables for basis conversion, lifting, and the GF(2^8) multiply every
+> tower Karatsuba bottoms out in. Tower rows are slower under the
+> default constant-time build; flat/hardware rows are identical.
+> Private witness data: use the default.
 
-Benchmarks executed on *Apple M3 Max*. The library achieves near-native memory
-bandwidth saturation and single-cycle throughput for hardware-accelerated operations.
+Benchmarks executed on *Apple M3 Max*.
 
 ### Micro-Benchmarks (Block128)
 
 | Operation                | Basis             | Latency  | Implementation                      |
 |:-------------------------|:------------------|:---------|:------------------------------------|
-| **Multiplication**       | Polynomial (Flat) | 1.08 ns  | `PMULL` (Pipelined)                 |
-| **Multiplication**       | Tower (Canonical) | 98.3 ns  | Recursive Karatsuba                 |
-| **Addition**             | Any               | 1.14 ns  | Vectorized XOR                      |
-| **Inversion** (Single)   | Tower             | 246.6 ns | Itoh-Tsujii / Fermat Little Theorem |
-| **Inversion** (Batch)    | Tower             | 15.7 ns  | Montgomery's Trick (SIMD)           |
-| **Basis Conv** (Default) | Tower ↔ Flat      | 90.0 ns  | Bit-Slicing (Constant-Time)         |
-| **Basis Conv** (Fast)    | Tower ↔ Flat      | 3.80 ns  | Look-Up Table (Variable-Time)       |
+| **Multiplication**       | Polynomial (Flat) | 0.90 ns  | `PMULL` (Pipelined)                 |
+| **Multiplication**       | Tower (Canonical) | 131.4 ns | Recursive Karatsuba                 |
+| **Addition**             | Any               | 1.15 ns  | Vectorized XOR                      |
+| **Inversion** (Single)   | Tower             | 315.6 ns | Itoh-Tsujii / Fermat Little Theorem |
+| **Inversion** (Batch)    | Tower             | 15.6 ns  | Montgomery's Trick (SIMD)           |
+| **Basis Conv** (Default) | Tower ↔ Flat      | 84.9 ns  | Bit-Slicing (Constant-Time)         |
+| **Basis Conv** (Fast)    | Tower ↔ Flat      | 3.68 ns  | Look-Up Table (Variable-Time)       |
 
-*Impact: Flat basis multiplication is approximately 100x faster than the canonical recursive implementation.*
+*Flat multiplication is ~145× faster than the canonical recursive path.*
 
 ### Polynomial Arithmetic (Poly ALU)
 
 Efficiency of polynomial operations in 𝔽(2^128).
 
-| Operation                 | Scenario / Size | Time     | Throughput  |
-|:--------------------------|:----------------|:---------|:------------|
-| **Dense Eval (Tower)**    | 2²⁰ coeffs      | 91.93 ms | 174 MiB/s   |
-| **Dense Eval (Hardware)** | 2²⁰ coeffs      | 8.34 ms  | 1.87 GiB/s  |
-| **Batch Eval (SIMD)**     | 256 × 16384     | 5.43 ms  | 772 Melem/s |
-| **Additive FFT (scalar)** | 2¹⁶ · Block16   | 482.2 µs | 136 Melem/s |
-| **Additive FFT (packed)** | 2¹⁶ · ×8 lanes  | 1.61 ms  | 326 Melem/s |
-| **Interpolate MSM**       | 65536 points    | 77.12 µs | 850 Melem/s |
-| **MLE Evaluation**        | 20 variables    | 1.27 ms  | 822 Melem/s |
+| Operation                 | Scenario / Size | Time     | Throughput   |
+|:--------------------------|:----------------|:---------|:-------------|
+| **Dense Eval (Tower)**    | 2²⁰ coeffs      | 148.2 ms | 108 MiB/s    |
+| **Dense Eval (Hardware)** | 2²⁰ coeffs      | 8.37 ms  | 1.87 GiB/s   |
+| **Batch Eval (SIMD)**     | 256 × 16384     | 4.44 ms  | 945 Melem/s  |
+| **Additive FFT (scalar)** | 2¹⁶ · Block16   | 477.7 µs | 137 Melem/s  |
+| **Additive FFT (packed)** | 2¹⁶ · ×8 lanes  | 1.75 ms  | 300 Melem/s  |
+| **Interpolate MSM**       | 65536 points    | 106.5 µs | 616 Melem/s  |
+| **MLE Evaluation**        | 20 variables    | 1.00 ms  | 1.04 Gelem/s |
 
-Reproduce with `cargo bench` (constant-time default) or `cargo bench --features table-math`
-(LUT basis conversion; hardware arithmetic is identical under both).
+Reproduce with `cargo bench --features table-math`, or `cargo bench` for the default.
 
 ## Installation
 
 ```toml
 [dependencies]
-hekate-math = "0.9.0"
+hekate-math = "0.9"
 ```
 
 ## Examples
@@ -191,30 +189,9 @@ fn example_fft() {
 
 ## Theoretical Foundation
 
-`hekate-math` implements a binary tower field architecture. The field 𝔽(2^128)
-is constructed via recursive quadratic extensions using the reduction polynomial v² + v + βᵢ.
-
-The construction follows a strict recursive data layout. Higher-order blocks are composed
-of two lower-order blocks (Low, High).
-
-```plaintext
-                    Block256 (GF(2^256))
-                    /              \
-              Block128              Block128 (GF(2^128))
-                /    \              /     \
-          Block64   Block64       ...     ...
-           /    \
-       Block32  Block32
-        /    \
-    Block16  Block16
-     /    \
- Block8   Block8  (Base Field GF(2^8))
-    |
-  [Bit; 8]        (Atomic Unit GF(2))
-```
-
-The extension defines 𝔽(2^(2^(i+1))) ≅ 𝔽(2^(2^i))[v] / (v² + v + βᵢ),
-where βᵢ is the extension constant (`EXTENSION_TAU`) for that level.
+`hekate-math` implements a binary tower field architecture:
+𝔽(2^(2^(i+1))) ≅ 𝔽(2^(2^i))[v] / (v² + v + βᵢ), where βᵢ is that level's extension constant
+(`EXTENSION_TAU`). Each block is a (Low, High) pair of the level below.
 
 | Height | Field     | Implementation | Extension Constant (β)                        | Arithmetic            |
 |:-------|:----------|:---------------|:----------------------------------------------|:----------------------|
@@ -231,8 +208,8 @@ are subfields embedded via isomorphism, making this a Hybrid Tower construction.
 
 ## The Isomorphic Basis Architecture
 
-To bridge the gap between algebraic recursion and CPU pipeline efficiency, `hekate-math` implements a hybrid basis
-system. Canonical values stay in `F`, while hardware/polynomial values are represented explicitly as `Flat<F>`.
+Two representations of the same field. Canonical values stay in `F`; hardware/polynomial
+values are `Flat<F>`. Recursion is cheap in the first, CLMUL is cheap in the second.
 
 ### Canonical Basis (Tower)
 
@@ -250,11 +227,10 @@ basis (1, x, x²...) optimized for specific CPU instruction sets (AES-NI, PMULL,
 
 * Linear bit-packed integers (`u8`, `u64`, `u128`).
 * Single-cycle Carry-Less Multiplication (`CLMUL`) with hardware-accelerated reduction.
-* 1.17ns per multiplication (Block128 on modern architectures).
 
 ### Isomorphism & Interop
 
-The crate strictly enforces basis separation through the type system to prevent mixing representations.
+`Flat<F>` and `F` are distinct types. Mixing them is a compile error.
 
 The Isomorphism φ is defined as: φ: 𝔽(Tower) ↔ 𝔽(Hardware)
 
@@ -273,35 +249,41 @@ pub trait HardwareField: TowerField + PackableField {
 
 ## Security Model
 
-The crate operates under a configurable security model designed for cryptographic contexts where secret-dependent
-execution time is catastrophic.
+Timing behaviour is a build-time choice. Pick per deployment.
 
 | Feature Flag       | Behavior                | Use Case                 | Security                          |
 |:-------------------|:------------------------|:-------------------------|:----------------------------------|
 | `default-features` | Bitsliced Constant-Time | Private Key / Prover     | **High** (Side-Channel Resistant) |
 | `table-math`       | Cached Lookup Tables    | Public Verifier / Rollup | Low (Variable Access Time)        |
 | `table-math`       | Cached Lifting Tables   | Public Data Ingestion    | Low (Variable Access Time)        |
+| `table-math`       | GF(2^8) Log/Exp Tables  | Public Verifier / Rollup | Low (Index + Zero Branch)         |
 
 * **Basis Conversion**: By default, φ and φ⁻¹ are computed using constant-time bit-sliced matrix
   multiplication, independent of the input value.
-* **Hardware Arithmetic**: `Block128` multiplication utilizes carry-less multiplication instructions (`PMULL` on ARMv8,
-  `PCLMULQDQ` on x86_64), which are constant-latency on modern microarchitectures.
+* **Hardware Arithmetic**: `Block128` multiplication uses carry-less multiply (`PMULL` on ARMv8,
+  `PCLMULQDQ` on x86_64), constant-latency on current microarchitectures.
+* **Tower Arithmetic**: `table-math` replaces `Block8::mul` with log/exp tables and a zero-operand
+  branch. Every tower multiply and inversion bottoms out there.
+
+## Formal Verification
+
+[`verus/`](verus/README.md) holds standalone [Verus](https://github.com/verus-lang/verus) proofs:
+1871 obligations, 0 errors, 15 units. The tower `mul` cascade refines schoolbook GF(2^k) at every
+level, the NEON flat kernels and constant-time basis conversions are proven equal to `gf_mul`, and
+the additive FFT round-trips. Excluded from the crate build; run `verus/verify.sh`.
+
+Trust boundary: four `external_body` axioms, each discharged by an exhaustive `build/main.rs`
+check on every `cargo build`, plus the kernel↔twin transcription seams. `tests/neon_differential.rs`
+covers the seams on silicon. Registered in [`verus/TRUSTED_AXIOMS.md`](verus/TRUSTED_AXIOMS.md).
 
 ## Hardware Support
 
-| Architecture | Feature Requirement | Instructions Used       | Status            |
-|:-------------|:--------------------|:------------------------|:------------------|
-| **aarch64**  | `neon`, `pmull`     | `vmull_p64`, `veorq_u8` | Production        |
-| **x86_64**   | N/A                 | `xor`, `sw_mul`         | Development       |
-| **WASM**     | `simd128`           | `v128.xor`, `sw_mul`    | Software Fallback |
+| Architecture | Feature Requirement | Instructions Used                            | Status      |
+|:-------------|:--------------------|:---------------------------------------------|:------------|
+| **aarch64**  | `neon`, `pmull`     | `pmull`/`pmull2`, `eor`, `ext`, `uzp`, `tbl` | Production  |
+| **x86_64**   | N/A                 | `xor`, `sw_mul`                              | Development |
 
 *Note: Native AVX2/PCLMULQDQ implementation for x86_64 is on the roadmap.*
-
-## Roadmap
-
-- **x86_64 Hardware Acceleration (0 -> 1)**
-    - Replace software fallbacks with hand-tuned assembly/intrinsics for AVX2 and PCLMULQDQ.
-    - Goal: Path to x86_64 Supremacy.
 
 ## License
 

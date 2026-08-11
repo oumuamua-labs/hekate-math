@@ -381,13 +381,12 @@ pub proof fn clmul_shift_limb_r(x: nat, y: nat, m: nat)
 
 // The 2×2 limb product with the d1 ^ d0 ^ d2 mid-term:
 // cross terms survive, the diagonal cancels in char 2.
-pub proof fn karatsuba_clmul(a0: nat, a1: nat, b0: nat, b1: nat, m: nat)
+pub proof fn schoolbook_clmul(a0: nat, a1: nat, b0: nat, b1: nat, m: nat)
     ensures ({
         let p = pow2(m);
         let d0 = clmul(a0, b0);
         let d2 = clmul(a1, b1);
-        let d1 = clmul(xor(a0, a1), xor(b0, b1));
-        let mid = xor(d1, xor(d0, d2));
+        let mid = xor(clmul(a0, b1), clmul(a1, b0));
 
         clmul(xor(a0, a1 * p), xor(b0, b1 * p))
             == xor(d0, xor(mid * p, d2 * p * p))
@@ -396,9 +395,9 @@ pub proof fn karatsuba_clmul(a0: nat, a1: nat, b0: nat, b1: nat, m: nat)
     let p = pow2(m);
     let d0 = clmul(a0, b0);
     let d2 = clmul(a1, b1);
-    let d1 = clmul(xor(a0, a1), xor(b0, b1));
     let c01 = clmul(a0, b1);
     let c10 = clmul(a1, b0);
+    let mid = xor(c01, c10);
     let bb = xor(b0, b1 * p);
 
     // Full expansion of the packed product.
@@ -416,6 +415,38 @@ pub proof fn karatsuba_clmul(a0: nat, a1: nat, b0: nat, b1: nat, m: nat)
 
     assert(clmul(xor(a0, a1 * p), bb)
         == xor(xor(d0, c01 * p), xor(c10 * p, d2 * p * p)));
+
+    // mid·p splits back into the two cross terms
+    xor_mul_pow2(m, c01, c10);
+    lemma_mul_is_commutative(p as int, c01 as int);
+    lemma_mul_is_commutative(p as int, c10 as int);
+    lemma_mul_is_commutative(p as int, mid as int);
+
+    // Regroup xor(xor(d0, c01·p), xor(c10·p, d2·p²))
+    // as xor(d0, xor(mid·p, d2·p²)).
+    xor_assoc(d0, c01 * p, xor(c10 * p, d2 * p * p));
+    xor_assoc(c01 * p, c10 * p, d2 * p * p);
+}
+
+pub proof fn karatsuba_clmul(a0: nat, a1: nat, b0: nat, b1: nat, m: nat)
+    ensures ({
+        let p = pow2(m);
+        let d0 = clmul(a0, b0);
+        let d2 = clmul(a1, b1);
+        let d1 = clmul(xor(a0, a1), xor(b0, b1));
+        let mid = xor(d1, xor(d0, d2));
+
+        clmul(xor(a0, a1 * p), xor(b0, b1 * p))
+            == xor(d0, xor(mid * p, d2 * p * p))
+    })
+{
+    let d0 = clmul(a0, b0);
+    let d2 = clmul(a1, b1);
+    let d1 = clmul(xor(a0, a1), xor(b0, b1));
+    let c01 = clmul(a0, b1);
+    let c10 = clmul(a1, b0);
+
+    schoolbook_clmul(a0, a1, b0, b1, m);
 
     // mid == xor(c01, c10): the d0/d2 diagonal cancels.
     clmul_distrib_l(a0, a1, xor(b0, b1));
@@ -441,17 +472,6 @@ pub proof fn karatsuba_clmul(a0: nat, a1: nat, b0: nat, b1: nat, m: nat)
         xor_self(dd);
         xor_zero(cc);
     }
-
-    // mid·p splits back into the two cross terms.
-    xor_mul_pow2(m, c01, c10);
-    lemma_mul_is_commutative(p as int, c01 as int);
-    lemma_mul_is_commutative(p as int, c10 as int);
-    lemma_mul_is_commutative(p as int, mid as int);
-
-    // Regroup xor(xor(d0, c01·p), xor(c10·p, d2·p²))
-    // as xor(d0, xor(mid·p, d2·p²)).
-    xor_assoc(d0, c01 * p, xor(c10 * p, d2 * p * p));
-    xor_assoc(c01 * p, c10 * p, d2 * p * p);
 }
 
 // ============================================================

@@ -600,79 +600,68 @@ mod neon {
     #[inline(always)]
     pub fn mul_flat_packed_64(lhs: PackedBlock64, rhs: PackedBlock64) -> PackedBlock64 {
         unsafe {
-            let a: uint64x2_t = transmute(lhs.0);
-            let b: uint64x2_t = transmute(rhs.0);
+            let ap: poly64x2_t = transmute(lhs.0);
+            let bp: poly64x2_t = transmute(rhs.0);
 
-            let a_lo = vget_low_u64(a);
-            let b_lo = vget_low_u64(b);
+            // vdupq_n_p64, not [c; 2]: the repeat
+            // form lowers to a memcpy libcall.
+            let rv: poly64x2_t = vdupq_n_p64(constants::POLY_64);
 
+            // Both lanes per stage: PMULL/PMULL2 pairs,
+            // uzp1/uzp2 regroup [lo, hi] products by lane.
             let p0: uint64x2_t =
-                transmute(vmull_p64(vget_lane_u64(a_lo, 0), vget_lane_u64(b_lo, 0)));
+                transmute(vmull_p64(vgetq_lane_p64::<0>(ap), vgetq_lane_p64::<0>(bp)));
+            let p1: uint64x2_t = transmute(vmull_high_p64(ap, bp));
 
-            let a_hi = vget_high_u64(a);
-            let b_hi = vget_high_u64(b);
-            let p1: uint64x2_t =
-                transmute(vmull_p64(vget_lane_u64(a_hi, 0), vget_lane_u64(b_hi, 0)));
+            let los = vuzp1q_u64(p0, p1);
+            let his = vuzp2q_u64(p0, p1);
+            let hisp: poly64x2_t = transmute(his);
 
-            let r0 = reduce_64(p0);
-            let r1 = reduce_64(p1);
+            let hr0: uint64x2_t = transmute(vmull_p64(
+                vgetq_lane_p64::<0>(hisp),
+                vgetq_lane_p64::<0>(rv),
+            ));
+            let hr1: uint64x2_t = transmute(vmull_high_p64(hisp, rv));
 
-            PackedBlock64([r0, r1])
-        }
-    }
+            let folded = vuzp1q_u64(hr0, hr1);
+            let carries = vuzp2q_u64(hr0, hr1);
+            let cp: poly64x2_t = transmute(carries);
 
-    #[inline(always)]
-    fn reduce_64(prod: uint64x2_t) -> Block64 {
-        unsafe {
-            let l = vgetq_lane_u64(prod, 0);
-            let h = vgetq_lane_u64(prod, 1);
+            let cr0: uint64x2_t =
+                transmute(vmull_p64(vgetq_lane_p64::<0>(cp), vgetq_lane_p64::<0>(rv)));
+            let cr1: uint64x2_t = transmute(vmull_high_p64(cp, rv));
+            let carry_red = vuzp1q_u64(cr0, cr1);
 
-            let r_val = constants::POLY_64;
+            let res = veorq_u64(veorq_u64(los, folded), carry_red);
 
-            let h_red: uint64x2_t = transmute(vmull_p64(h, r_val));
-
-            let folded = vgetq_lane_u64(h_red, 0);
-            let carry = vgetq_lane_u64(h_red, 1);
-
-            let mut res = l ^ folded;
-
-            let carry_red: uint64x2_t = transmute(vmull_p64(carry, r_val));
-            res ^= vgetq_lane_u64(carry_red, 0);
-
-            Block64(res)
+            PackedBlock64(transmute::<uint64x2_t, [Block64; 2]>(res))
         }
     }
 
     #[inline(always)]
     pub fn mul_flat_64(a: Block64, b: Block64) -> Block64 {
         unsafe {
-            // Multiply 64x64 -> 128
-            let prod = vmull_p64(a.0, b.0);
-            let prod_u64: uint64x2_t = transmute(prod);
+            // vdupq_n_p64, not [c; 2]: the repeat
+            // form lowers to a memcpy libcall.
+            let rv: poly64x2_t = vdupq_n_p64(constants::POLY_64);
 
-            let l = vgetq_lane_u64(prod_u64, 0);
-            let h = vgetq_lane_u64(prod_u64, 1);
+            // Reduction P(x) = x^64 + R(x), R(x) = 0x1b
+            let prod: uint8x16_t = transmute(vmull_p64(a.0, b.0));
+            let h_red: uint8x16_t = transmute(vmull_high_p64(
+                transmute::<uint8x16_t, poly64x2_t>(prod),
+                rv,
+            ));
 
-            // Reduce mod P(x) = x^64 + R(x).
-            let r_val = constants::POLY_64; // u64
+            // carry = hi lane of h_red < 2^3;
+            // deg(carry·R) < 7: no third fold.
+            let c_red: uint8x16_t = transmute(vmull_high_p64(
+                transmute::<uint8x16_t, poly64x2_t>(h_red),
+                rv,
+            ));
 
-            // H * R
-            let h_red = vmull_p64(h, r_val);
-            let h_red_u64: uint64x2_t = transmute(h_red);
+            let res = veorq_u8(veorq_u8(prod, h_red), c_red);
 
-            let folded = vgetq_lane_u64(h_red_u64, 0);
-            let carry = vgetq_lane_u64(h_red_u64, 1);
-
-            let mut res = l ^ folded;
-
-            // Reduce carry (if exists)
-            let carry_red = vmull_p64(carry, r_val);
-            let carry_res_vec: uint64x2_t = transmute(carry_red);
-            let carry_val = vgetq_lane_u64(carry_res_vec, 0);
-
-            res ^= carry_val;
-
-            Block64(res)
+            Block64(vgetq_lane_u64(vreinterpretq_u64_u8(res), 0))
         }
     }
 }

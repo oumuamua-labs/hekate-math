@@ -556,10 +556,10 @@ pub proof fn mul_flat_scalar_packed_16_correct(a: Seq<u16>, s: u16)
 }
 
 // ============================================================
-// The remaining packed kernels are lane loops over the proven
-// scalar kernels: block64.rs:589 (two vmull_p64 + reduce_64,
-// the scalar dataflow per lane), block32.rs:584, and the
-// mul_hardware_packed loop in block128.rs:485
+// The remaining packed kernels compute the proven scalar dataflow
+// per lane: block64.rs:601-636 (PMULL/PMULL2 pairs with uzp lane
+// regroup, lane values unchanged), block32.rs:596 (scalar-kernel loop),
+// and the mul_hardware_packed loop in block128.rs:497
 // ============================================================
 
 pub open spec fn mul_flat_packed_64_twin(a: Seq<u64>, b: Seq<u64>) -> Seq<u64> {

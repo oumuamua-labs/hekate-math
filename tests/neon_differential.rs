@@ -194,7 +194,7 @@ fn flat_mul_16_exhaustive_vs_soft() {
 }
 
 // Single-bit × single-bit products are the bilinear map's basis:
-// a wrong Karatsuba recombination, lane swap, or fold wiring is
+// a wrong limb recombination, lane swap, or fold wiring is
 // input-oblivious, generator coverage exercises every wire.
 // Bilinearity itself is the `verus/` theorems' claim, not this test's.
 #[test]
@@ -237,6 +237,79 @@ fn flat_single_bit_exhaustive_32_64_128() {
                 Block128::mul_hardware(fa, fb).into_raw().0,
                 gf_soft128(a, b),
                 "flat mul 128: bit {i} * bit {j}",
+            );
+        }
+    }
+}
+
+// Random sampling does not reach the fold chain's carry lanes.
+#[test]
+fn flat_reduction_edges_64_128() {
+    const E64: [u64; 8] = [
+        0,
+        1,
+        0x1b,
+        u64::MAX,
+        1 << 63,
+        (1 << 63) | 1,
+        u32::MAX as u64,
+        (u32::MAX as u64) << 32,
+    ];
+
+    const E128: [u128; 8] = [
+        0,
+        1,
+        0x87,
+        u128::MAX,
+        1 << 127,
+        (1 << 127) | 1,
+        u64::MAX as u128,
+        (u64::MAX as u128) << 64,
+    ];
+
+    for (i, &x0) in E64.iter().enumerate() {
+        for (j, &y0) in E64.iter().enumerate() {
+            let (x1, y1) = (E64[7 - i], E64[7 - j]);
+
+            let a = [Flat::from_raw(Block64(x0)), Flat::from_raw(Block64(x1))];
+            let b = [Flat::from_raw(Block64(y0)), Flat::from_raw(Block64(y1))];
+
+            assert_eq!(
+                Block64::mul_hardware(a[0], b[0]).into_raw().0,
+                gf_soft64(x0, y0),
+                "flat mul 64: {x0:#018x} * {y0:#018x}",
+            );
+
+            let pc = Block64::mul_hardware_packed(
+                <Flat<Block64> as PackableField>::pack(&a),
+                <Flat<Block64> as PackableField>::pack(&b),
+            );
+
+            let mut out = [Flat::<Block64>::default(); 2];
+            <Flat<Block64> as PackableField>::unpack(pc, &mut out);
+
+            assert_eq!(
+                out[0].into_raw().0,
+                gf_soft64(x0, y0),
+                "packed mul 64 lane 0: {x0:#018x} * {y0:#018x}",
+            );
+            assert_eq!(
+                out[1].into_raw().0,
+                gf_soft64(x1, y1),
+                "packed mul 64 lane 1: {x1:#018x} * {y1:#018x}",
+            );
+        }
+    }
+
+    for &x in &E128 {
+        for &y in &E128 {
+            let fa = Flat::from_raw(Block128(x));
+            let fb = Flat::from_raw(Block128(y));
+
+            assert_eq!(
+                Block128::mul_hardware(fa, fb).into_raw().0,
+                gf_soft128(x, y),
+                "flat mul 128: {x:#034x} * {y:#034x}",
             );
         }
     }
