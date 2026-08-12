@@ -280,8 +280,17 @@ covers the seams on silicon. Registered in [`verus/TRUSTED_AXIOMS.md`](verus/TRU
 
 | Architecture | Feature Requirement | Instructions Used                            | Status      |
 |:-------------|:--------------------|:---------------------------------------------|:------------|
-| **aarch64**  | `neon`, `pmull`     | `pmull`/`pmull2`, `eor`, `ext`, `uzp`, `tbl` | Production  |
+| **aarch64**  | `neon`, `aes`       | `pmull`/`pmull2`, `eor`, `ext`, `uzp`, `tbl` | Production  |
 | **x86_64**   | N/A                 | `xor`, `sw_mul`                              | Development |
+
+PMULL sits behind the `aes` target feature, off by default on
+`aarch64-unknown-linux-gnu`. Without it the flat kernels take the
+software path (constant-time under default features): same results,
+lower throughput.
+
+```bash
+RUSTFLAGS="-C target-feature=+aes" cargo build --release
+```
 
 *Note: Native AVX2/PCLMULQDQ implementation for x86_64 is on the roadmap.*
 

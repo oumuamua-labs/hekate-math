@@ -319,7 +319,7 @@ impl Mul for PackedBlock32 {
 
     #[inline(always)]
     fn mul(self, rhs: Self) -> Self {
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(pmull)]
         {
             let a0 = mul_iso_32(self.0[0], rhs.0[0]);
             let a1 = mul_iso_32(self.0[1], rhs.0[1]);
@@ -329,7 +329,7 @@ impl Mul for PackedBlock32 {
             Self([a0, a1, a2, a3])
         }
 
-        #[cfg(not(target_arch = "aarch64"))]
+        #[cfg(not(pmull))]
         {
             let mut res = [Block32::ZERO; PACKED_WIDTH_32];
             for ((out, l), r) in res.iter_mut().zip(self.0.iter()).zip(rhs.0.iter()) {
@@ -422,12 +422,12 @@ impl HardwareField for Block32 {
         let lhs = lhs.into_raw();
         let rhs = rhs.into_raw();
 
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(pmull)]
         {
             Flat::from_raw(neon::mul_flat_32(lhs, rhs))
         }
 
-        #[cfg(not(target_arch = "aarch64"))]
+        #[cfg(not(pmull))]
         {
             let a_tower = Self::from_hardware(Flat::from_raw(lhs));
             let b_tower = Self::from_hardware(Flat::from_raw(rhs));
@@ -441,12 +441,12 @@ impl HardwareField for Block32 {
         let lhs = lhs.into_raw();
         let rhs = rhs.into_raw();
 
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(pmull)]
         {
             PackedFlat::from_raw(neon::mul_flat_packed_32(lhs, rhs))
         }
 
-        #[cfg(not(target_arch = "aarch64"))]
+        #[cfg(not(pmull))]
         {
             let mut l = [Self::ZERO; <Self as PackableField>::WIDTH];
             let mut r = [Self::ZERO; <Self as PackableField>::WIDTH];
@@ -526,7 +526,7 @@ impl_binary_field_extras!(
 // UTILS
 // ===========================================
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(pmull)]
 #[inline(always)]
 pub fn mul_iso_32(a: Block32, b: Block32) -> Block32 {
     let a_flat = a.to_hardware();
@@ -592,6 +592,7 @@ mod neon {
         }
     }
 
+    #[cfg(pmull)]
     #[inline(always)]
     pub fn mul_flat_packed_32(lhs: PackedBlock32, rhs: PackedBlock32) -> PackedBlock32 {
         let r0 = mul_flat_32(lhs.0[0], rhs.0[0]);
@@ -602,6 +603,7 @@ mod neon {
         PackedBlock32([r0, r1, r2, r3])
     }
 
+    #[cfg(pmull)]
     #[inline(always)]
     pub fn mul_flat_32(a: Block32, b: Block32) -> Block32 {
         unsafe {

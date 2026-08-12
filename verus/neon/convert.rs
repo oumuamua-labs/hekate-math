@@ -379,8 +379,9 @@ fn lift_ct_twin(x: u64, basis: &[u128]) -> (r: u128)
 }
 
 // ============================================================
-// The non-aarch64 mul_hardware fallback, block128.rs:487-493:
-// to_hardware(from_hardware(a) * from_hardware(b))
+// The non-pmull mul_hardware fallback, block128.rs:487-493:
+// to_hardware(from_hardware(a) * from_hardware(b)).
+// Also covers aarch64 without the `aes` feature.
 // ============================================================
 
 // On every value in φ's image the round-trip computes gf_mul;
@@ -401,7 +402,7 @@ pub proof fn fallback_mul_128_correct(x: nat, y: nat)
 }
 
 // ============================================================
-// The flat-256 glue, block256.rs:409-430:
+// The flat-256 glue, block256.rs:426-447:
 // pair-Karatsuba over the flat-128 field is the tower
 // quadratic extension seen through φ, half by half.
 // ============================================================

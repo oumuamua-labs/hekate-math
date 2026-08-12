@@ -51,7 +51,7 @@ verus! {
 // One lane of mul_flat_packed_16 / mul_flat_scalar_packed_16:
 // byte-Karatsuba (three vmull_p8 lanes), then the
 // shift-decomposed 0x2b fold of reduce_packed_16
-// (block16.rs:740-764)
+// (block16.rs:720-744)
 // ============================================================
 
 pub open spec fn reduce_packed_16_lane(ll: u16, mm: u16, hh: u16) -> u16 {
@@ -474,7 +474,7 @@ pub proof fn mul_flat_packed_8_correct(a: Seq<u8>, b: Seq<u8>)
     }
 }
 
-// reduce_packed_16, block16.rs:740-764
+// reduce_packed_16, block16.rs:720-744
 pub open spec fn reduce_packed_16_m(ll: Seq<u16>, mm: Seq<u16>, hh: Seq<u16>) -> Seq<u16> {
     let mid = veor_m16(veor_m16(mm, ll), hh);
     let l = veor_m16(ll, vshl_m16(mid, 8));
@@ -496,7 +496,7 @@ pub open spec fn reduce_packed_16_m(ll: Seq<u16>, mm: Seq<u16>, hh: Seq<u16>) ->
     veor_m16(veor_m16(l, h_fold), carry_fold)
 }
 
-// mul_flat_packed_16, block16.rs:668-697
+// mul_flat_packed_16, block16.rs:648-677
 pub open spec fn mul_flat_packed_16_twin(a: Seq<u16>, b: Seq<u16>) -> Seq<u16> {
     let a_lo = vmovn_m16(a);
     let a_hi = vmovn_m16(vshr_m16(a, 8));
@@ -510,7 +510,7 @@ pub open spec fn mul_flat_packed_16_twin(a: Seq<u16>, b: Seq<u16>) -> Seq<u16> {
     reduce_packed_16_m(ll, mm, hh)
 }
 
-// mul_flat_scalar_packed_16, block16.rs:702-735: the
+// mul_flat_scalar_packed_16, block16.rs:682-715: the
 // lane-uniform byte split of the scalar is hoisted.
 pub open spec fn mul_flat_scalar_packed_16_twin(a: Seq<u16>, s: u16) -> Seq<u16> {
     let a_lo = vmovn_m16(a);
@@ -557,8 +557,8 @@ pub proof fn mul_flat_scalar_packed_16_correct(a: Seq<u16>, s: u16)
 
 // ============================================================
 // The remaining packed kernels compute the proven scalar dataflow
-// per lane: block64.rs:601-636 (PMULL/PMULL2 pairs with uzp lane
-// regroup, lane values unchanged), block32.rs:596 (scalar-kernel loop),
+// per lane: block64.rs:602-640 (PMULL/PMULL2 pairs with uzp lane
+// regroup, lane values unchanged), block32.rs:597 (scalar-kernel loop),
 // and the mul_hardware_packed loop in block128.rs:497
 // ============================================================
 

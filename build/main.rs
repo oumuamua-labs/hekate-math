@@ -1700,6 +1700,24 @@ impl_write_algebra_extras_wide!(
     0x7365_6564_5f72_7331u64
 );
 
+// Gate PMULL on `aes`, not on the arch:
+// without the feature core's vmull_p64 stays out-of-line and
+// spills operands, and a core lacking the extension SIGILLs.
+fn emit_pmull_cfg() {
+    println!("cargo::rerun-if-env-changed=CARGO_CFG_TARGET_FEATURE");
+    println!("cargo::rustc-check-cfg=cfg(pmull)");
+
+    let aarch64 = env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("aarch64");
+    let aes = env::var("CARGO_CFG_TARGET_FEATURE")
+        .unwrap_or_default()
+        .split(',')
+        .any(|f| f == "aes");
+
+    if aarch64 && aes {
+        println!("cargo::rustc-cfg=pmull");
+    }
+}
+
 fn main() {
     verify_isomorphism_8();
     verify_isomorphism_16();
@@ -1847,6 +1865,8 @@ fn main() {
         &TOWER_TO_FLAT_64,
     );
 
-    println!("cargo:rerun-if-changed=build/main.rs");
-    println!("cargo:rerun-if-changed=build/gf_oracle.rs");
+    emit_pmull_cfg();
+
+    println!("cargo::rerun-if-changed=build/main.rs");
+    println!("cargo::rerun-if-changed=build/gf_oracle.rs");
 }

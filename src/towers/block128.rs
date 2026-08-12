@@ -344,7 +344,7 @@ impl Mul for PackedBlock128 {
 
     #[inline(always)]
     fn mul(self, rhs: Self) -> Self {
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(pmull)]
         {
             let mut res = [Block128::ZERO; PACKED_WIDTH_128];
             for ((out, l), r) in res.iter_mut().zip(self.0.iter()).zip(rhs.0.iter()) {
@@ -359,7 +359,7 @@ impl Mul for PackedBlock128 {
             Self(res)
         }
 
-        #[cfg(not(target_arch = "aarch64"))]
+        #[cfg(not(pmull))]
         {
             let mut res = [Block128::ZERO; PACKED_WIDTH_128];
             for ((out, l), r) in res.iter_mut().zip(self.0.iter()).zip(rhs.0.iter()) {
@@ -479,12 +479,12 @@ impl HardwareField for Block128 {
         let lhs = lhs.into_raw();
         let rhs = rhs.into_raw();
 
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(pmull)]
         {
             Flat::from_raw(neon::mul_flat_128(lhs, rhs))
         }
 
-        #[cfg(not(target_arch = "aarch64"))]
+        #[cfg(not(pmull))]
         {
             let a_tower = Self::from_hardware(Flat::from_raw(lhs));
             let b_tower = Self::from_hardware(Flat::from_raw(rhs));
@@ -498,7 +498,7 @@ impl HardwareField for Block128 {
         let lhs = lhs.into_raw();
         let rhs = rhs.into_raw();
 
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(pmull)]
         {
             let mut res = [Block128::ZERO; PACKED_WIDTH_128];
             for ((out, l), r) in res.iter_mut().zip(lhs.0.iter()).zip(rhs.0.iter()) {
@@ -508,7 +508,7 @@ impl HardwareField for Block128 {
             PackedFlat::from_raw(PackedBlock128(res))
         }
 
-        #[cfg(not(target_arch = "aarch64"))]
+        #[cfg(not(pmull))]
         {
             let mut l = [Self::ZERO; <Self as PackableField>::WIDTH];
             let mut r = [Self::ZERO; <Self as PackableField>::WIDTH];
@@ -869,6 +869,7 @@ mod neon {
         }
     }
 
+    #[cfg(pmull)]
     #[inline(always)]
     pub fn mul_flat_128(a: Block128, b: Block128) -> Block128 {
         unsafe {
