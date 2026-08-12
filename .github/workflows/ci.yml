@@ -6,14 +6,23 @@ on:
     branches: [ main ]
 jobs:
   test:
-    name: CI checks (${{ matrix.os }})
+    name: CI checks (${{ matrix.lane }})
     strategy:
       fail-fast: false
       matrix:
-        # arm: production NEON paths;
-        # x86: software-fallback paths.
-        os: [ubuntu-24.04-arm, ubuntu-24.04]
+        include:
+          - os: ubuntu-24.04-arm
+            lane: pmull
+            rustflags: "-C target-feature=+aes"
+          - os: ubuntu-24.04-arm
+            lane: fallback
+            rustflags: ""
+          - os: ubuntu-24.04
+            lane: x86
+            rustflags: ""
     runs-on: ${{ matrix.os }}
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
     steps:
       - uses: actions/checkout@v5
 
@@ -23,6 +32,8 @@ jobs:
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.lane }}
 
       - name: Rustfmt
         run: cargo fmt --all --check
@@ -30,19 +41,29 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-features -- -D warnings
 
+      - name: Assert PMULL path is live
+        if: matrix.lane == 'pmull'
+        run: cargo rustc --release -- --print cfg | grep -qx pmull
+
+      - name: Assert PMULL path is off
+        if: matrix.lane != 'pmull'
+        run: |
+          cfg=$(cargo rustc --release -- --print cfg)
+          ! grep -qx pmull <<< "$cfg"
+
       - name: Run Tests
         run: cargo test --all-features --release
 
       - name: Install cargo-audit and cargo-deny
-        if: matrix.os == 'ubuntu-24.04-arm'
+        if: matrix.lane == 'pmull'
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit, cargo-deny
 
       - name: Cargo audit
-        if: matrix.os == 'ubuntu-24.04-arm'
+        if: matrix.lane == 'pmull'
         run: cargo audit
 
       - name: Cargo deny check
-        if: matrix.os == 'ubuntu-24.04-arm'
+        if: matrix.lane == 'pmull'
         run: cargo deny check
