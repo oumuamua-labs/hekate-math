@@ -320,7 +320,7 @@ impl Mul for PackedBlock64 {
 
     #[inline(always)]
     fn mul(self, rhs: Self) -> Self {
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(pmull)]
         {
             let a0 = mul_iso_64(self.0[0], rhs.0[0]);
             let a1 = mul_iso_64(self.0[1], rhs.0[1]);
@@ -328,7 +328,7 @@ impl Mul for PackedBlock64 {
             Self([a0, a1])
         }
 
-        #[cfg(not(target_arch = "aarch64"))]
+        #[cfg(not(pmull))]
         {
             let mut res = [Block64::ZERO; PACKED_WIDTH_64];
             for ((out, l), r) in res.iter_mut().zip(self.0.iter()).zip(rhs.0.iter()) {
@@ -422,12 +422,12 @@ impl HardwareField for Block64 {
         let lhs = lhs.into_raw();
         let rhs = rhs.into_raw();
 
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(pmull)]
         {
             Flat::from_raw(neon::mul_flat_64(lhs, rhs))
         }
 
-        #[cfg(not(target_arch = "aarch64"))]
+        #[cfg(not(pmull))]
         {
             let a_tower = Self::from_hardware(Flat::from_raw(lhs));
             let b_tower = Self::from_hardware(Flat::from_raw(rhs));
@@ -441,12 +441,12 @@ impl HardwareField for Block64 {
         let lhs = lhs.into_raw();
         let rhs = rhs.into_raw();
 
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(pmull)]
         {
             PackedFlat::from_raw(neon::mul_flat_packed_64(lhs, rhs))
         }
 
-        #[cfg(not(target_arch = "aarch64"))]
+        #[cfg(not(pmull))]
         {
             let mut l = [Self::ZERO; <Self as PackableField>::WIDTH];
             let mut r = [Self::ZERO; <Self as PackableField>::WIDTH];
@@ -530,7 +530,7 @@ impl_binary_field_extras!(
 // UTILS
 // ===========================================
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(pmull)]
 #[inline(always)]
 pub fn mul_iso_64(a: Block64, b: Block64) -> Block64 {
     let a_flat = a.to_hardware();
@@ -597,6 +597,7 @@ mod neon {
         }
     }
 
+    #[cfg(pmull)]
     #[inline(always)]
     pub fn mul_flat_packed_64(lhs: PackedBlock64, rhs: PackedBlock64) -> PackedBlock64 {
         unsafe {
@@ -638,6 +639,7 @@ mod neon {
         }
     }
 
+    #[cfg(pmull)]
     #[inline(always)]
     pub fn mul_flat_64(a: Block64, b: Block64) -> Block64 {
         unsafe {

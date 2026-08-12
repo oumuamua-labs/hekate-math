@@ -318,7 +318,7 @@ impl Mul for PackedBlock16 {
 
     #[inline(always)]
     fn mul(self, rhs: Self) -> Self {
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(pmull)]
         {
             let mut res = [Block16::ZERO; PACKED_WIDTH_16];
             for ((out, l), r) in res.iter_mut().zip(self.0.iter()).zip(rhs.0.iter()) {
@@ -328,7 +328,7 @@ impl Mul for PackedBlock16 {
             Self(res)
         }
 
-        #[cfg(not(target_arch = "aarch64"))]
+        #[cfg(not(pmull))]
         {
             let mut res = [Block16::ZERO; PACKED_WIDTH_16];
             for ((out, l), r) in res.iter_mut().zip(self.0.iter()).zip(rhs.0.iter()) {
@@ -420,12 +420,12 @@ impl HardwareField for Block16 {
         let lhs = lhs.into_raw();
         let rhs = rhs.into_raw();
 
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(pmull)]
         {
             Flat::from_raw(neon::mul_flat_16(lhs, rhs))
         }
 
-        #[cfg(not(target_arch = "aarch64"))]
+        #[cfg(not(pmull))]
         {
             let a_tower = Self::from_hardware(Flat::from_raw(lhs));
             let b_tower = Self::from_hardware(Flat::from_raw(rhs));
@@ -535,7 +535,7 @@ impl_binary_field_extras!(
 // UTILS
 // ===========================================
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(pmull)]
 #[inline(always)]
 pub fn mul_iso_16(a: Block16, b: Block16) -> Block16 {
     let a_f = a.to_hardware();
@@ -600,6 +600,7 @@ mod neon {
         }
     }
 
+    #[cfg(pmull)]
     #[inline(always)]
     pub fn mul_flat_16(a: Block16, b: Block16) -> Block16 {
         unsafe {
@@ -748,7 +749,7 @@ mod tests {
     use super::*;
     use rand::{RngExt, rng};
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(pmull)]
     use proptest::prelude::*;
 
     // ==================================
@@ -1094,7 +1095,7 @@ mod tests {
 
     // The NEON vmull_p8 path vs
     // the scalar vmull_p64 path.
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(pmull)]
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(65536))]
 
