@@ -646,16 +646,16 @@ impl_write_lift!(write_lift_64, u64, 64, apply_8, apply_64, 16);
 impl_write_lift!(write_lift_128, u128, 128, apply_8, apply_128, 32);
 
 // ==========================================
-// 5. GENERIC LIFT BASIS GENERATOR (For N -> 128)
+// 5. GENERIC LIFT BASIS GENERATOR (N -> M)
 // ==========================================
 
 macro_rules! impl_write_lift_basis {
-    ($func_name:ident, $type_from:ty, $type_to:ty, $bits:expr, $apply_flat_to_tower:ident, $apply_tower_to_flat:ident, $width:expr) => {
+    ($func_name:ident, $type_from:ty, $type_to:ty, $bits:expr, $bits_to:expr, $apply_flat_to_tower:ident, $apply_tower_to_flat:ident, $width:expr) => {
         fn $func_name(
             file: &mut File,
             basis_name: &str,
             flat_to_tower_from: &[$type_from; $bits],
-            tower_to_flat_to: &[$type_to; 128],
+            tower_to_flat_to: &[$type_to; $bits_to],
         ) {
             writeln!(
                 file,
@@ -681,10 +681,41 @@ macro_rules! impl_write_lift_basis {
 }
 
 impl_write_lift_basis!(
+    write_lift_basis_16_to_32,
+    u16,
+    u32,
+    16,
+    32,
+    apply_16,
+    apply_32,
+    8
+);
+impl_write_lift_basis!(
+    write_lift_basis_16_to_64,
+    u16,
+    u64,
+    16,
+    64,
+    apply_16,
+    apply_64,
+    16
+);
+impl_write_lift_basis!(
+    write_lift_basis_32_to_64,
+    u32,
+    u64,
+    32,
+    64,
+    apply_32,
+    apply_64,
+    16
+);
+impl_write_lift_basis!(
     write_lift_basis_16_to_128,
     u16,
     u128,
     16,
+    128,
     apply_16,
     apply_128,
     32
@@ -694,6 +725,7 @@ impl_write_lift_basis!(
     u32,
     u128,
     32,
+    128,
     apply_32,
     apply_128,
     32
@@ -703,6 +735,7 @@ impl_write_lift_basis!(
     u64,
     u128,
     64,
+    128,
     apply_64,
     apply_128,
     32
@@ -743,17 +776,16 @@ impl_write_raw_basis!(write_raw_128, u128, 128, 32);
 // 7. BYTE-DECOMPOSED PROMOTE TABLES
 // ==========================================
 //
-// For promoting Block16/32/64 to Block128 via
-// table-math. Each source byte position gets
-// its own [u128; 256] table. The full promote
+// For promoting Block16/32/64 to a wider block via
+// table-math. Each source byte position gets its own
+// 256-entry table at the target width. The full promote
 // is the XOR of per-byte lookups (GF(2)-linear).
 //
-// Block8 to Block128 is a single-byte source,
-// so it uses LIFT_TABLE_8_TO_128 from section 4
-// (no byte decomposition needed).
+// Block8 sources are single-byte, and use LIFT_TABLE_8_TO_N
+// from section 4 (no byte decomposition needed).
 
-macro_rules! impl_write_promote_byte_tables_to_128 {
-    ($func_name:ident, $from_type:ty, $n_bytes:expr, $apply_from:ident) => {
+macro_rules! impl_write_promote_byte_tables {
+    ($func_name:ident, $from_type:ty, $n_bytes:expr, $apply_from:ident, $to_type:ty, $bits_to:expr, $apply_to:ident, $tower_to_flat_to:ident, $width:expr) => {
         fn $func_name(
             file: &mut File,
             prefix: &str,
@@ -762,18 +794,21 @@ macro_rules! impl_write_promote_byte_tables_to_128 {
             for byte_idx in 0..$n_bytes {
                 writeln!(
                     file,
-                    "pub const {}_{}_TO_128: [u128; 256] = [",
-                    prefix, byte_idx
+                    "pub const {}_{}_TO_{}: [{}; 256] = [",
+                    prefix,
+                    byte_idx,
+                    $bits_to,
+                    stringify!($to_type)
                 )
                 .unwrap();
 
                 for val in 0..=255u8 {
                     let from_val = (val as $from_type) << (byte_idx * 8);
                     let tower_from = $apply_from(from_val, flat_to_tower_from);
-                    let tower_128 = tower_from as u128;
-                    let flat_128 = apply_128(tower_128, &TOWER_TO_FLAT_128);
+                    let tower_to = tower_from as $to_type;
+                    let flat_to = $apply_to(tower_to, &$tower_to_flat_to);
 
-                    writeln!(file, "    0x{:032x},", flat_128).unwrap();
+                    writeln!(file, "    0x{:0width$x},", flat_to, width = $width).unwrap();
                 }
 
                 writeln!(file, "];\n").unwrap();
@@ -782,9 +817,72 @@ macro_rules! impl_write_promote_byte_tables_to_128 {
     };
 }
 
-impl_write_promote_byte_tables_to_128!(write_promote_byte_tables_16_to_128, u16, 2, apply_16);
-impl_write_promote_byte_tables_to_128!(write_promote_byte_tables_32_to_128, u32, 4, apply_32);
-impl_write_promote_byte_tables_to_128!(write_promote_byte_tables_64_to_128, u64, 8, apply_64);
+impl_write_promote_byte_tables!(
+    write_promote_byte_tables_16_to_32,
+    u16,
+    2,
+    apply_16,
+    u32,
+    32,
+    apply_32,
+    TOWER_TO_FLAT_32,
+    8
+);
+impl_write_promote_byte_tables!(
+    write_promote_byte_tables_16_to_64,
+    u16,
+    2,
+    apply_16,
+    u64,
+    64,
+    apply_64,
+    TOWER_TO_FLAT_64,
+    16
+);
+impl_write_promote_byte_tables!(
+    write_promote_byte_tables_32_to_64,
+    u32,
+    4,
+    apply_32,
+    u64,
+    64,
+    apply_64,
+    TOWER_TO_FLAT_64,
+    16
+);
+impl_write_promote_byte_tables!(
+    write_promote_byte_tables_16_to_128,
+    u16,
+    2,
+    apply_16,
+    u128,
+    128,
+    apply_128,
+    TOWER_TO_FLAT_128,
+    32
+);
+impl_write_promote_byte_tables!(
+    write_promote_byte_tables_32_to_128,
+    u32,
+    4,
+    apply_32,
+    u128,
+    128,
+    apply_128,
+    TOWER_TO_FLAT_128,
+    32
+);
+impl_write_promote_byte_tables!(
+    write_promote_byte_tables_64_to_128,
+    u64,
+    8,
+    apply_64,
+    u128,
+    128,
+    apply_128,
+    TOWER_TO_FLAT_128,
+    32
+);
 
 // ==========================================
 // 8. NIBBLE-DECOMPOSED PROMOTE TABLES (CT NEON)
@@ -1774,6 +1872,16 @@ fn main() {
         &FLAT_TO_TOWER_8,
         &TOWER_TO_FLAT_32,
     );
+
+    write_lift_basis_16_to_32(
+        &mut file,
+        "LIFT_BASIS_16_TO_32",
+        &FLAT_TO_TOWER_16,
+        &TOWER_TO_FLAT_32,
+    );
+
+    write_promote_byte_tables_16_to_32(&mut file, "PROMOTE_16_BYTE", &FLAT_TO_TOWER_16);
+
     write_raw_32(&mut file, "RAW_FLAT_TO_TOWER_32", &FLAT_TO_TOWER_32);
     write_raw_32(&mut file, "RAW_TOWER_TO_FLAT_32", &TOWER_TO_FLAT_32);
 
@@ -1790,6 +1898,23 @@ fn main() {
         &FLAT_TO_TOWER_8,
         &TOWER_TO_FLAT_64,
     );
+
+    write_lift_basis_16_to_64(
+        &mut file,
+        "LIFT_BASIS_16_TO_64",
+        &FLAT_TO_TOWER_16,
+        &TOWER_TO_FLAT_64,
+    );
+    write_lift_basis_32_to_64(
+        &mut file,
+        "LIFT_BASIS_32_TO_64",
+        &FLAT_TO_TOWER_32,
+        &TOWER_TO_FLAT_64,
+    );
+
+    write_promote_byte_tables_16_to_64(&mut file, "PROMOTE_16_BYTE", &FLAT_TO_TOWER_16);
+    write_promote_byte_tables_32_to_64(&mut file, "PROMOTE_32_BYTE", &FLAT_TO_TOWER_32);
+
     write_raw_64(&mut file, "RAW_FLAT_TO_TOWER_64", &FLAT_TO_TOWER_64);
     write_raw_64(&mut file, "RAW_TOWER_TO_FLAT_64", &TOWER_TO_FLAT_64);
 
