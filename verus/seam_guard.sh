@@ -13,7 +13,7 @@ git rev-parse --verify --quiet "$BASE^{commit}" > /dev/null || {
   exit 2
 }
 
-SEAM="src/towers src/fft/additive.rs"
+SEAM="src/towers src/fft/additive.rs src/algebra.rs"
 
 # shellcheck disable=SC2086
 CHANGED=$(git diff --name-only "$BASE"...HEAD -- $SEAM)
