@@ -54,6 +54,14 @@ impl Block16 {
     pub fn split(self) -> (Block8, Block8) {
         (Block8(self.0 as u8), Block8((self.0 >> 8) as u8))
     }
+
+    #[inline(always)]
+    pub(crate) fn mul_tau(self) -> Self {
+        let (a0, a1) = self.split();
+        let t = a1.mul_tau();
+
+        Self::new(t.mul_tau(), (a0 + a1).mul_tau())
+    }
 }
 
 impl TowerField for Block16 {
@@ -67,11 +75,7 @@ impl TowerField for Block16 {
         let (l, h) = self.split();
 
         // Norm = h^2 * tau + h*l + l^2
-        let h2 = h * h;
-        let l2 = l * l;
-        let hl = h * l;
-        let norm = (h2 * Block8::EXTENSION_TAU) + hl + l2;
-
+        let norm = h.square().mul_tau() + h * l + l.square();
         let norm_inv = norm.invert();
 
         // Res = (h*norm_inv) X + (h+l)*norm_inv
@@ -108,23 +112,16 @@ impl Sub for Block16 {
 impl Mul for Block16 {
     type Output = Self;
 
+    #[inline]
     fn mul(self, rhs: Self) -> Self {
         let (a0, a1) = self.split();
         let (b0, b1) = rhs.split();
 
-        // Karatsuba
         let v0 = a0 * b0;
         let v1 = a1 * b1;
-        let v_sum = (a0 + a1) * (b0 + b1);
+        let vs = (a0 + a1) * (b0 + b1);
 
-        // Reconstruction with reduction X^2 = X + tau
-        // Hi
-        let c_hi = v0 + v_sum;
-
-        // Lo
-        let c_lo = v0 + (v1 * Block8::EXTENSION_TAU);
-
-        Self::new(c_lo, c_hi)
+        Self::new(v0 + v1.mul_tau(), v0 + vs)
     }
 }
 
@@ -318,25 +315,20 @@ impl Mul for PackedBlock16 {
 
     #[inline(always)]
     fn mul(self, rhs: Self) -> Self {
-        #[cfg(pmull)]
-        {
-            let mut res = [Block16::ZERO; PACKED_WIDTH_16];
-            for ((out, l), r) in res.iter_mut().zip(self.0.iter()).zip(rhs.0.iter()) {
+        let mut res = [Block16::ZERO; PACKED_WIDTH_16];
+        for ((out, l), r) in res.iter_mut().zip(self.0.iter()).zip(rhs.0.iter()) {
+            #[cfg(all(pmull, feature = "table-math"))]
+            {
                 *out = mul_iso_16(*l, *r);
             }
 
-            Self(res)
-        }
-
-        #[cfg(not(pmull))]
-        {
-            let mut res = [Block16::ZERO; PACKED_WIDTH_16];
-            for ((out, l), r) in res.iter_mut().zip(self.0.iter()).zip(rhs.0.iter()) {
+            #[cfg(not(all(pmull, feature = "table-math")))]
+            {
                 *out = *l * *r;
             }
-
-            Self(res)
         }
+
+        Self(res)
     }
 }
 
@@ -523,13 +515,7 @@ impl FlatPromote<Block8> for Block16 {
 // Binary Field Extras
 // ===================================
 
-impl_binary_field_extras!(
-    Block16,
-    Block8,
-    map_ct_16,
-    TRACE_MASK_16,
-    SOLVE_QUADRATIC_BASIS_16
-);
+impl_binary_field_extras!(Block16, map_ct_16, TRACE_MASK_16, SOLVE_QUADRATIC_BASIS_16);
 
 // ===========================================
 // UTILS
@@ -833,6 +819,18 @@ mod tests {
             Block8(0x20),
             "X^2 should contain tau component (0x20)"
         );
+    }
+
+    #[test]
+    fn mul_tau_exhaustive() {
+        for v in 0u32..0x1_0000 {
+            let x = Block16(v as u16);
+            assert_eq!(
+                x.mul_tau(),
+                x * Block16::EXTENSION_TAU,
+                "Block16 mul_tau mismatch at {v:#06x}"
+            );
+        }
     }
 
     #[test]

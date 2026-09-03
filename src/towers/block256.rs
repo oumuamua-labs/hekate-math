@@ -16,7 +16,7 @@
 // limitations under the License.
 
 //! BLOCK 256 (GF(2^256))
-use crate::{Bit, Block8, Block16, Block32, Block64, Block128};
+use crate::{BinaryFieldExtras, Bit, Block8, Block16, Block32, Block64, Block128};
 use crate::{
     CanonicalDeserialize, CanonicalSerialize, Flat, FlatPromote, HardwareField, PackableField,
     PackedFlat, TowerField,
@@ -55,12 +55,10 @@ impl TowerField for Block256 {
 
     fn invert(&self) -> Self {
         let (l, h) = self.split();
-        let h2 = h * h;
-        let l2 = l * l;
-        let hl = h * l;
-        let norm = (h2 * Block128::EXTENSION_TAU) + hl + l2;
 
+        let norm = h.square().mul_tau() + h * l + l.square();
         let norm_inv = norm.invert();
+
         let res_hi = h * norm_inv;
         let res_lo = (h + l) * norm_inv;
 
@@ -97,18 +95,16 @@ impl Sub for Block256 {
 impl Mul for Block256 {
     type Output = Self;
 
+    #[inline]
     fn mul(self, rhs: Self) -> Self {
         let (a0, a1) = self.split();
         let (b0, b1) = rhs.split();
 
         let v0 = a0 * b0;
         let v1 = a1 * b1;
-        let v_sum = (a0 + a1) * (b0 + b1);
+        let vs = (a0 + a1) * (b0 + b1);
 
-        let c_hi = v0 + v_sum;
-        let c_lo = v0 + (v1 * Block128::EXTENSION_TAU);
-
-        Self::new(c_lo, c_hi)
+        Self::new(v0 + v1.mul_tau(), v0 + vs)
     }
 }
 
