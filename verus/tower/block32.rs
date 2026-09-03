@@ -19,7 +19,10 @@ use vstd::prelude::*;
 
 #[path = "block16.rs"]
 pub mod b16;
-use b16::{mul16_distrib_l, mul16_distrib_r, schoolbook16};
+use b16::{
+    mul_tau16, mul_tau16_is_schoolbook, mul16_distrib_l, mul16_distrib_r, schoolbook16,
+    schoolbook16_zero,
+};
 
 verus! {
 
@@ -53,10 +56,60 @@ pub open spec fn mul32_k(a: u32, b: u32) -> u32 {
     let a1 = hi(a);
     let b0 = lo(b);
     let b1 = hi(b);
+
     let v0 = schoolbook16(a0, b0);
     let v1 = schoolbook16(a1, b1);
     let vs = schoolbook16(a0 ^ a1, b0 ^ b1);
-    pack(v0 ^ schoolbook16(v1, 0x2000), v0 ^ vs)
+
+    pack(v0 ^ mul_tau16(v1), v0 ^ vs)
+}
+
+// Block32::mul_tau, block32.rs:
+// τ² a1 + τ(a0 + a1) X.
+pub open spec fn mul_tau32(a: u32) -> u32 {
+    let a0 = lo(a);
+    let a1 = hi(a);
+    let t = mul_tau16(a1);
+
+    pack(mul_tau16(t), mul_tau16(a0 ^ a1))
+}
+
+pub proof fn schoolbook32_zero(a: u32)
+    ensures schoolbook32(a, 0) == 0
+{
+    mul32_distrib_r(a, 1, 1);
+    assert(1u32 ^ 1u32 == 0u32) by (bit_vector);
+
+    let p = schoolbook32(a, 1);
+    assert(p ^ p == 0u32) by (bit_vector);
+}
+
+pub proof fn mul_tau32_is_schoolbook(a: u32)
+    ensures mul_tau32(a) == schoolbook32(a, 0x2000_0000)
+{
+    let a0 = lo(a);
+    let a1 = hi(a);
+
+    assert(lo(0x2000_0000u32) == 0u16) by (bit_vector);
+    assert(hi(0x2000_0000u32) == 0x2000u16) by (bit_vector);
+
+    let t = mul_tau16(a1);
+
+    mul_tau16_is_schoolbook(a1);
+    mul_tau16_is_schoolbook(t);
+    mul_tau16_is_schoolbook(a0 ^ a1);
+
+    mul16_distrib_l(a0, a1, 0x2000);
+
+    schoolbook16_zero(a0);
+    schoolbook16_zero(a1);
+
+    let x0 = schoolbook16(a0, 0x2000);
+    let x1 = schoolbook16(a1, 0x2000);
+    let x11 = schoolbook16(x1, 0x2000);
+
+    assert(0u16 ^ x11 == x11) by (bit_vector);
+    assert(x0 ^ 0u16 ^ x1 == x0 ^ x1) by (bit_vector);
 }
 
 pub proof fn pack_xor(l1: u16, l2: u16, h1: u16, h2: u16)
@@ -72,6 +125,8 @@ pub proof fn mul32_matches_schoolbook(a: u32, b: u32)
     let a1 = hi(a);
     let b0 = lo(b);
     let b1 = hi(b);
+
+    mul_tau16_is_schoolbook(schoolbook16(a1, b1));
 
     mul16_distrib_l(a0, a1, b0 ^ b1);
     mul16_distrib_r(a0, b0, b1);

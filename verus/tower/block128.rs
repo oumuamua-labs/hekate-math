@@ -19,7 +19,10 @@ use vstd::prelude::*;
 
 #[path = "block64.rs"]
 pub mod b64;
-use b64::{mul64_distrib_l, mul64_distrib_r, schoolbook64};
+use b64::{
+    mul_tau64, mul_tau64_is_schoolbook, mul64_distrib_l, mul64_distrib_r, schoolbook64,
+    schoolbook64_zero,
+};
 
 verus! {
 
@@ -47,16 +50,68 @@ pub open spec fn schoolbook128(a: u128, b: u128) -> u128 {
     )
 }
 
-// Block128::mul, block128.rs:110-121: Karatsuba, three base multiplies.
+// Block128::mul, block128.rs:
+// Karatsuba, three base multiplies.
 pub open spec fn mul128_k(a: u128, b: u128) -> u128 {
     let a0 = lo(a);
     let a1 = hi(a);
     let b0 = lo(b);
     let b1 = hi(b);
+
     let v0 = schoolbook64(a0, b0);
     let v1 = schoolbook64(a1, b1);
     let vs = schoolbook64(a0 ^ a1, b0 ^ b1);
-    pack(v0 ^ schoolbook64(v1, 0x2000_0000_0000_0000), v0 ^ vs)
+
+    pack(v0 ^ mul_tau64(v1), v0 ^ vs)
+}
+
+// Block128::mul_tau, block128.rs:
+// τ² a1 + τ(a0 + a1) X.
+pub open spec fn mul_tau128(a: u128) -> u128 {
+    let a0 = lo(a);
+    let a1 = hi(a);
+    let t = mul_tau64(a1);
+
+    pack(mul_tau64(t), mul_tau64(a0 ^ a1))
+}
+
+pub proof fn schoolbook128_zero(a: u128)
+    ensures schoolbook128(a, 0) == 0
+{
+    mul128_distrib_r(a, 1, 1);
+    assert(1u128 ^ 1u128 == 0u128) by (bit_vector);
+
+    let p = schoolbook128(a, 1);
+    assert(p ^ p == 0u128) by (bit_vector);
+}
+
+pub proof fn mul_tau128_is_schoolbook(a: u128)
+    ensures mul_tau128(a) == schoolbook128(a, 0x2000_0000_0000_0000_0000_0000_0000_0000)
+{
+    let a0 = lo(a);
+    let a1 = hi(a);
+
+    assert(lo(0x2000_0000_0000_0000_0000_0000_0000_0000u128) == 0u64) by (bit_vector);
+    assert(hi(0x2000_0000_0000_0000_0000_0000_0000_0000u128) == 0x2000_0000_0000_0000u64)
+        by (bit_vector);
+
+    let t = mul_tau64(a1);
+
+    mul_tau64_is_schoolbook(a1);
+    mul_tau64_is_schoolbook(t);
+    mul_tau64_is_schoolbook(a0 ^ a1);
+
+    mul64_distrib_l(a0, a1, 0x2000_0000_0000_0000);
+
+    schoolbook64_zero(a0);
+    schoolbook64_zero(a1);
+
+    let x0 = schoolbook64(a0, 0x2000_0000_0000_0000);
+    let x1 = schoolbook64(a1, 0x2000_0000_0000_0000);
+    let x11 = schoolbook64(x1, 0x2000_0000_0000_0000);
+
+    assert(0u64 ^ x11 == x11) by (bit_vector);
+    assert(x0 ^ 0u64 ^ x1 == x0 ^ x1) by (bit_vector);
 }
 
 pub proof fn pack_xor(l1: u64, l2: u64, h1: u64, h2: u64)
@@ -72,6 +127,8 @@ pub proof fn mul128_matches_schoolbook(a: u128, b: u128)
     let a1 = hi(a);
     let b0 = lo(b);
     let b1 = hi(b);
+
+    mul_tau64_is_schoolbook(schoolbook64(a1, b1));
 
     mul64_distrib_l(a0, a1, b0 ^ b1);
     mul64_distrib_r(a0, b0, b1);

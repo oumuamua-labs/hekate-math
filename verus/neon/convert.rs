@@ -114,8 +114,7 @@ proof fn bit_gate_u128(x: u128, i: u128)
 
 // ============================================================
 // map_ct twins: the masked accumulation computes bit_comb
-// (block8.rs:568, block16.rs:564, block32.rs:556,
-// block64.rs:561, block128.rs:794)
+// (block8.rs, block16.rs, block32.rs, block64.rs, block128.rs)
 // ============================================================
 
 fn map_ct_8_twin(x: u8, basis: &[u8; 8]) -> (r: u8)
@@ -272,8 +271,8 @@ fn map_ct_64_twin(x: u64, basis: &[u64; 64]) -> (r: u64)
     acc
 }
 
-// block128.rs:794-811: the accumulator is split into
-// two u64 halves; the packed view carries the invariant.
+// block128.rs: the accumulator is split into two
+// u64 halves; the packed view carries the invariant.
 fn map_ct_128_split_twin(x: u128, basis: &[u128; 128]) -> (r: u128)
     ensures r as nat == bit_comb(x as nat, basis@.map_values(|v: u128| v as nat), 128)
 {
@@ -334,7 +333,7 @@ fn map_ct_128_split_twin(x: u128, basis: &[u128; 128]) -> (r: u128)
     (acc_lo as u128) | ((acc_hi as u128) << 64)
 }
 
-// lift_ct, block128.rs:815-827: the promote kernels' scalar
+// lift_ct, block128.rs: the promote kernels' scalar
 // core, same masked accumulation over the lifting basis.
 fn lift_ct_twin(x: u64, basis: &[u128]) -> (r: u128)
     requires basis@.len() <= 64,
@@ -379,7 +378,7 @@ fn lift_ct_twin(x: u64, basis: &[u128]) -> (r: u128)
 }
 
 // ============================================================
-// The non-pmull mul_hardware fallback, block128.rs:487-493:
+// The non-pmull mul_hardware fallback, block128.rs:
 // to_hardware(from_hardware(a) * from_hardware(b)).
 // Also covers aarch64 without the `aes` feature.
 // ============================================================
@@ -402,7 +401,7 @@ pub proof fn fallback_mul_128_correct(x: nat, y: nat)
 }
 
 // ============================================================
-// The flat-256 glue, block256.rs:426-447:
+// The flat-256 glue, block256.rs:
 // pair-Karatsuba over the flat-128 field is the tower
 // quadratic extension seen through φ, half by half.
 // ============================================================

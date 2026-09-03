@@ -56,6 +56,14 @@ impl Block32 {
     pub fn split(self) -> (Block16, Block16) {
         (Block16(self.0 as u16), Block16((self.0 >> 16) as u16))
     }
+
+    #[inline(always)]
+    pub(crate) fn mul_tau(self) -> Self {
+        let (a0, a1) = self.split();
+        let t = a1.mul_tau();
+
+        Self::new(t.mul_tau(), (a0 + a1).mul_tau())
+    }
 }
 
 impl TowerField for Block32 {
@@ -67,14 +75,10 @@ impl TowerField for Block32 {
 
     fn invert(&self) -> Self {
         let (l, h) = self.split();
-        let h2 = h * h;
-        let l2 = l * l;
-        let hl = h * l;
 
-        // Tau here is Block16::TAU
-        let norm = (h2 * Block16::TAU) + hl + l2;
-
+        let norm = h.square().mul_tau() + h * l + l.square();
         let norm_inv = norm.invert();
+
         let res_hi = h * norm_inv;
         let res_lo = (h + l) * norm_inv;
 
@@ -108,18 +112,16 @@ impl Sub for Block32 {
 impl Mul for Block32 {
     type Output = Self;
 
+    #[inline]
     fn mul(self, rhs: Self) -> Self {
         let (a0, a1) = self.split();
         let (b0, b1) = rhs.split();
 
         let v0 = a0 * b0;
         let v1 = a1 * b1;
-        let v_sum = (a0 + a1) * (b0 + b1);
+        let vs = (a0 + a1) * (b0 + b1);
 
-        let c_hi = v0 + v_sum;
-        let c_lo = v0 + (v1 * Block16::TAU);
-
-        Self::new(c_lo, c_hi)
+        Self::new(v0 + v1.mul_tau(), v0 + vs)
     }
 }
 
@@ -319,25 +321,20 @@ impl Mul for PackedBlock32 {
 
     #[inline(always)]
     fn mul(self, rhs: Self) -> Self {
-        #[cfg(pmull)]
-        {
-            let a0 = mul_iso_32(self.0[0], rhs.0[0]);
-            let a1 = mul_iso_32(self.0[1], rhs.0[1]);
-            let a2 = mul_iso_32(self.0[2], rhs.0[2]);
-            let a3 = mul_iso_32(self.0[3], rhs.0[3]);
-
-            Self([a0, a1, a2, a3])
-        }
-
-        #[cfg(not(pmull))]
-        {
-            let mut res = [Block32::ZERO; PACKED_WIDTH_32];
-            for ((out, l), r) in res.iter_mut().zip(self.0.iter()).zip(rhs.0.iter()) {
-                *out = *l * *r;
+        let mut res = [Block32::ZERO; PACKED_WIDTH_32];
+        for ((out, l), r) in res.iter_mut().zip(self.0.iter()).zip(rhs.0.iter()) {
+            #[cfg(all(pmull, feature = "table-math"))]
+            {
+                *out = mul_iso_32(*l, *r);
             }
 
-            Self(res)
+            #[cfg(not(all(pmull, feature = "table-math")))]
+            {
+                *out = *l * *r;
+            }
         }
+
+        Self(res)
     }
 }
 
@@ -510,17 +507,39 @@ impl FlatPromote<Block8> for Block32 {
     }
 }
 
+impl FlatPromote<Block16> for Block32 {
+    #[inline(always)]
+    fn promote_flat(val: Flat<Block16>) -> Flat<Self> {
+        let val = val.into_raw();
+
+        #[cfg(not(feature = "table-math"))]
+        {
+            let mut acc = 0u32;
+            for i in 0..16 {
+                let bit = (val.0 >> i) & 1;
+                let mask = 0u32.wrapping_sub(bit as u32);
+                acc ^= constants::LIFT_BASIS_16_TO_32[i] & mask;
+            }
+
+            Flat::from_raw(Block32(acc))
+        }
+
+        #[cfg(feature = "table-math")]
+        {
+            let v = val.0;
+            let res = constants::PROMOTE_16_BYTE_0_TO_32[(v & 0xFF) as usize]
+                ^ constants::PROMOTE_16_BYTE_1_TO_32[(v >> 8) as usize];
+
+            Flat::from_raw(Block32(res))
+        }
+    }
+}
+
 // ===========================================
 // Binary Field Extras
 // ===========================================
 
-impl_binary_field_extras!(
-    Block32,
-    Block16,
-    map_ct_32,
-    TRACE_MASK_32,
-    SOLVE_QUADRATIC_BASIS_32
-);
+impl_binary_field_extras!(Block32, map_ct_32, TRACE_MASK_32, SOLVE_QUADRATIC_BASIS_32);
 
 // ===========================================
 // UTILS
@@ -734,6 +753,22 @@ mod tests {
     }
 
     #[test]
+    fn mul_tau_matches_mul() {
+        let mut rng = rng();
+        let edges = [Block32::ZERO, Block32::ONE, Block32::TAU, Block32(u32::MAX)];
+        let random = (0..1000).map(|_| Block32(rng.random()));
+
+        for x in edges.into_iter().chain(random) {
+            assert_eq!(
+                x.mul_tau(),
+                x * Block32::EXTENSION_TAU,
+                "Block32 mul_tau mismatch at {:#010x}",
+                x.0
+            );
+        }
+    }
+
+    #[test]
     fn security_zeroize() {
         let mut secret_val = Block32::from(0xDEAD_BEEF_u32);
         assert_ne!(secret_val, Block32::ZERO);
@@ -834,6 +869,18 @@ mod tests {
             let a = Block32(rng.random::<u32>());
             let b = Block32(rng.random::<u32>());
             assert_eq!(a.to_hardware() * b.to_hardware(), (a * b).to_hardware());
+        }
+    }
+
+    #[test]
+    fn promote_block16_matches_embedding() {
+        for v in 0u32..0x1_0000 {
+            let x = Block16(v as u16);
+            assert_eq!(
+                <Block32 as FlatPromote<Block16>>::promote_flat(x.to_hardware()),
+                Block32::from(x).to_hardware(),
+                "Block16 -> Block32 promote mismatch at {v:#06x}"
+            );
         }
     }
 

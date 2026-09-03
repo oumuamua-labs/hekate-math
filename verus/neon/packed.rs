@@ -49,9 +49,8 @@ verus! {
 
 // ============================================================
 // One lane of mul_flat_packed_16 / mul_flat_scalar_packed_16:
-// byte-Karatsuba (three vmull_p8 lanes), then the
-// shift-decomposed 0x2b fold of reduce_packed_16
-// (block16.rs:720-744)
+// byte-Karatsuba (three vmull_p8 lanes), then the shift-decomposed
+// 0x2b fold of reduce_packed_16 (block16.rs)
 // ============================================================
 
 pub open spec fn reduce_packed_16_lane(ll: u16, mm: u16, hh: u16) -> u16 {
@@ -271,11 +270,11 @@ pub proof fn packed_16_lane_correct(a: u16, b: u16)
 
 // ============================================================
 // One lane of mul_flat_packed_8: vmull_p8 then the nibble-TBL
-// reduction (block8.rs:727-803); the two 16-byte tables are
-// source literals, proven byte by byte
+// reduction (block8.rs); the two 16-byte tables are source
+// literals, proven byte by byte.
 // ============================================================
 
-// block8.rs:751-756
+// block8.rs
 pub open spec fn tbl_lo_8(n: u8) -> u8 {
     if n == 0 { 0x00 } else if n == 1 { 0x1b } else if n == 2 { 0x36 } else if n == 3 { 0x2d }
     else if n == 4 { 0x6c } else if n == 5 { 0x77 } else if n == 6 { 0x5a } else if n == 7 { 0x41 }
@@ -283,7 +282,7 @@ pub open spec fn tbl_lo_8(n: u8) -> u8 {
     else if n == 12 { 0xb4 } else if n == 13 { 0xaf } else if n == 14 { 0x82 } else { 0x99 }
 }
 
-// block8.rs:759-764
+// block8.rs
 pub open spec fn tbl_hi_8(n: u8) -> u8 {
     if n == 0 { 0x00 } else if n == 1 { 0xab } else if n == 2 { 0x4d } else if n == 3 { 0xe6 }
     else if n == 4 { 0x9a } else if n == 5 { 0x31 } else if n == 6 { 0xd7 } else if n == 7 { 0x7c }
@@ -429,7 +428,7 @@ pub proof fn packed_8_lane_correct(a: u8, b: u8)
 // over the instruction model
 // ============================================================
 
-// reduce_tbl closure, block8.rs:770-792
+// reduce_tbl closure, block8.rs
 pub open spec fn reduce_tbl_8_m(val: Seq<u16>) -> Seq<u8> {
     let data = vmovn_m16(val);
     let carry = vmovn_m16(vshr_m16(val, 8));
@@ -439,7 +438,7 @@ pub open spec fn reduce_tbl_8_m(val: Seq<u16>) -> Seq<u8> {
     veor_m8(data, veor_m8(vqtbl1_m(tbl_lo_8_seq(), h_lo), vqtbl1_m(tbl_hi_8_seq(), h_hi)))
 }
 
-// mul_flat_packed_8, block8.rs:727-803
+// mul_flat_packed_8, block8.rs
 pub open spec fn mul_flat_packed_8_twin(a: Seq<u8>, b: Seq<u8>) -> Seq<u8> {
     let res_lo = reduce_tbl_8_m(vmull_p8_m(vget_low_m8(a), vget_low_m8(b)));
     let res_hi = reduce_tbl_8_m(vmull_p8_m(vget_high_m8(a), vget_high_m8(b)));
@@ -474,7 +473,7 @@ pub proof fn mul_flat_packed_8_correct(a: Seq<u8>, b: Seq<u8>)
     }
 }
 
-// reduce_packed_16, block16.rs:720-744
+// reduce_packed_16, block16.rs
 pub open spec fn reduce_packed_16_m(ll: Seq<u16>, mm: Seq<u16>, hh: Seq<u16>) -> Seq<u16> {
     let mid = veor_m16(veor_m16(mm, ll), hh);
     let l = veor_m16(ll, vshl_m16(mid, 8));
@@ -496,7 +495,7 @@ pub open spec fn reduce_packed_16_m(ll: Seq<u16>, mm: Seq<u16>, hh: Seq<u16>) ->
     veor_m16(veor_m16(l, h_fold), carry_fold)
 }
 
-// mul_flat_packed_16, block16.rs:648-677
+// mul_flat_packed_16, block16.rs
 pub open spec fn mul_flat_packed_16_twin(a: Seq<u16>, b: Seq<u16>) -> Seq<u16> {
     let a_lo = vmovn_m16(a);
     let a_hi = vmovn_m16(vshr_m16(a, 8));
@@ -510,8 +509,8 @@ pub open spec fn mul_flat_packed_16_twin(a: Seq<u16>, b: Seq<u16>) -> Seq<u16> {
     reduce_packed_16_m(ll, mm, hh)
 }
 
-// mul_flat_scalar_packed_16, block16.rs:682-715: the
-// lane-uniform byte split of the scalar is hoisted.
+// mul_flat_scalar_packed_16, block16.rs:
+// the lane-uniform byte split of the scalar is hoisted.
 pub open spec fn mul_flat_scalar_packed_16_twin(a: Seq<u16>, s: u16) -> Seq<u16> {
     let a_lo = vmovn_m16(a);
     let a_hi = vmovn_m16(vshr_m16(a, 8));
@@ -557,9 +556,9 @@ pub proof fn mul_flat_scalar_packed_16_correct(a: Seq<u16>, s: u16)
 
 // ============================================================
 // The remaining packed kernels compute the proven scalar dataflow
-// per lane: block64.rs:602-640 (PMULL/PMULL2 pairs with uzp lane
-// regroup, lane values unchanged), block32.rs:597 (scalar-kernel loop),
-// and the mul_hardware_packed loop in block128.rs:497
+// per lane: block64.rs (PMULL/PMULL2 pairs with uzp lane regroup,
+// lane values unchanged), block32.rs (scalar-kernel loop),
+// and the mul_hardware_packed loop in block128.rs.
 // ============================================================
 
 pub open spec fn mul_flat_packed_64_twin(a: Seq<u64>, b: Seq<u64>) -> Seq<u64> {

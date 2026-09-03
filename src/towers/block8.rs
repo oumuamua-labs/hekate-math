@@ -58,6 +58,9 @@ const EXP_TABLE: [u8; 256] = generate_exp_table();
 #[cfg(feature = "table-math")]
 const LOG_TABLE: [u8; 256] = generate_log_table();
 
+#[cfg(feature = "table-math")]
+const TAU_TABLE: [u8; 256] = generate_tau_table();
+
 /// Field element GF(2^8).
 #[derive(Copy, Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Zeroize)]
 #[repr(transparent)]
@@ -70,19 +73,47 @@ impl Block8 {
 
     #[inline(always)]
     pub fn square(self) -> Self {
-        // Carryless square (bit spread), then fold the
-        // high half twice by 0x1b (= x^4 + x^3 + x + 1).
-        let mut s = self.0 as u16;
-        s = (s | (s << 4)) & 0x0f0f;
-        s = (s | (s << 2)) & 0x3333;
-        s = (s | (s << 1)) & 0x5555;
+        #[cfg(feature = "table-math")]
+        {
+            if self.0 == 0 {
+                return Self::ZERO;
+            }
 
-        let hi = s >> 8;
-        let s = (s & 0x00ff) ^ (hi ^ (hi << 1) ^ (hi << 3) ^ (hi << 4));
+            let k = (LOG_TABLE[self.0 as usize] as usize) << 1;
+            let idx = if k >= 255 { k - 255 } else { k };
 
-        let hi = s >> 8;
+            Self(EXP_TABLE[idx])
+        }
 
-        Block8(((s & 0x00ff) ^ (hi ^ (hi << 1) ^ (hi << 3) ^ (hi << 4))) as u8)
+        #[cfg(not(feature = "table-math"))]
+        {
+            // Carryless square (bit spread), then fold the
+            // high half twice by 0x1b (= x^4 + x^3 + x + 1).
+            let mut s = self.0 as u16;
+            s = (s | (s << 4)) & 0x0f0f;
+            s = (s | (s << 2)) & 0x3333;
+            s = (s | (s << 1)) & 0x5555;
+
+            let hi = s >> 8;
+            let s = (s & 0x00ff) ^ (hi ^ (hi << 1) ^ (hi << 3) ^ (hi << 4));
+
+            let hi = s >> 8;
+
+            Block8(((s & 0x00ff) ^ (hi ^ (hi << 1) ^ (hi << 3) ^ (hi << 4))) as u8)
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn mul_tau(self) -> Self {
+        #[cfg(feature = "table-math")]
+        {
+            Block8(TAU_TABLE[self.0 as usize])
+        }
+
+        #[cfg(not(feature = "table-math"))]
+        {
+            Block8(mul_tau_fold(self.0))
+        }
     }
 }
 
@@ -149,6 +180,7 @@ impl Sub for Block8 {
 impl Mul for Block8 {
     type Output = Self;
 
+    #[inline]
     fn mul(self, rhs: Self) -> Self::Output {
         #[cfg(feature = "table-math")]
         {
@@ -579,6 +611,17 @@ fn map_ct_8(x: u8, basis: &[u8; 8]) -> u8 {
     acc
 }
 
+const fn mul_tau_fold(a: u8) -> u8 {
+    let p = (a as u16) << 5;
+
+    let hi = p >> 8;
+    let s = (p & 0x00ff) ^ (hi ^ (hi << 1) ^ (hi << 3) ^ (hi << 4));
+
+    let hi = s >> 8;
+
+    ((s & 0x00ff) ^ (hi ^ (hi << 1) ^ (hi << 3) ^ (hi << 4))) as u8
+}
+
 #[cfg(feature = "table-math")]
 const fn generate_exp_table() -> [u8; 256] {
     let mut table = [0u8; 256];
@@ -645,6 +688,19 @@ const fn generate_log_table() -> [u8; 256] {
     }
 
     // table[0] remains 0 (log(0) is undefined).
+
+    table
+}
+
+#[cfg(feature = "table-math")]
+const fn generate_tau_table() -> [u8; 256] {
+    let mut table = [0u8; 256];
+    let mut i = 0;
+
+    while i < 256 {
+        table[i] = mul_tau_fold(i as u8);
+        i += 1;
+    }
 
     table
 }
@@ -867,6 +923,18 @@ mod tests {
         for i in 0u16..=255 {
             let x = Block8(i as u8);
             assert_eq!(x.square(), x * x, "Block8 square mismatch at {i:#04x}");
+        }
+    }
+
+    #[test]
+    fn mul_tau_exhaustive() {
+        for i in 0u16..=255 {
+            let x = Block8(i as u8);
+            assert_eq!(
+                x.mul_tau(),
+                x * Block8::EXTENSION_TAU,
+                "Block8 mul_tau mismatch at {i:#04x}"
+            );
         }
     }
 

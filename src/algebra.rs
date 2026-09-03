@@ -63,7 +63,7 @@ pub trait BinaryFieldExtras: TowerField {
 }
 
 macro_rules! impl_binary_field_extras {
-    ($block:ty, $sub:ty, $map_ct:ident, $trace_mask:ident, $solve_basis:ident) => {
+    ($block:ty, $map_ct:ident, $trace_mask:ident, $solve_basis:ident) => {
         impl BinaryFieldExtras for $block {
             #[inline(always)]
             fn square(&self) -> Self {
@@ -73,7 +73,7 @@ macro_rules! impl_binary_field_extras {
                 let (lo, hi) = self.split();
                 let hi2 = hi.square();
 
-                Self::new(lo.square() + hi2 * <$sub>::EXTENSION_TAU, hi2)
+                Self::new(lo.square() + hi2.mul_tau(), hi2)
             }
 
             #[inline(always)]

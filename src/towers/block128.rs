@@ -58,6 +58,14 @@ impl Block128 {
     pub fn split(self) -> (Block64, Block64) {
         (Block64(self.0 as u64), Block64((self.0 >> 64) as u64))
     }
+
+    #[inline(always)]
+    pub(crate) fn mul_tau(self) -> Self {
+        let (a0, a1) = self.split();
+        let t = a1.mul_tau();
+
+        Self::new(t.mul_tau(), (a0 + a1).mul_tau())
+    }
 }
 
 impl TowerField for Block128 {
@@ -69,12 +77,10 @@ impl TowerField for Block128 {
 
     fn invert(&self) -> Self {
         let (l, h) = self.split();
-        let h2 = h * h;
-        let l2 = l * l;
-        let hl = h * l;
-        let norm = (h2 * Block64::TAU) + hl + l2;
 
+        let norm = h.square().mul_tau() + h * l + l.square();
         let norm_inv = norm.invert();
+
         let res_hi = h * norm_inv;
         let res_lo = (h + l) * norm_inv;
 
@@ -108,18 +114,24 @@ impl Sub for Block128 {
 impl Mul for Block128 {
     type Output = Self;
 
+    #[inline]
     fn mul(self, rhs: Self) -> Self {
-        let (a0, a1) = self.split();
-        let (b0, b1) = rhs.split();
+        #[cfg(all(pmull, feature = "table-math"))]
+        {
+            mul_iso_128(self, rhs)
+        }
 
-        let v0 = a0 * b0;
-        let v1 = a1 * b1;
-        let v_sum = (a0 + a1) * (b0 + b1);
+        #[cfg(not(all(pmull, feature = "table-math")))]
+        {
+            let (a0, a1) = self.split();
+            let (b0, b1) = rhs.split();
 
-        let c_hi = v0 + v_sum;
-        let c_lo = v0 + (v1 * Block64::TAU);
+            let v0 = a0 * b0;
+            let v1 = a1 * b1;
+            let vs = (a0 + a1) * (b0 + b1);
 
-        Self::new(c_lo, c_hi)
+            Self::new(v0 + v1.mul_tau(), v0 + vs)
+        }
     }
 }
 
@@ -344,30 +356,12 @@ impl Mul for PackedBlock128 {
 
     #[inline(always)]
     fn mul(self, rhs: Self) -> Self {
-        #[cfg(pmull)]
-        {
-            let mut res = [Block128::ZERO; PACKED_WIDTH_128];
-            for ((out, l), r) in res.iter_mut().zip(self.0.iter()).zip(rhs.0.iter()) {
-                let a_flat = l.to_hardware();
-                let b_flat = r.to_hardware();
-                let c_flat =
-                    Flat::from_raw(neon::mul_flat_128(a_flat.into_raw(), b_flat.into_raw()));
-
-                *out = c_flat.to_tower();
-            }
-
-            Self(res)
+        let mut res = [Block128::ZERO; PACKED_WIDTH_128];
+        for ((out, l), r) in res.iter_mut().zip(self.0.iter()).zip(rhs.0.iter()) {
+            *out = *l * *r;
         }
 
-        #[cfg(not(pmull))]
-        {
-            let mut res = [Block128::ZERO; PACKED_WIDTH_128];
-            for ((out, l), r) in res.iter_mut().zip(self.0.iter()).zip(rhs.0.iter()) {
-                *out = *l * *r;
-            }
-
-            Self(res)
-        }
+        Self(res)
     }
 }
 
@@ -762,7 +756,6 @@ impl FlatPromote<Block64> for Block128 {
 
 impl_binary_field_extras!(
     Block128,
-    Block64,
     map_ct_128_split,
     TRACE_MASK_128,
     SOLVE_QUADRATIC_BASIS_128
@@ -771,6 +764,16 @@ impl_binary_field_extras!(
 // ===========================================
 // UTILS
 // ===========================================
+
+#[cfg(pmull)]
+#[inline(always)]
+pub fn mul_iso_128(a: Block128, b: Block128) -> Block128 {
+    let a_flat = a.to_hardware();
+    let b_flat = b.to_hardware();
+    let c_flat = Flat::from_raw(neon::mul_flat_128(a_flat.into_raw(), b_flat.into_raw()));
+
+    c_flat.to_tower()
+}
 
 #[cfg(feature = "table-math")]
 #[inline(always)]
@@ -1307,6 +1310,28 @@ mod tests {
             Block64(0x2000_0000_0000_0000),
             "X^2 should contain tau component (0x2000_0000_0000_0000)"
         );
+    }
+
+    #[test]
+    fn mul_tau_matches_mul() {
+        let mut rng = rng();
+        let edges = [
+            Block128::ZERO,
+            Block128::ONE,
+            Block128::TAU,
+            Block128(u128::MAX),
+        ];
+
+        let random = (0..1000).map(|_| Block128(rng.random()));
+
+        for x in edges.into_iter().chain(random) {
+            assert_eq!(
+                x.mul_tau(),
+                x * Block128::EXTENSION_TAU,
+                "Block128 mul_tau mismatch at {:#034x}",
+                x.0
+            );
+        }
     }
 
     #[test]

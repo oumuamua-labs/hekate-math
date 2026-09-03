@@ -106,7 +106,7 @@ pub proof fn u16_split8(x: u16)
 }
 
 // ============================================================
-// mul_flat_16, block16.rs:605-643
+// mul_flat_16, block16.rs
 // ============================================================
 
 pub open spec fn mul_flat_16_twin(a: u16, b: u16) -> u16 {
@@ -208,7 +208,7 @@ pub proof fn mul_flat_16_correct(a: u16, b: u16)
 }
 
 // ============================================================
-// mul_flat_32, block32.rs:608-644
+// mul_flat_32, block32.rs
 // ============================================================
 
 pub open spec fn mul_flat_32_twin(a: u32, b: u32) -> u32 {
@@ -306,7 +306,7 @@ pub proof fn mul_flat_32_correct(a: u32, b: u32)
 }
 
 // ============================================================
-// mul_8, block8.rs:679-722: the tower Mul dispatch at 8 bits
+// mul_8, block8.rs: the tower Mul dispatch at 8 bits
 // ============================================================
 
 pub open spec fn mul_8_twin(a: u8, b: u8) -> u8 {
@@ -401,7 +401,7 @@ pub proof fn mul_8_correct(a: u8, b: u8)
 }
 
 // ============================================================
-// mul_flat_64, block64.rs:644-668
+// mul_flat_64, block64.rs
 // ============================================================
 
 pub open spec fn mul_flat_64_twin(a: u64, b: u64) -> u64 {
@@ -483,8 +483,8 @@ pub proof fn mul_flat_64_correct(a: u64, b: u64)
 }
 
 // ============================================================
-// mul_flat_128, block128.rs:874-921: two-limb
-// schoolbook, four product PMULLs, two-stage 0x87 fold
+// mul_flat_128, block128.rs:
+// two-limb schoolbook, four product PMULLs, two-stage 0x87 fold
 // ============================================================
 
 pub open spec fn mul_flat_128_twin(a: u128, b: u128) -> u128 {

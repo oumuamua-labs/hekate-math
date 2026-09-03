@@ -1662,7 +1662,7 @@ pub open spec fn ext_norm(lo: nat, hi: nat, m: nat) -> nat {
         gf_mul_tower(gf_mul_tower(hi, hi, m), tau_tower(m), m))
 }
 
-// a^-1 = conj(a) * N(a)^-1, conj = (lo+hi, hi). block128.rs:69-81.
+// a^-1 = conj(a) * N(a)^-1, conj = (lo+hi, hi). block128.rs.
 // The reduction a * (conj(a) * ninv) == N(a) * ninv is proven algebra (tau-generic);
 // only N(a) != 0 for a != 0 is trusted (norm_nonzero).
 pub proof fn quad_ext_inverse(a: nat, k: nat, ninv: nat)
