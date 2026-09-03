@@ -1108,10 +1108,10 @@ proof fn and_dec_is_sub(x: u64, j: u64)
 }
 
 // ============================================================
-// Constructor twin: new(), additive.rs:78-114, from the lift
+// Constructor twin: new(), additive.rs, from the lift
 // chain on. The solve_quadratic loop producing `lift` is
-// checked at build time; `bits` is u64 where production uses
-// usize (identical on the pinned platform).
+// checked at build time; `bits` is u64 where production
+// uses usize (identical on the pinned platform).
 // ============================================================
 
 pub struct FftTwin {
@@ -1670,7 +1670,7 @@ proof fn inv_pass_step(
 }
 
 impl FftTwin {
-    // fwd_butterflies, additive.rs:295-307:
+    // fwd_butterflies, additive.rs:
     // pair r in [0,s) as (base+r, base+s+r);
     // writes stay inside [base, base+2s).
     fn fwd_bfly_block(&self, data: &mut Vec<u128>, base: usize, s: usize, tw: u128)
@@ -1740,7 +1740,7 @@ impl FftTwin {
         }
     }
 
-    // blocks_serial, additive.rs:284-293:
+    // blocks_serial, additive.rs:
     // whole-array pass at stride s;
     // block b (width 2s) twiddled by xor(coset, tws[b]).
     fn pass_fwd_exec(&self, data: &mut Vec<u128>, coset: u128, s: usize, nblocks: usize)
@@ -1847,9 +1847,9 @@ impl FftTwin {
         }
     }
 
-    // fwd_levels, additive.rs:197-215: passes at stride 2^L for
-    // L = log_n-1 down to 0, coset sigma^L(offset). Loop invariant:
-    // each stride-2^L class holds fwd_spec at depth log_n-L.
+    // fwd_levels, additive.rs:
+    // passes at stride 2^L for L = log_n-1 down to 0, coset sigma^L(offset).
+    // Loop invariant: each stride-2^L class holds fwd_spec at depth log_n-L.
     fn fwd_levels_exec(&self, data: &mut Vec<u128>, offset: u128)
         requires
             self.wf(),
@@ -2090,7 +2090,7 @@ impl FftTwin {
         }
     }
 
-    // inv_butterflies, additive.rs:309-319:
+    // inv_butterflies, additive.rs:
     // qv = lo+hi, lo = bfly_lo(lo, qv, tw), hi = qv;
     // writes stay in [base,base+2s).
     fn inv_bfly_block(&self, data: &mut Vec<u128>, base: usize, s: usize, tw: u128)
@@ -2160,7 +2160,7 @@ impl FftTwin {
         }
     }
 
-    // blocks_serial, additive.rs:284-293: inverse whole-array
+    // blocks_serial, additive.rs: inverse whole-array
     // pass at stride s; block b twiddled by xor(coset, tws[b]).
     fn pass_inv_exec(&self, data: &mut Vec<u128>, coset: u128, s: usize, nblocks: usize)
         requires
@@ -2275,10 +2275,10 @@ impl FftTwin {
         }
     }
 
-    // inv_levels, additive.rs:219-229: passes at stride 2^L for
-    // L = 0 up to log_n-1, coset sigma^L(offset). Loop invariant:
-    // each stride-2^L class still owes its depth-(log_n-L) inv_spec
-    // to reach fin = inv_spec(input).
+    // inv_levels, additive.rs:
+    // passes at stride 2^L for L = 0 up to log_n-1, coset sigma^L(offset).
+    // Loop invariant: each stride-2^L class still owes its depth-(log_n-L)
+    // inv_spec to reach fin = inv_spec(input).
     fn inv_levels_exec(&self, data: &mut Vec<u128>, offset: u128)
         requires
             self.wf(),
