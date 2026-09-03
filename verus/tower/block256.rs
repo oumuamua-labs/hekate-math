@@ -19,7 +19,9 @@ use vstd::prelude::*;
 
 #[path = "block128.rs"]
 pub mod b128;
-use b128::{mul128_distrib_l, mul128_distrib_r, schoolbook128};
+use b128::{
+    mul_tau128, mul_tau128_is_schoolbook, mul128_distrib_l, mul128_distrib_r, schoolbook128,
+};
 
 verus! {
 
@@ -35,20 +37,21 @@ pub open spec fn schoolbook256(alo: u128, ahi: u128, blo: u128, bhi: u128) -> (u
     )
 }
 
-// Block256::mul, block256.rs:100-112: Karatsuba, three base multiplies.
+// Block256::mul, block256.rs:
+// Karatsuba, three base multiplies.
 pub open spec fn mul256_k(alo: u128, ahi: u128, blo: u128, bhi: u128) -> (u128, u128) {
     let v0 = schoolbook128(alo, blo);
     let v1 = schoolbook128(ahi, bhi);
     let vs = schoolbook128(alo ^ ahi, blo ^ bhi);
-    (
-        v0 ^ schoolbook128(v1, 0x2000_0000_0000_0000_0000_0000_0000_0000),
-        v0 ^ vs,
-    )
+
+    (v0 ^ mul_tau128(v1), v0 ^ vs)
 }
 
 pub proof fn mul256_matches_schoolbook(alo: u128, ahi: u128, blo: u128, bhi: u128)
     ensures mul256_k(alo, ahi, blo, bhi) == schoolbook256(alo, ahi, blo, bhi)
 {
+    mul_tau128_is_schoolbook(schoolbook128(ahi, bhi));
+
     mul128_distrib_l(alo, ahi, blo ^ bhi);
     mul128_distrib_r(alo, blo, bhi);
     mul128_distrib_r(ahi, blo, bhi);

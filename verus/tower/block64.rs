@@ -19,7 +19,10 @@ use vstd::prelude::*;
 
 #[path = "block32.rs"]
 pub mod b32;
-use b32::{mul32_distrib_l, mul32_distrib_r, schoolbook32};
+use b32::{
+    mul_tau32, mul_tau32_is_schoolbook, mul32_distrib_l, mul32_distrib_r, schoolbook32,
+    schoolbook32_zero,
+};
 
 verus! {
 
@@ -53,10 +56,60 @@ pub open spec fn mul64_k(a: u64, b: u64) -> u64 {
     let a1 = hi(a);
     let b0 = lo(b);
     let b1 = hi(b);
+
     let v0 = schoolbook32(a0, b0);
     let v1 = schoolbook32(a1, b1);
     let vs = schoolbook32(a0 ^ a1, b0 ^ b1);
-    pack(v0 ^ schoolbook32(v1, 0x2000_0000), v0 ^ vs)
+
+    pack(v0 ^ mul_tau32(v1), v0 ^ vs)
+}
+
+// Block64::mul_tau, block64.rs:
+// τ² a1 + τ(a0 + a1) X.
+pub open spec fn mul_tau64(a: u64) -> u64 {
+    let a0 = lo(a);
+    let a1 = hi(a);
+    let t = mul_tau32(a1);
+
+    pack(mul_tau32(t), mul_tau32(a0 ^ a1))
+}
+
+pub proof fn schoolbook64_zero(a: u64)
+    ensures schoolbook64(a, 0) == 0
+{
+    mul64_distrib_r(a, 1, 1);
+    assert(1u64 ^ 1u64 == 0u64) by (bit_vector);
+
+    let p = schoolbook64(a, 1);
+    assert(p ^ p == 0u64) by (bit_vector);
+}
+
+pub proof fn mul_tau64_is_schoolbook(a: u64)
+    ensures mul_tau64(a) == schoolbook64(a, 0x2000_0000_0000_0000)
+{
+    let a0 = lo(a);
+    let a1 = hi(a);
+
+    assert(lo(0x2000_0000_0000_0000u64) == 0u32) by (bit_vector);
+    assert(hi(0x2000_0000_0000_0000u64) == 0x2000_0000u32) by (bit_vector);
+
+    let t = mul_tau32(a1);
+
+    mul_tau32_is_schoolbook(a1);
+    mul_tau32_is_schoolbook(t);
+    mul_tau32_is_schoolbook(a0 ^ a1);
+
+    mul32_distrib_l(a0, a1, 0x2000_0000);
+
+    schoolbook32_zero(a0);
+    schoolbook32_zero(a1);
+
+    let x0 = schoolbook32(a0, 0x2000_0000);
+    let x1 = schoolbook32(a1, 0x2000_0000);
+    let x11 = schoolbook32(x1, 0x2000_0000);
+
+    assert(0u32 ^ x11 == x11) by (bit_vector);
+    assert(x0 ^ 0u32 ^ x1 == x0 ^ x1) by (bit_vector);
 }
 
 pub proof fn pack_xor(l1: u32, l2: u32, h1: u32, h2: u32)
@@ -72,6 +125,8 @@ pub proof fn mul64_matches_schoolbook(a: u64, b: u64)
     let a1 = hi(a);
     let b0 = lo(b);
     let b1 = hi(b);
+
+    mul_tau32_is_schoolbook(schoolbook32(a1, b1));
 
     mul32_distrib_l(a0, a1, b0 ^ b1);
     mul32_distrib_r(a0, b0, b1);

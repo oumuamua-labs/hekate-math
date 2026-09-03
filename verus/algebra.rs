@@ -28,10 +28,16 @@ use vstd::prelude::*;
 #[path = "tower/bridge.rs"]
 pub mod bridge;
 
-use bridge::b256::b128::b64::b32::b16::b8::schoolbook8;
-use bridge::b256::b128::b64::b32::b16::{hi, lo, pack, schoolbook16};
-use bridge::b256::b128::b64::b32::{hi as hi32, lo as lo32, pack as pack32, schoolbook32};
-use bridge::b256::b128::b64::{hi as hi64, lo as lo64, pack as pack64, schoolbook64};
+use bridge::b256::b128::b64::b32::b16::b8::{mul_tau8, mul_tau8_is_schoolbook, schoolbook8};
+use bridge::b256::b128::b64::b32::b16::{
+    hi, lo, mul_tau16, mul_tau16_is_schoolbook, pack, schoolbook16,
+};
+use bridge::b256::b128::b64::b32::{
+    hi as hi32, lo as lo32, mul_tau32, mul_tau32_is_schoolbook, pack as pack32, schoolbook32,
+};
+use bridge::b256::b128::b64::{
+    hi as hi64, lo as lo64, mul_tau64, mul_tau64_is_schoolbook, pack as pack64, schoolbook64,
+};
 use bridge::b256::b128::{hi as hi128, lo as lo128, pack as pack128, schoolbook128};
 use bridge::gf_model::{
     deg_lt_conv, frobenius_mod_cycle, gf_mul_tower, gf_mul_tower_comm, pow_2exp, pow2,
@@ -41,8 +47,8 @@ use bridge::{bridge16, bridge32, bridge64, bridge128, xor16};
 
 verus! {
 
-// Block8::square, block8.rs:72-85: carryless bit spread,
-// then two folds of the high half by 0x1b.
+// Block8::square, block8.rs:
+// carryless bit spread, then two folds of the high half by 0x1b.
 pub open spec fn square8_spread(a: u8) -> u8 {
     let s0 = a as u16;
     let s1 = (s0 | (s0 << 4)) & 0x0f0f;
@@ -75,7 +81,7 @@ pub open spec fn square16_twin(x: u16) -> u16 {
     let l2 = square8_spread(lo(x));
     let h2 = square8_spread(hi(x));
 
-    pack(l2 ^ schoolbook8(h2, 0x20), h2)
+    pack(l2 ^ mul_tau8(h2), h2)
 }
 
 pub proof fn square16_is_schoolbook(x: u16)
@@ -86,6 +92,9 @@ pub proof fn square16_is_schoolbook(x: u16)
 
     square8_spread_is_schoolbook(l);
     square8_spread_is_schoolbook(h);
+
+    mul_tau8_is_schoolbook(square8_spread(h));
+
     schoolbook8_comm(l, h);
 
     let c = schoolbook8(l, h);
@@ -134,7 +143,7 @@ pub open spec fn square32_twin(x: u32) -> u32 {
     let l2 = square16_twin(lo32(x));
     let h2 = square16_twin(hi32(x));
 
-    pack32(l2 ^ schoolbook16(h2, 0x2000), h2)
+    pack32(l2 ^ mul_tau16(h2), h2)
 }
 
 pub proof fn square32_is_schoolbook(x: u32)
@@ -145,6 +154,9 @@ pub proof fn square32_is_schoolbook(x: u32)
 
     square16_is_schoolbook(l);
     square16_is_schoolbook(h);
+
+    mul_tau16_is_schoolbook(square16_twin(h));
+
     schoolbook16_comm(l, h);
 
     let c = schoolbook16(l, h);
@@ -165,7 +177,7 @@ pub open spec fn square64_twin(x: u64) -> u64 {
     let l2 = square32_twin(lo64(x));
     let h2 = square32_twin(hi64(x));
 
-    pack64(l2 ^ schoolbook32(h2, 0x2000_0000), h2)
+    pack64(l2 ^ mul_tau32(h2), h2)
 }
 
 pub proof fn square64_is_schoolbook(x: u64)
@@ -176,6 +188,9 @@ pub proof fn square64_is_schoolbook(x: u64)
 
     square32_is_schoolbook(l);
     square32_is_schoolbook(h);
+
+    mul_tau32_is_schoolbook(square32_twin(h));
+
     schoolbook32_comm(l, h);
 
     let c = schoolbook32(l, h);
@@ -196,7 +211,7 @@ pub open spec fn square128_twin(x: u128) -> u128 {
     let l2 = square64_twin(lo128(x));
     let h2 = square64_twin(hi128(x));
 
-    pack128(l2 ^ schoolbook64(h2, 0x2000_0000_0000_0000), h2)
+    pack128(l2 ^ mul_tau64(h2), h2)
 }
 
 pub proof fn square128_is_schoolbook(x: u128)
@@ -207,6 +222,9 @@ pub proof fn square128_is_schoolbook(x: u128)
 
     square64_is_schoolbook(l);
     square64_is_schoolbook(h);
+
+    mul_tau64_is_schoolbook(square64_twin(h));
+
     schoolbook64_comm(l, h);
 
     let c = schoolbook64(l, h);
@@ -223,7 +241,7 @@ pub proof fn square128_twin_correct(x: u128)
     bridge128(x, x);
 }
 
-// The default frobenius loop, algebra.rs:32-41:
+// The default frobenius loop, algebra.rs:
 // acc squared `reps` times.
 pub open spec fn sq_iter16(x: u16, n: nat) -> u16
     decreases n
@@ -269,7 +287,7 @@ pub proof fn frobenius16_semantics(x: u16, k: u32)
     assert((k % 16) as nat == (k as nat) % 16);
 }
 
-// The default trace loop, algebra.rs:45-55:
+// The default trace loop, algebra.rs:
 // acc accumulates the Frobenius orbit.
 pub open spec fn trace_iter16(x: u16, n: nat) -> u16
     decreases n

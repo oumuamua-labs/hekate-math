@@ -70,7 +70,7 @@ fn xtime_exec(a: u8) -> (r: u8)
     (a << 1) ^ (if a & 0x80 != 0 { 0x1b } else { 0 })
 }
 
-// Block8::mul, block8.rs:185-203 (shift-and-add), unrolled.
+// Block8::mul, block8.rs (shift-and-add), unrolled.
 pub fn mul8(a: u8, b: u8) -> (r: u8)
     ensures r == schoolbook8(a, b)
 {
@@ -124,6 +124,31 @@ pub proof fn mul8_distrib_r(a: u8, b: u8, c: u8)
 {
     clmul8_lin_r(a, b, c);
     reduce8_lin(clmul8(a, b), clmul8(a, c));
+}
+
+pub proof fn schoolbook8_zero(a: u8)
+    ensures schoolbook8(a, 0) == 0
+{
+    assert(schoolbook8(a, 0) == 0) by (bit_vector);
+}
+
+// mul_tau_fold, block8.rs:
+// a·x^5, two folds by 0x1b.
+pub open spec fn mul_tau8(a: u8) -> u8 {
+    let p = (a as u16) << 5;
+
+    let h1 = p >> 8;
+    let s = (p & 0x00ff) ^ (h1 ^ (h1 << 1) ^ (h1 << 3) ^ (h1 << 4));
+
+    let h2 = s >> 8;
+
+    ((s & 0x00ff) ^ (h2 ^ (h2 << 1) ^ (h2 << 3) ^ (h2 << 4))) as u8
+}
+
+pub proof fn mul_tau8_is_schoolbook(a: u8)
+    ensures mul_tau8(a) == schoolbook8(a, 0x20)
+{
+    assert(mul_tau8(a) == schoolbook8(a, 0x20)) by (bit_vector);
 }
 
 fn main() {}

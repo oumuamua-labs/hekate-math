@@ -19,7 +19,9 @@ use vstd::prelude::*;
 
 #[path = "block8.rs"]
 pub mod b8;
-use b8::{mul8_distrib_l, mul8_distrib_r, schoolbook8};
+use b8::{
+    mul_tau8, mul_tau8_is_schoolbook, mul8_distrib_l, mul8_distrib_r, schoolbook8, schoolbook8_zero,
+};
 
 verus! {
 
@@ -47,16 +49,67 @@ pub open spec fn schoolbook16(a: u16, b: u16) -> u16 {
     )
 }
 
-// Block16::mul, block16.rs:110-127: Karatsuba, three base multiplies.
+// Block16::mul, block16.rs:
+// Karatsuba, three base multiplies.
 pub open spec fn mul16_k(a: u16, b: u16) -> u16 {
     let a0 = lo(a);
     let a1 = hi(a);
     let b0 = lo(b);
     let b1 = hi(b);
+
     let v0 = schoolbook8(a0, b0);
     let v1 = schoolbook8(a1, b1);
     let vs = schoolbook8(a0 ^ a1, b0 ^ b1);
-    pack(v0 ^ schoolbook8(v1, 0x20), v0 ^ vs)
+
+    pack(v0 ^ mul_tau8(v1), v0 ^ vs)
+}
+
+// Block16::mul_tau, block16.rs:
+// τ² a1 + τ(a0 + a1) X.
+pub open spec fn mul_tau16(a: u16) -> u16 {
+    let a0 = lo(a);
+    let a1 = hi(a);
+    let t = mul_tau8(a1);
+
+    pack(mul_tau8(t), mul_tau8(a0 ^ a1))
+}
+
+pub proof fn schoolbook16_zero(a: u16)
+    ensures schoolbook16(a, 0) == 0
+{
+    mul16_distrib_r(a, 1, 1);
+    assert(1u16 ^ 1u16 == 0u16) by (bit_vector);
+
+    let p = schoolbook16(a, 1);
+    assert(p ^ p == 0u16) by (bit_vector);
+}
+
+pub proof fn mul_tau16_is_schoolbook(a: u16)
+    ensures mul_tau16(a) == schoolbook16(a, 0x2000)
+{
+    let a0 = lo(a);
+    let a1 = hi(a);
+
+    assert(lo(0x2000u16) == 0u8) by (bit_vector);
+    assert(hi(0x2000u16) == 0x20u8) by (bit_vector);
+
+    let t = mul_tau8(a1);
+
+    mul_tau8_is_schoolbook(a1);
+    mul_tau8_is_schoolbook(t);
+    mul_tau8_is_schoolbook(a0 ^ a1);
+
+    mul8_distrib_l(a0, a1, 0x20);
+
+    schoolbook8_zero(a0);
+    schoolbook8_zero(a1);
+
+    let x0 = schoolbook8(a0, 0x20);
+    let x1 = schoolbook8(a1, 0x20);
+    let x11 = schoolbook8(x1, 0x20);
+
+    assert(0u8 ^ x11 == x11) by (bit_vector);
+    assert(x0 ^ 0u8 ^ x1 == x0 ^ x1) by (bit_vector);
 }
 
 pub proof fn pack_xor(l1: u8, l2: u8, h1: u8, h2: u8)
@@ -73,6 +126,7 @@ pub proof fn mul16_matches_schoolbook(a: u16, b: u16)
     let b0 = lo(b);
     let b1 = hi(b);
 
+    mul_tau8_is_schoolbook(schoolbook8(a1, b1));
     mul8_distrib_l(a0, a1, b0 ^ b1);
     mul8_distrib_r(a0, b0, b1);
     mul8_distrib_r(a1, b0, b1);
