@@ -32,10 +32,9 @@ USE AT YOUR OWN RISK!
 
 > [!NOTE]
 > Tables below are the `table-math` build. That feature uses lookup
-> tables for basis conversion, lifting, and the GF(2^8) multiply every
-> tower Karatsuba bottoms out in. Tower rows are slower under the
-> default constant-time build; flat/hardware rows are identical.
-> Private witness data: use the default.
+> tables for basis conversion, lifting, and the GF(2^8) leaf arithmetic.
+> Tower rows are slower under the default constant-time build;
+> flat/hardware rows are identical. Private witness data: use the default.
 
 Benchmarks executed on *Apple M3 Max*.
 
@@ -44,14 +43,14 @@ Benchmarks executed on *Apple M3 Max*.
 | Operation                | Basis             | Latency  | Implementation                      |
 |:-------------------------|:------------------|:---------|:------------------------------------|
 | **Multiplication**       | Polynomial (Flat) | 0.90 ns  | `PMULL` (Pipelined)                 |
-| **Multiplication**       | Tower (Canonical) | 131.4 ns | Recursive Karatsuba                 |
+| **Multiplication**       | Tower (Canonical) | 16.6 ns  | Basis isomorphism + `PMULL`         |
 | **Addition**             | Any               | 1.15 ns  | Vectorized XOR                      |
-| **Inversion** (Single)   | Tower             | 315.6 ns | Itoh-Tsujii / Fermat Little Theorem |
+| **Inversion** (Single)   | Tower             | 106.2 ns | Itoh-Tsujii / Fermat Little Theorem |
 | **Inversion** (Batch)    | Tower             | 15.6 ns  | Montgomery's Trick (SIMD)           |
 | **Basis Conv** (Default) | Tower ↔ Flat      | 84.9 ns  | Bit-Slicing (Constant-Time)         |
 | **Basis Conv** (Fast)    | Tower ↔ Flat      | 3.68 ns  | Look-Up Table (Variable-Time)       |
 
-*Flat multiplication is ~145× faster than the canonical recursive path.*
+*Flat multiplication is ~18× faster than the canonical path.*
 
 ### Polynomial Arithmetic (Poly ALU)
 
@@ -59,7 +58,7 @@ Efficiency of polynomial operations in 𝔽(2^128).
 
 | Operation                 | Scenario / Size | Time     | Throughput   |
 |:--------------------------|:----------------|:---------|:-------------|
-| **Dense Eval (Tower)**    | 2²⁰ coeffs      | 148.2 ms | 108 MiB/s    |
+| **Dense Eval (Tower)**    | 2²⁰ coeffs      | 23.7 ms  | 675 MiB/s    |
 | **Dense Eval (Hardware)** | 2²⁰ coeffs      | 8.37 ms  | 1.87 GiB/s   |
 | **Batch Eval (SIMD)**     | 256 × 16384     | 4.44 ms  | 945 Melem/s  |
 | **Additive FFT (scalar)** | 2¹⁶ · Block16   | 477.7 µs | 137 Melem/s  |
@@ -262,13 +261,13 @@ Timing behaviour is a build-time choice. Pick per deployment.
   multiplication, independent of the input value.
 * **Hardware Arithmetic**: `Block128` multiplication uses carry-less multiply (`PMULL` on ARMv8,
   `PCLMULQDQ` on x86_64), constant-latency on current microarchitectures.
-* **Tower Arithmetic**: `table-math` replaces `Block8::mul` with log/exp tables and a zero-operand
-  branch. Every tower multiply and inversion bottoms out there.
+* **Tower Arithmetic**: `table-math` replaces `Block8::mul`, `square` and `mul_tau` with lookup
+  tables and a zero-operand branch. Multiplies at 64 and up take the `pmull` route instead.
 
 ## Formal Verification
 
 [`verus/`](verus/README.md) holds standalone [Verus](https://github.com/verus-lang/verus) proofs:
-1871 obligations, 0 errors, 15 units. The tower `mul` cascade refines schoolbook GF(2^k) at every
+2079 obligations, 0 errors, 15 units. The tower `mul` cascade refines schoolbook GF(2^k) at every
 level, the NEON flat kernels and constant-time basis conversions are proven equal to `gf_mul`, and
 the additive FFT round-trips. Excluded from the crate build; run `verus/verify.sh`.
 
