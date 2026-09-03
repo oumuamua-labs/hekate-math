@@ -7,11 +7,11 @@
 
 *Copyright (c) Andrei Kochergin and Oumuamua Labs.*
 
-Hardware-accelerated binary tower fields for zero-knowledge proofs.
+Formally verified, hardware-accelerated binary tower fields for zero-knowledge proofs.
 
-`hekate-math` implements constant-time binary tower fields (𝔽(2^k)) for Sumcheck, GKR-based
-provers, and Binius protocols. The tower runs to 𝔽(2^256). A basis isomorphism maps tower
-elements onto CPU carry-less multiply instructions: PMULL (ARMv8 NEON) and PCLMULQDQ (x86_64 AVX2).
+`hekate-math` runs the tower to 𝔽(2^256) for Sumcheck, GKR-based provers, and Binius
+protocols. A basis isomorphism maps tower elements onto CPU carry-less multiply
+instructions: PMULL (ARMv8 NEON) and PCLMULQDQ (x86_64 AVX2).
 
 `no-std` compatible. Default execution paths are constant-time (unproved) against side-channel
 attacks. The type system separates canonical (tower) from polynomial (flat/hardware) representations.
@@ -72,7 +72,7 @@ Reproduce with `cargo bench --features table-math`, or `cargo bench` for the def
 
 ```toml
 [dependencies]
-hekate-math = "0.9"
+hekate-math = "0.11"
 ```
 
 ## Examples
@@ -186,65 +186,29 @@ fn example_fft() {
 }
 ```
 
-## Theoretical Foundation
+## Tower Construction
 
-`hekate-math` implements a binary tower field architecture:
-𝔽(2^(2^(i+1))) ≅ 𝔽(2^(2^i))[v] / (v² + v + βᵢ), where βᵢ is that level's extension constant
-(`EXTENSION_TAU`). Each block is a (Low, High) pair of the level below.
+𝔽(2^(2^(i+1))) ≅ 𝔽(2^(2^i))[v] / (v² + v + βᵢ), where βᵢ is that level's
+`EXTENSION_TAU`. Each block is a (Low, High) pair of the level below. The
+tower is rooted at 𝔽(2^8) (AES field), not 𝔽₂: `Bit` is an embedded subfield,
+making this a hybrid tower.
 
-| Height | Field     | Implementation | Extension Constant (β)                        | Arithmetic            |
-|:-------|:----------|:---------------|:----------------------------------------------|:----------------------|
-| 0      | 𝔽₂       | `Bit`          | N/A                                           | Boolean (XOR/AND)     |
-| 3      | 𝔽(2^8)   | `Block8`       | *Base Field* (AES Poly)                       | Recursive / Karatsuba |
-| 4      | 𝔽(2^16)  | `Block16`      | 0x20 ∈ Block8                                 | Recursive / Karatsuba |
-| 5      | 𝔽(2^32)  | `Block32`      | 0x2000 ∈ Block16                              | Recursive / Karatsuba |
-| 6      | 𝔽(2^64)  | `Block64`      | 0x20000000 ∈ Block32                          | Recursive / Karatsuba |
-| 7      | 𝔽(2^128) | `Block128`     | 0x2000000000000000 ∈ Block64                  | Recursive / Karatsuba |
-| 8      | 𝔽(2^256) | `Block256`     | 0x20000000000000000000000000000000 ∈ Block128 | Recursive / Karatsuba |
+| Height | Field     | Implementation | Extension Constant (β)                        |
+|:-------|:----------|:---------------|:----------------------------------------------|
+| 0      | 𝔽₂       | `Bit`          | N/A                                           |
+| 3      | 𝔽(2^8)   | `Block8`       | *Base field* (AES poly)                       |
+| 4      | 𝔽(2^16)  | `Block16`      | 0x20 ∈ Block8                                 |
+| 5      | 𝔽(2^32)  | `Block32`      | 0x2000 ∈ Block16                              |
+| 6      | 𝔽(2^64)  | `Block64`      | 0x20000000 ∈ Block32                          |
+| 7      | 𝔽(2^128) | `Block128`     | 0x2000000000000000 ∈ Block64                  |
+| 8      | 𝔽(2^256) | `Block256`     | 0x20000000000000000000000000000000 ∈ Block128 |
 
-*Note: The tower is rooted at F(2^8) (AES Field) for hardware compatibility. Lower fields (Bit)
-are subfields embedded via isomorphism, making this a Hybrid Tower construction.*
+## The Two Bases
 
-## The Isomorphic Basis Architecture
-
-Two representations of the same field. Canonical values stay in `F`; hardware/polynomial
-values are `Flat<F>`. Recursion is cheap in the first, CLMUL is cheap in the second.
-
-### Canonical Basis (Tower)
-
-The default representation optimized for recursive algebraic operations. Elements
-are structured as linear polynomials A(v) = a₁v + a₀ over the subfield.
-
-* Recursive coefficients (a_hi, a_lo).
-* Karatsuba Multiplication (3 sub-multiplications).
-* Standard layout (Little-Endian).
-
-### Polynomial Basis (Flat)
-
-An isomorphic representation mapping the tower structure to a dense polynomial
-basis (1, x, x²...) optimized for specific CPU instruction sets (AES-NI, PMULL, PCLMULQDQ).
-
-* Linear bit-packed integers (`u8`, `u64`, `u128`).
-* Single-cycle Carry-Less Multiplication (`CLMUL`) with hardware-accelerated reduction.
-
-### Isomorphism & Interop
-
-`Flat<F>` and `F` are distinct types. Mixing them is a compile error.
-
-The Isomorphism φ is defined as: φ: 𝔽(Tower) ↔ 𝔽(Hardware)
-
-```rust
-pub trait HardwareField: TowerField + PackableField {
-    fn to_hardware(self) -> Flat<Self>;
-    fn from_hardware(value: Flat<Self>) -> Self;
-    fn add_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self>;
-    fn mul_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self>;
-    fn tower_bit_from_hardware(value: Flat<Self>, bit_idx: usize) -> u8;
-}
-```
-
-*Change-of-basis matrices are pre-computed constant-time bit-sliced operations by default, with an optional
-`table-math` feature for cached lookups.*
+φ: 𝔽(Tower) ↔ 𝔽(Hardware). Canonical values stay in `F`, hardware values in
+`Flat<F>`. The two are distinct types; mixing them is a compile error.
+Recursion is cheap in the first basis, CLMUL in the second. Change-of-basis
+matrices are constant-time bit-sliced by default, cached lookups under `table-math`.
 
 ## Security Model
 
@@ -259,10 +223,10 @@ Timing behaviour is a build-time choice. Pick per deployment.
 
 * **Basis Conversion**: By default, φ and φ⁻¹ are computed using constant-time bit-sliced matrix
   multiplication, independent of the input value.
-* **Hardware Arithmetic**: `Block128` multiplication uses carry-less multiply (`PMULL` on ARMv8,
-  `PCLMULQDQ` on x86_64), constant-latency on current microarchitectures.
+* **Hardware Arithmetic**: carry-less multiply (`PMULL`, `PCLMULQDQ`), constant-latency on current
+  microarchitectures. `Block64::mul` takes it in every build, `Block128::mul` under `table-math`.
 * **Tower Arithmetic**: `table-math` replaces `Block8::mul`, `square` and `mul_tau` with lookup
-  tables and a zero-operand branch. Multiplies at 64 and up take the `pmull` route instead.
+  tables and a zero-operand branch.
 
 ## Formal Verification
 
