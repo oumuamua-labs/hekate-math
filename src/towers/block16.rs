@@ -494,14 +494,10 @@ impl FlatPromote<Block8> for Block16 {
 
         #[cfg(not(feature = "table-math"))]
         {
-            let mut acc = 0u16;
-            for i in 0..8 {
-                let bit = (val.0 >> i) & 1;
-                let mask = 0u16.wrapping_sub(bit as u16);
-                acc ^= constants::LIFT_BASIS_8_TO_16[i] & mask;
-            }
-
-            Flat::from_raw(Block16(acc))
+            Flat::from_raw(Block16(lift_ct_16::<8>(
+                val.0 as u16,
+                &constants::LIFT_BASIS_8_TO_16,
+            )))
         }
 
         #[cfg(feature = "table-math")]
@@ -544,6 +540,23 @@ pub fn apply_matrix_16(val: Block16, table: &[u16; 512]) -> Block16 {
     }
 
     Block16(res)
+}
+
+#[cfg(not(feature = "table-math"))]
+#[inline(always)]
+fn lift_ct_16<const N: usize>(x: u16, basis: &[u16; N]) -> u16 {
+    let mut acc = 0u16;
+    let mut i = 0usize;
+
+    while i < N {
+        let bit = (x >> i) & 1;
+        let mask = 0u16.wrapping_sub(bit);
+
+        acc ^= basis[i] & mask;
+        i += 1;
+    }
+
+    acc
 }
 
 #[inline(always)]
@@ -1069,6 +1082,18 @@ mod tests {
             }
 
             assert_eq!(c_packed.0, c_expected, "SIMD Block16 mismatch!");
+        }
+    }
+
+    #[test]
+    fn promote_block8_matches_embedding() {
+        for v in 0u16..256 {
+            let x = Block8(v as u8);
+            assert_eq!(
+                <Block16 as FlatPromote<Block8>>::promote_flat(x.to_hardware()),
+                Block16::from(x).to_hardware(),
+                "Block8 -> Block16 promote mismatch at {v:#04x}"
+            );
         }
     }
 

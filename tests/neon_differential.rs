@@ -627,26 +627,35 @@ where
 
 #[test]
 fn promote_batch_8_to_128_basis_exhaustive() {
-    promote_basis_exhaustive::<Block8, 2>(|v, pos| Block8(v << (4 * pos)), "promote 8→128");
-    promote_random_batches(|r| Block8(r.random()), 0x08128, "promote 8→128");
+    promote_basis_exhaustive::<Block8, 2>(|v, pos| Block8(v << (4 * pos)), "promote 8->128");
+    promote_random_batches(|r| Block8(r.random()), 0x08128, "promote 8->128");
 }
 
 #[test]
 fn promote_batch_16_to_128_basis_exhaustive() {
     promote_basis_exhaustive::<Block16, 4>(
         |v, pos| Block16((v as u16) << (4 * pos)),
-        "promote 16→128",
+        "promote 16->128",
     );
-    promote_random_batches(|r| Block16(r.random()), 0x16128, "promote 16→128");
+    promote_random_batches(|r| Block16(r.random()), 0x16128, "promote 16->128");
 }
 
 #[test]
 fn promote_batch_32_to_128_basis_exhaustive() {
     promote_basis_exhaustive::<Block32, 8>(
         |v, pos| Block32((v as u32) << (4 * pos)),
-        "promote 32→128",
+        "promote 32->128",
     );
-    promote_random_batches(|r| Block32(r.random()), 0x32128, "promote 32→128");
+    promote_random_batches(|r| Block32(r.random()), 0x32128, "promote 32->128");
+}
+
+#[test]
+fn promote_batch_64_to_128_basis_exhaustive() {
+    promote_basis_exhaustive::<Block64, 16>(
+        |v, pos| Block64((v as u64) << (4 * pos)),
+        "promote 64->128",
+    );
+    promote_random_batches(|r| Block64(r.random()), 0x64128, "promote 64->128");
 }
 
 // Block256 promotes delegate to the 128 kernels plus a zero
@@ -665,7 +674,7 @@ fn promote_to_256_batch_vs_scalar() {
             assert_eq!(
                 *got,
                 <Block256 as FlatPromote<Block8>>::promote_flat(input[l]),
-                "promote 8→256: lane {l}",
+                "promote 8->256: lane {l}",
             );
         }
     }

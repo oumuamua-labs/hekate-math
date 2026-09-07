@@ -564,34 +564,9 @@ impl FlatPromote<Block8> for Block128 {
         )))
     }
 
+    #[cfg(target_arch = "aarch64")]
     fn promote_flat_batch(input: &[Flat<Block8>], output: &mut [Flat<Self>]) {
-        let n = input.len().min(output.len());
-
-        #[cfg(target_arch = "aarch64")]
-        {
-            let full = n / 16;
-            for chunk in 0..full {
-                let i = chunk * 16;
-                unsafe {
-                    neon::promote_batch_8_to_128(
-                        input.as_ptr().add(i).cast::<u8>(),
-                        output.as_mut_ptr().add(i).cast::<u128>(),
-                    );
-                }
-            }
-
-            let tail = full * 16;
-            for i in tail..n {
-                output[i] = Self::promote_flat(input[i]);
-            }
-        }
-
-        #[cfg(not(target_arch = "aarch64"))]
-        {
-            for i in 0..n {
-                output[i] = Self::promote_flat(input[i]);
-            }
-        }
+        promote_batch_neon(input, output, neon::promote_batch_8_to_128);
     }
 }
 
@@ -605,34 +580,9 @@ impl FlatPromote<Block16> for Block128 {
         )))
     }
 
+    #[cfg(target_arch = "aarch64")]
     fn promote_flat_batch(input: &[Flat<Block16>], output: &mut [Flat<Self>]) {
-        let n = input.len().min(output.len());
-
-        #[cfg(target_arch = "aarch64")]
-        {
-            let full = n / 16;
-            for chunk in 0..full {
-                let i = chunk * 16;
-                unsafe {
-                    neon::promote_batch_16_to_128(
-                        input.as_ptr().add(i).cast::<u8>(),
-                        output.as_mut_ptr().add(i).cast::<u128>(),
-                    );
-                }
-            }
-
-            let tail = full * 16;
-            for i in tail..n {
-                output[i] = Self::promote_flat(input[i]);
-            }
-        }
-
-        #[cfg(not(target_arch = "aarch64"))]
-        {
-            for i in 0..n {
-                output[i] = Self::promote_flat(input[i]);
-            }
-        }
+        promote_batch_neon(input, output, neon::promote_batch_16_to_128);
     }
 }
 
@@ -646,34 +596,9 @@ impl FlatPromote<Block32> for Block128 {
         )))
     }
 
+    #[cfg(target_arch = "aarch64")]
     fn promote_flat_batch(input: &[Flat<Block32>], output: &mut [Flat<Self>]) {
-        let n = input.len().min(output.len());
-
-        #[cfg(target_arch = "aarch64")]
-        {
-            let full = n / 16;
-            for chunk in 0..full {
-                let i = chunk * 16;
-                unsafe {
-                    neon::promote_batch_32_to_128(
-                        input.as_ptr().add(i).cast::<u8>(),
-                        output.as_mut_ptr().add(i).cast::<u128>(),
-                    );
-                }
-            }
-
-            let tail = full * 16;
-            for i in tail..n {
-                output[i] = Self::promote_flat(input[i]);
-            }
-        }
-
-        #[cfg(not(target_arch = "aarch64"))]
-        {
-            for i in 0..n {
-                output[i] = Self::promote_flat(input[i]);
-            }
-        }
+        promote_batch_neon(input, output, neon::promote_batch_32_to_128);
     }
 }
 
@@ -685,6 +610,11 @@ impl FlatPromote<Block64> for Block128 {
             val.into_raw().0,
             &constants::LIFT_BASIS_64.0,
         )))
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn promote_flat_batch(input: &[Flat<Block64>], output: &mut [Flat<Self>]) {
+        promote_batch_neon(input, output, neon::promote_batch_64_to_128);
     }
 }
 
@@ -829,6 +759,34 @@ fn lift_ct<const N: usize>(x: u64, basis: &'static [u128; N]) -> u128 {
     acc
 }
 
+#[cfg(all(target_arch = "aarch64", not(feature = "table-math")))]
+#[inline(always)]
+fn promote_batch_neon<Src>(
+    input: &[Flat<Src>],
+    output: &mut [Flat<Block128>],
+    kernel: unsafe fn(*const u8, *mut u128),
+) where
+    Src: HardwareField,
+    Block128: FlatPromote<Src>,
+{
+    let n = input.len().min(output.len());
+    let full = n / 16;
+
+    for chunk in 0..full {
+        let i = chunk * 16;
+        unsafe {
+            kernel(
+                input.as_ptr().add(i).cast::<u8>(),
+                output.as_mut_ptr().add(i).cast::<u128>(),
+            );
+        }
+    }
+
+    for i in full * 16..n {
+        output[i] = <Block128 as FlatPromote<Src>>::promote_flat(input[i]);
+    }
+}
+
 // ===========================================
 // 128-BIT SIMD INSTRUCTIONS
 // ===========================================
@@ -924,7 +882,11 @@ mod neon {
     }
 
     /// CT packed promote:
-    /// 16 × Block8 → 16 × Block128 via nibble decomposition.
+    /// 16 × Block8 -> 16 × Block128 via nibble decomposition.
+    ///
+    /// # Safety
+    /// `input` must be readable for 16 `u8`,
+    /// `output` writable for 16 `u128`.
     #[cfg(not(feature = "table-math"))]
     #[inline(always)]
     pub unsafe fn promote_batch_8_to_128(input: *const u8, output: *mut u128) {
@@ -971,7 +933,11 @@ mod neon {
     }
 
     /// CT packed promote:
-    /// 16 × Block16 → 16 × Block128 via nibble decomposition.
+    /// 16 × Block16 -> 16 × Block128 via nibble decomposition.
+    ///
+    /// # Safety
+    /// `input` must be readable for 16 `u16`,
+    /// `output` writable for 16 `u128`.
     #[cfg(not(feature = "table-math"))]
     #[inline(always)]
     pub unsafe fn promote_batch_16_to_128(input: *const u8, output: *mut u128) {
@@ -1029,7 +995,11 @@ mod neon {
     }
 
     /// CT packed promote:
-    /// 16 × Block32 → 16 × Block128 via nibble decomposition.
+    /// 16 × Block32 -> 16 × Block128 via nibble decomposition.
+    ///
+    /// # Safety
+    /// `input` must be readable for 16 `u32`,
+    /// `output` writable for 16 `u128`.
     #[cfg(not(feature = "table-math"))]
     #[inline(always)]
     pub unsafe fn promote_batch_32_to_128(input: *const u8, output: *mut u128) {
@@ -1102,6 +1072,142 @@ mod neon {
             lookup!(13, n0, n1, n2, n3, n4, n5, n6, n7, out);
             lookup!(14, n0, n1, n2, n3, n4, n5, n6, n7, out);
             lookup!(15, n0, n1, n2, n3, n4, n5, n6, n7, out);
+
+            let elems = transpose_16x16(&out);
+            for (i, elem) in elems.iter().enumerate() {
+                vst1q_u8(output.add(i).cast::<u8>(), *elem);
+            }
+        }
+    }
+
+    /// CT packed promote:
+    /// 16 × Block64 -> 16 × Block128 via nibble decomposition.
+    ///
+    /// # Safety
+    /// `input` must be readable for 16 `u64`,
+    /// `output` writable for 16 `u128`.
+    #[cfg(not(feature = "table-math"))]
+    #[inline(always)]
+    pub unsafe fn promote_batch_64_to_128(input: *const u8, output: *mut u128) {
+        unsafe {
+            let raw0 = vld1q_u8(input);
+            let raw1 = vld1q_u8(input.add(16));
+            let raw2 = vld1q_u8(input.add(32));
+            let raw3 = vld1q_u8(input.add(48));
+            let raw4 = vld1q_u8(input.add(64));
+            let raw5 = vld1q_u8(input.add(80));
+            let raw6 = vld1q_u8(input.add(96));
+            let raw7 = vld1q_u8(input.add(112));
+
+            let e01 = vuzp1q_u8(raw0, raw1);
+            let o01 = vuzp2q_u8(raw0, raw1);
+            let e23 = vuzp1q_u8(raw2, raw3);
+            let o23 = vuzp2q_u8(raw2, raw3);
+            let e45 = vuzp1q_u8(raw4, raw5);
+            let o45 = vuzp2q_u8(raw4, raw5);
+            let e67 = vuzp1q_u8(raw6, raw7);
+            let o67 = vuzp2q_u8(raw6, raw7);
+
+            let e0_lo = vuzp1q_u8(e01, e23);
+            let e2_lo = vuzp2q_u8(e01, e23);
+            let o1_lo = vuzp1q_u8(o01, o23);
+            let o3_lo = vuzp2q_u8(o01, o23);
+            let e0_hi = vuzp1q_u8(e45, e67);
+            let e2_hi = vuzp2q_u8(e45, e67);
+            let o1_hi = vuzp1q_u8(o45, o67);
+            let o3_hi = vuzp2q_u8(o45, o67);
+
+            let byte0 = vuzp1q_u8(e0_lo, e0_hi);
+            let byte4 = vuzp2q_u8(e0_lo, e0_hi);
+            let byte1 = vuzp1q_u8(o1_lo, o1_hi);
+            let byte5 = vuzp2q_u8(o1_lo, o1_hi);
+            let byte2 = vuzp1q_u8(e2_lo, e2_hi);
+            let byte6 = vuzp2q_u8(e2_lo, e2_hi);
+            let byte3 = vuzp1q_u8(o3_lo, o3_hi);
+            let byte7 = vuzp2q_u8(o3_lo, o3_hi);
+
+            let mask_0f = vdupq_n_u8(0x0F);
+            let nib = [
+                vandq_u8(byte0, mask_0f),
+                vshrq_n_u8::<4>(byte0),
+                vandq_u8(byte1, mask_0f),
+                vshrq_n_u8::<4>(byte1),
+                vandq_u8(byte2, mask_0f),
+                vshrq_n_u8::<4>(byte2),
+                vandq_u8(byte3, mask_0f),
+                vshrq_n_u8::<4>(byte3),
+                vandq_u8(byte4, mask_0f),
+                vshrq_n_u8::<4>(byte4),
+                vandq_u8(byte5, mask_0f),
+                vshrq_n_u8::<4>(byte5),
+                vandq_u8(byte6, mask_0f),
+                vshrq_n_u8::<4>(byte6),
+                vandq_u8(byte7, mask_0f),
+                vshrq_n_u8::<4>(byte7),
+            ];
+
+            let mut out = [vdupq_n_u8(0); 16];
+
+            macro_rules! lookup {
+                ($j:expr, $nib:ident, $dst:ident) => {{
+                    let t0 = vld1q_u8(constants::NIBBLE_PROMOTE_64_0_TO_128[$j].as_ptr());
+                    let t1 = vld1q_u8(constants::NIBBLE_PROMOTE_64_1_TO_128[$j].as_ptr());
+                    let t2 = vld1q_u8(constants::NIBBLE_PROMOTE_64_2_TO_128[$j].as_ptr());
+                    let t3 = vld1q_u8(constants::NIBBLE_PROMOTE_64_3_TO_128[$j].as_ptr());
+                    let t4 = vld1q_u8(constants::NIBBLE_PROMOTE_64_4_TO_128[$j].as_ptr());
+                    let t5 = vld1q_u8(constants::NIBBLE_PROMOTE_64_5_TO_128[$j].as_ptr());
+                    let t6 = vld1q_u8(constants::NIBBLE_PROMOTE_64_6_TO_128[$j].as_ptr());
+                    let t7 = vld1q_u8(constants::NIBBLE_PROMOTE_64_7_TO_128[$j].as_ptr());
+                    let t8 = vld1q_u8(constants::NIBBLE_PROMOTE_64_8_TO_128[$j].as_ptr());
+                    let t9 = vld1q_u8(constants::NIBBLE_PROMOTE_64_9_TO_128[$j].as_ptr());
+                    let t10 = vld1q_u8(constants::NIBBLE_PROMOTE_64_10_TO_128[$j].as_ptr());
+                    let t11 = vld1q_u8(constants::NIBBLE_PROMOTE_64_11_TO_128[$j].as_ptr());
+                    let t12 = vld1q_u8(constants::NIBBLE_PROMOTE_64_12_TO_128[$j].as_ptr());
+                    let t13 = vld1q_u8(constants::NIBBLE_PROMOTE_64_13_TO_128[$j].as_ptr());
+                    let t14 = vld1q_u8(constants::NIBBLE_PROMOTE_64_14_TO_128[$j].as_ptr());
+                    let t15 = vld1q_u8(constants::NIBBLE_PROMOTE_64_15_TO_128[$j].as_ptr());
+
+                    $dst[$j] = veorq_u8(
+                        veorq_u8(
+                            veorq_u8(
+                                veorq_u8(vqtbl1q_u8(t0, $nib[0]), vqtbl1q_u8(t1, $nib[1])),
+                                veorq_u8(vqtbl1q_u8(t2, $nib[2]), vqtbl1q_u8(t3, $nib[3])),
+                            ),
+                            veorq_u8(
+                                veorq_u8(vqtbl1q_u8(t4, $nib[4]), vqtbl1q_u8(t5, $nib[5])),
+                                veorq_u8(vqtbl1q_u8(t6, $nib[6]), vqtbl1q_u8(t7, $nib[7])),
+                            ),
+                        ),
+                        veorq_u8(
+                            veorq_u8(
+                                veorq_u8(vqtbl1q_u8(t8, $nib[8]), vqtbl1q_u8(t9, $nib[9])),
+                                veorq_u8(vqtbl1q_u8(t10, $nib[10]), vqtbl1q_u8(t11, $nib[11])),
+                            ),
+                            veorq_u8(
+                                veorq_u8(vqtbl1q_u8(t12, $nib[12]), vqtbl1q_u8(t13, $nib[13])),
+                                veorq_u8(vqtbl1q_u8(t14, $nib[14]), vqtbl1q_u8(t15, $nib[15])),
+                            ),
+                        ),
+                    );
+                }};
+            }
+
+            lookup!(0, nib, out);
+            lookup!(1, nib, out);
+            lookup!(2, nib, out);
+            lookup!(3, nib, out);
+            lookup!(4, nib, out);
+            lookup!(5, nib, out);
+            lookup!(6, nib, out);
+            lookup!(7, nib, out);
+            lookup!(8, nib, out);
+            lookup!(9, nib, out);
+            lookup!(10, nib, out);
+            lookup!(11, nib, out);
+            lookup!(12, nib, out);
+            lookup!(13, nib, out);
+            lookup!(14, nib, out);
+            lookup!(15, nib, out);
 
             let elems = transpose_16x16(&out);
             for (i, elem) in elems.iter().enumerate() {
@@ -1753,11 +1859,11 @@ mod tests {
     #[test]
     fn promote_flat_batch_matches_scalar_block64() {
         let mut rng = rng();
-        let input: Vec<Flat<Block64>> = (0..8)
+        let input: Vec<Flat<Block64>> = (0..40)
             .map(|_| Block64(rng.random::<u64>()).to_hardware())
             .collect();
 
-        let mut batch_out = vec![Flat::from_raw(Block128::ZERO); 8];
+        let mut batch_out = vec![Flat::from_raw(Block128::ZERO); 40];
         Block128::promote_flat_batch(&input, &mut batch_out);
 
         for (i, &v) in input.iter().enumerate() {
