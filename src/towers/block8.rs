@@ -705,6 +705,66 @@ const fn generate_tau_table() -> [u8; 256] {
     table
 }
 
+#[cfg(feature = "table-math")]
+const fn gf8_mul_const(mut a: u8, mut b: u8) -> u8 {
+    let mut res = 0u8;
+    let mut i = 0;
+
+    while i < 8 {
+        if b & 1 == 1 {
+            res ^= a;
+        }
+
+        let carry = a & 0x80;
+
+        a <<= 1;
+
+        if carry != 0 {
+            a ^= 0x1B;
+        }
+
+        b >>= 1;
+        i += 1;
+    }
+
+    res
+}
+
+#[cfg(feature = "table-math")]
+const _: () = {
+    assert!(EXP_TABLE[0] == 1, "EXP_TABLE[0] is not g^0");
+
+    let mut x: usize = 0;
+    while x < 256 {
+        assert!(
+            TAU_TABLE[x] == gf8_mul_const(x as u8, <Block8 as TowerField>::EXTENSION_TAU.0),
+            "TAU_TABLE is not multiplication by EXTENSION_TAU"
+        );
+
+        if x < 255 {
+            assert!(
+                EXP_TABLE[x + 1] == gf8_mul_const(EXP_TABLE[x], 3),
+                "EXP_TABLE is not the power chain of the generator 3"
+            );
+        }
+
+        if x != 0 {
+            let i = LOG_TABLE[x] as usize;
+
+            assert!(
+                EXP_TABLE[i] as usize == x,
+                "EXP_TABLE does not invert LOG_TABLE"
+            );
+            assert!(
+                gf8_mul_const(x as u8, EXP_TABLE[255 - i]) == 1,
+                "EXP_TABLE[255 - LOG_TABLE[x]] is not the inverse of x"
+            );
+        }
+
+        x += 1;
+    }
+};
+
 // ===========================================
 // 8-BIT SIMD INSTRUCTIONS
 // ===========================================

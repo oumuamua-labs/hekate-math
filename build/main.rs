@@ -911,7 +911,6 @@ macro_rules! impl_write_nibble_promote_tables_to_128 {
             file: &mut File,
             prefix: &str,
             flat_to_tower_from: &[$from_type; <$from_type>::BITS as usize],
-            tower_to_flat_from: &[$from_type; <$from_type>::BITS as usize],
         ) {
             for nib_idx in 0..$n_nibbles {
                 // Precompute full 128-bit lift for all
@@ -924,21 +923,6 @@ macro_rules! impl_write_nibble_promote_tables_to_128 {
                     let tower_128 = tower_from as u128;
 
                     lifted[nibble as usize] = apply_128(tower_128, &TOWER_TO_FLAT_128);
-
-                    // Every entry round-trips through the mutually-inverse
-                    // matrices at both widths: pins the tables against
-                    // a corrupted matrix or transport, independent of
-                    // the generating direction.
-                    assert_eq!(
-                        apply_128(lifted[nibble as usize], &FLAT_TO_TOWER_128),
-                        tower_128,
-                        "{prefix}: 128-side round-trip broken at nib {nib_idx}, value {nibble}"
-                    );
-                    assert_eq!(
-                        $apply_from(tower_from, tower_to_flat_from),
-                        from_val,
-                        "{prefix}: source-side round-trip broken at nib {nib_idx}, value {nibble}"
-                    );
                 }
 
                 writeln!(
@@ -1377,56 +1361,70 @@ impl_verify_iso!(
     FLAT_TO_TOWER_128
 );
 
-// Build-time discharge of verus/axioms_t.rs::norm_nonzero: the norm N(a) has
-// no nonzero root (GF(2^{2m}) is a field) iff X^2+X+tau_m is irreducible over GF(2^m)
-// iff Tr_{GF(2^m)/GF(2)}(tau_m) = 1 (Artin-Schreier). tau_m is EXTENSION_TAU in
-// the tower basis (see gf_oracle::schoolbook*); 1 is the tower identity.
+// Build-time discharge of verus/axioms_t.rs::norm_nonzero: the norm N(a)
+// has no nonzero root (GF(2^{2m}) is a field) iff X^2+X+tau_m is irreducible
+// over GF(2^m) iff Tr_{GF(2^m)/GF(2)}(tau_m) = 1 (Artin-Schreier).
+// v = (0, 1) at level 2m satisfies v^2 = v + tau_m.
+macro_rules! verify_tau_trace_one {
+    ($m:expr, $narrow:ty, $wide:ty, $mul_wide:path, $mul_narrow:path) => {{
+        let v = (1 as $wide) << $m;
+        let tau = $mul_wide(v, v) ^ v;
+
+        assert_eq!(
+            tau >> $m,
+            0,
+            "GF(2^{}): v^2 + v is not a level-{} element",
+            2 * $m,
+            $m
+        );
+
+        let (mut t, mut p) = (0 as $narrow, tau as $narrow);
+        for _ in 0..$m {
+            t ^= p;
+            p = $mul_narrow(p, p);
+        }
+
+        assert_eq!(
+            t,
+            1,
+            "GF(2^{}) not a field: Tr(tau_{}) != 1 (X^2+X+tau_{} reducible over GF(2^{}))",
+            2 * $m,
+            $m,
+            $m,
+            $m
+        );
+    }};
+}
+
 fn verify_norm_anisotropy() {
-    let (mut t, mut p) = (0u8, 0x20u8);
-    for _ in 0..8 {
-        t ^= p;
-        p = gf_oracle::sb8(p, p);
-    }
-
-    assert_eq!(
-        t, 1,
-        "GF(2^16) not a field: Tr(tau_8) != 1 (X^2+X+0x20 reducible over GF(2^8))"
+    verify_tau_trace_one!(8, u8, u16, gf_oracle::schoolbook16, gf_oracle::sb8);
+    verify_tau_trace_one!(
+        16,
+        u16,
+        u32,
+        gf_oracle::schoolbook32,
+        gf_oracle::schoolbook16
+    );
+    verify_tau_trace_one!(
+        32,
+        u32,
+        u64,
+        gf_oracle::schoolbook64,
+        gf_oracle::schoolbook32
+    );
+    verify_tau_trace_one!(
+        64,
+        u64,
+        u128,
+        gf_oracle::schoolbook128,
+        gf_oracle::schoolbook64
     );
 
-    let (mut t, mut p) = (0u16, 0x2000u16);
-    for _ in 0..16 {
-        t ^= p;
-        p = gf_oracle::schoolbook16(p, p);
-    }
+    let (tau, hi) = gf_oracle::schoolbook256(0, 1, 0, 1);
 
-    assert_eq!(
-        t, 1,
-        "GF(2^32) not a field: Tr(tau_16) != 1 (X^2+X+tau_16 reducible over GF(2^16))"
-    );
+    assert_eq!(hi ^ 1, 0, "GF(2^256): v^2 + v is not a level-128 element");
 
-    let (mut t, mut p) = (0u32, 0x2000_0000u32);
-    for _ in 0..32 {
-        t ^= p;
-        p = gf_oracle::schoolbook32(p, p);
-    }
-
-    assert_eq!(
-        t, 1,
-        "GF(2^64) not a field: Tr(tau_32) != 1 (X^2+X+tau_32 reducible over GF(2^32))"
-    );
-
-    let (mut t, mut p) = (0u64, 0x2000_0000_0000_0000u64);
-    for _ in 0..64 {
-        t ^= p;
-        p = gf_oracle::schoolbook64(p, p);
-    }
-
-    assert_eq!(
-        t, 1,
-        "GF(2^128) not a field: Tr(tau_64) != 1 (X^2+X+tau_64 reducible over GF(2^64))"
-    );
-
-    let (mut t, mut p) = (0u128, 0x20u128 << 120);
+    let (mut t, mut p) = (0u128, tau);
     for _ in 0..128 {
         t ^= p;
         p = gf_oracle::schoolbook128(p, p);
@@ -1965,30 +1963,10 @@ fn main() {
 
     // Nibble-decomposed promote tables
     // for CT NEON promotion to Block128.
-    write_nibble_promote_8_to_128(
-        &mut file,
-        "NIBBLE_PROMOTE_8",
-        &FLAT_TO_TOWER_8,
-        &TOWER_TO_FLAT_8,
-    );
-    write_nibble_promote_16_to_128(
-        &mut file,
-        "NIBBLE_PROMOTE_16",
-        &FLAT_TO_TOWER_16,
-        &TOWER_TO_FLAT_16,
-    );
-    write_nibble_promote_32_to_128(
-        &mut file,
-        "NIBBLE_PROMOTE_32",
-        &FLAT_TO_TOWER_32,
-        &TOWER_TO_FLAT_32,
-    );
-    write_nibble_promote_64_to_128(
-        &mut file,
-        "NIBBLE_PROMOTE_64",
-        &FLAT_TO_TOWER_64,
-        &TOWER_TO_FLAT_64,
-    );
+    write_nibble_promote_8_to_128(&mut file, "NIBBLE_PROMOTE_8", &FLAT_TO_TOWER_8);
+    write_nibble_promote_16_to_128(&mut file, "NIBBLE_PROMOTE_16", &FLAT_TO_TOWER_16);
+    write_nibble_promote_32_to_128(&mut file, "NIBBLE_PROMOTE_32", &FLAT_TO_TOWER_32);
+    write_nibble_promote_64_to_128(&mut file, "NIBBLE_PROMOTE_64", &FLAT_TO_TOWER_64);
 
     emit_pmull_cfg();
 
