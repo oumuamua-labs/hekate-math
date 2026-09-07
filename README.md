@@ -230,14 +230,11 @@ Timing behaviour is a build-time choice. Pick per deployment.
 
 ## Formal Verification
 
-[`verus/`](verus/README.md) holds standalone [Verus](https://github.com/verus-lang/verus) proofs:
-2079 obligations, 0 errors, 15 units. The tower `mul` cascade refines schoolbook GF(2^k) at every
-level, the NEON flat kernels and constant-time basis conversions are proven equal to `gf_mul`, and
-the additive FFT round-trips. Excluded from the crate build; run `verus/verify.sh`.
-
-Trust boundary: four `external_body` axioms, each discharged by an exhaustive `build/main.rs`
-check on every `cargo build`, plus the kernel↔twin transcription seams. `tests/neon_differential.rs`
-covers the seams on silicon. Registered in [`verus/TRUSTED_AXIOMS.md`](verus/TRUSTED_AXIOMS.md).
+[`verus/`](verus/README.md) holds standalone [Verus](https://github.com/verus-lang/verus) proofs,
+outside the crate build: 2872 obligations, 0 errors, 17 units. Tower `mul` and `invert`, the NEON
+kernels, the constant-time conversions and batch promotes, and the additive FFT are proven against
+the GF(2^k) model, relative to four build-discharged axioms and the transcription seams registered in
+[`verus/TRUSTED_AXIOMS.md`](verus/TRUSTED_AXIOMS.md).
 
 ## Hardware Support
 
