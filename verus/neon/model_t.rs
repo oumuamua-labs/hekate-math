@@ -155,8 +155,8 @@ pub open spec fn vuzp2_m<T>(a: Seq<T>, b: Seq<T>) -> Seq<T> {
 // The little-endian transmute view (AAPCS64)
 // ============================================================
 
-// u128 <-> uint64x2_t: vgetq_lane_u64(transmute(x), 0) is the
-// low 64 bits, lane 1 the high.
+// u128 <-> uint64x2_t: vgetq_lane_u64(transmute(x), 0)
+// is the low 64 bits, lane 1 the high.
 pub open spec fn lo64(x: u128) -> u64 {
     x as u64
 }
@@ -172,6 +172,46 @@ pub open spec fn lo8(x: u16) -> u8 {
 
 pub open spec fn hi8(x: u16) -> u8 {
     (x >> 8) as u8
+}
+
+pub open spec fn lanes16(v: Seq<u8>) -> Seq<u16> {
+    Seq::new(v.len() / 2, |l: int| (v[2 * l] as u16) | ((v[2 * l + 1] as u16) << 8))
+}
+
+pub open spec fn bytes16(s: Seq<u16>) -> Seq<u8> {
+    Seq::new(2 * s.len(), |i: int| (s[i / 2] >> ((8 * (i % 2)) as u16)) as u8)
+}
+
+pub open spec fn lanes32(v: Seq<u8>) -> Seq<u32> {
+    Seq::new(
+        v.len() / 4,
+        |l: int|
+            (v[4 * l] as u32) | ((v[4 * l + 1] as u32) << 8) | ((v[4 * l + 2] as u32) << 16)
+                | ((v[4 * l + 3] as u32) << 24),
+    )
+}
+
+pub open spec fn bytes32(s: Seq<u32>) -> Seq<u8> {
+    Seq::new(4 * s.len(), |i: int| (s[i / 4] >> ((8 * (i % 4)) as u32)) as u8)
+}
+
+pub open spec fn lanes64(v: Seq<u8>) -> Seq<u64> {
+    Seq::new(
+        v.len() / 8,
+        |l: int|
+            (v[8 * l] as u64) | ((v[8 * l + 1] as u64) << 8) | ((v[8 * l + 2] as u64) << 16)
+                | ((v[8 * l + 3] as u64) << 24) | ((v[8 * l + 4] as u64) << 32)
+                | ((v[8 * l + 5] as u64) << 40) | ((v[8 * l + 6] as u64) << 48)
+                | ((v[8 * l + 7] as u64) << 56),
+    )
+}
+
+pub open spec fn bytes64(s: Seq<u64>) -> Seq<u8> {
+    Seq::new(8 * s.len(), |i: int| (s[i / 8] >> ((8 * (i % 8)) as u64)) as u8)
+}
+
+pub open spec fn u128_bytes(x: u128) -> Seq<u8> {
+    Seq::new(16, |i: int| (x >> ((8 * i) as u128)) as u8)
 }
 
 fn main() {

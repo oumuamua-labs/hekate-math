@@ -163,7 +163,7 @@ proof fn clmul8_bridge(a: u8, b: u8)
 }
 
 // gf_model::xor on 8-bit values is native ^ (the u8 twin of xor16).
-proof fn xor8(x: u8, y: u8)
+pub proof fn xor8(x: u8, y: u8)
     ensures gf_model::xor(x as nat, y as nat) == (x ^ y) as nat
     decreases x as nat + y as nat
 {
@@ -343,7 +343,7 @@ proof fn reduce8_bridge(y: u16)
 
 // Leaf: the u8 production oracle equals the nat field model at GF(2^8).
 // schoolbook8 = reduce8 ∘ clmul8; gf_mul_tower bottoms out at gf_mul = pmod ∘ clmul.
-proof fn bridge8(a: u8, b: u8)
+pub proof fn bridge8(a: u8, b: u8)
     ensures schoolbook8(a, b) as nat == gf_mul_tower(a as nat, b as nat, 8),
 {
     clmul8_bridge(a, b);
@@ -352,7 +352,7 @@ proof fn bridge8(a: u8, b: u8)
 }
 
 // Split/pack a u16 into two u8 halves, matching lo_half/hi_half/pack at k = 16.
-proof fn split16(a: u16)
+pub proof fn split16(a: u16)
     ensures
         ((a & 0xff) as u8) as nat == (a as nat) % gf_model::pow2(8),
         ((a >> 8) as u8) as nat == (a as nat) / gf_model::pow2(8),
@@ -364,7 +364,7 @@ proof fn split16(a: u16)
     assert(a >> 8 == a / 256) by (bit_vector);
 }
 
-proof fn pack16(l: u8, h: u8)
+pub proof fn pack16(l: u8, h: u8)
     ensures ((l as u16) | ((h as u16) << 8)) as nat == (l as nat) + gf_model::pow2(8) * (h as nat),
 {
     assert(gf_model::pow2(8) == 256) by (compute);
@@ -401,7 +401,7 @@ pub proof fn bridge16(a: u16, b: u16)
     );
 }
 
-proof fn xor32(x: u32, y: u32)
+pub proof fn xor32(x: u32, y: u32)
     ensures gf_model::xor(x as nat, y as nat) == (x ^ y) as nat
     decreases x as nat + y as nat
 {
@@ -433,7 +433,7 @@ proof fn xor32(x: u32, y: u32)
     }
 }
 
-proof fn split32(a: u32)
+pub proof fn split32(a: u32)
     ensures
         ((a & 0xffff) as u16) as nat == (a as nat) % gf_model::pow2(16),
         ((a >> 16) as u16) as nat == (a as nat) / gf_model::pow2(16),
@@ -445,7 +445,7 @@ proof fn split32(a: u32)
     assert(a >> 16 == a / 0x10000) by (bit_vector);
 }
 
-proof fn pack32(l: u16, h: u16)
+pub proof fn pack32(l: u16, h: u16)
     ensures ((l as u32) | ((h as u32) << 16)) as nat == (l as nat) + gf_model::pow2(16) * (h as nat),
 {
     assert(gf_model::pow2(16) == 0x10000) by (compute);
@@ -481,7 +481,7 @@ pub proof fn bridge32(a: u32, b: u32)
     );
 }
 
-proof fn split64(a: u64)
+pub proof fn split64(a: u64)
     ensures
         ((a & 0xffffffff) as u32) as nat == (a as nat) % gf_model::pow2(32),
         ((a >> 32) as u32) as nat == (a as nat) / gf_model::pow2(32),
@@ -493,7 +493,7 @@ proof fn split64(a: u64)
     assert(a >> 32 == a / 0x1_0000_0000) by (bit_vector);
 }
 
-proof fn pack64(l: u32, h: u32)
+pub proof fn pack64(l: u32, h: u32)
     ensures ((l as u64) | ((h as u64) << 32)) as nat == (l as nat) + gf_model::pow2(32) * (h as nat),
 {
     assert(gf_model::pow2(32) == 0x1_0000_0000) by (compute);
@@ -530,7 +530,7 @@ pub proof fn bridge64(a: u64, b: u64)
     );
 }
 
-proof fn xor64(x: u64, y: u64)
+pub proof fn xor64(x: u64, y: u64)
     ensures gf_model::xor(x as nat, y as nat) == (x ^ y) as nat
     decreases x as nat + y as nat
 {
@@ -562,7 +562,7 @@ proof fn xor64(x: u64, y: u64)
     }
 }
 
-proof fn split128(a: u128)
+pub proof fn split128(a: u128)
     ensures
         ((a & 0xffffffffffffffff) as u64) as nat == (a as nat) % gf_model::pow2(64),
         ((a >> 64) as u64) as nat == (a as nat) / gf_model::pow2(64),
@@ -574,7 +574,7 @@ proof fn split128(a: u128)
     assert(a >> 64 == a / 0x1_0000_0000_0000_0000) by (bit_vector);
 }
 
-proof fn pack128(l: u64, h: u64)
+pub proof fn pack128(l: u64, h: u64)
     ensures ((l as u128) | ((h as u128) << 64)) as nat == (l as nat) + gf_model::pow2(64) * (h
         as nat),
 {
@@ -612,7 +612,7 @@ pub proof fn bridge128(a: u128, b: u128)
     );
 }
 
-proof fn xor128(x: u128, y: u128)
+pub proof fn xor128(x: u128, y: u128)
     ensures gf_model::xor(x as nat, y as nat) == (x ^ y) as nat
     decreases x as nat + y as nat
 {
@@ -646,7 +646,7 @@ proof fn xor128(x: u128, y: u128)
 
 // Lift 128 -> 256 (tau_tower(128) = 2^125). GF(2^256) has no native u256, the
 // element is the (lo, hi) pair of u128 limbs; the ensures packs it as lo + 2^128·hi.
-proof fn bridge256(alo: u128, ahi: u128, blo: u128, bhi: u128)
+pub proof fn bridge256(alo: u128, ahi: u128, blo: u128, bhi: u128)
     ensures
         (schoolbook256(alo, ahi, blo, bhi).0 as nat) + gf_model::pow2(128) * (schoolbook256(
             alo,
