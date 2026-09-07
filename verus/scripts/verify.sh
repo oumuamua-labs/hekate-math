@@ -1,19 +1,33 @@
 #!/usr/bin/env bash
+
 # nextest-style runner for the verus/ proof tree:
 # one PASS line per function discharged by the solver,
 # per proof unit, then the tool's own verified/error counts.
 #
 # Usage:
-#   verus/verify.sh # every unit under verus/
-#   verus/verify.sh verus/neon/flat.rs [...]
+#   verus/scripts/verify.sh # every unit under verus/
+#   verus/scripts/verify.sh verus/neon/flat.rs [...]
 #
+# Runs from the repo root; unit paths are repo-relative.
 # Binary resolution:
 # $VERUS, then `verus` on PATH.
+# VERUS_SEED=N sets the Z3 random seed.
 # Requires jq.
 set -uo pipefail
 
+cd "$(git rev-parse --show-toplevel)" || exit 2
+
 VERUS_BIN="${VERUS:-$(command -v verus || true)}"
 DELAY_S=$(awk "BEGIN { print ${VERIFY_DELAY_MS:-0} / 1000 }")
+SEED_ARGS=${VERUS_SEED:+--smt-option smt.random_seed=$VERUS_SEED}
+
+# Z3 silently ignores a malformed seed value.
+case "${VERUS_SEED:-0}" in
+  *[!0-9]*)
+    echo "error: VERUS_SEED must be an unsigned integer, got '$VERUS_SEED'" >&2
+    exit 2
+    ;;
+esac
 
 if [ -z "$VERUS_BIN" ]; then
   echo "error: verus not found; set VERUS=/path/to/verus" >&2
@@ -25,16 +39,47 @@ if ! command -v jq > /dev/null; then
   exit 2
 fi
 
+# Silent-shrink guard: bump with TRUSTED_AXIOMS.md.
+EXPECTED_EXTERNAL_BODY=4
+EXPECTED_VERIFIED=2872
+
+# The whole verifier::external* family is trusted;
+# only external_body, only in axioms_t.rs, only on its own line.
+EXTERNAL=$(grep -rnE --include='*.rs' '#\[verifier::external' verus || true)
+EXTERNAL_TOTAL=$(printf '%s\n' "$EXTERNAL" | grep -c .)
+EXTERNAL_BODY=$(printf '%s\n' "$EXTERNAL" \
+  | grep -cE '^verus/axioms_t\.rs:[0-9]+:[[:space:]]*#\[verifier::external_body\]$')
+
+if [ "$EXTERNAL_BODY" -ne "$EXPECTED_EXTERNAL_BODY" ] || [ "$EXTERNAL_TOTAL" -ne "$EXTERNAL_BODY" ]; then
+  echo "error: expected exactly $EXPECTED_EXTERNAL_BODY external_body items, all in verus/axioms_t.rs; found:" >&2
+  printf '%s\n' "$EXTERNAL" | sed 's/^/  /' >&2
+  exit 2
+fi
+
+# axiom fn verifies with no body;
+# it must never appear here.
+FORBIDDEN=$(grep -rnE --include='*.rs' \
+  '\badmit\(\)|\bassume\(|assume_specification|axiom[[:space:]]+fn' verus || true)
+
+if [ -n "$FORBIDDEN" ]; then
+  echo "error: unproven items under verus/:" >&2
+  echo "$FORBIDDEN" | sed 's/^/  /' >&2
+  exit 2
+fi
+
+FULL=0
+
 if [ "$#" -gt 0 ]; then
   FILES="$*"
 else
+  FULL=1
   FILES=$(find verus -name '*.rs' | sort)
   N=$(echo "$FILES" | wc -l | tr -d ' ')
 
   # Silent-shrink guard:
   # bump when adding or removing a proof file.
-  if [ "$N" -ne 16 ]; then
-    echo "error: expected 16 verus files, found $N" >&2
+  if [ "$N" -ne 18 ]; then
+    echo "error: expected 18 verus files, found $N" >&2
     exit 2
   fi
 
@@ -71,7 +116,8 @@ for f in $FILES; do
     echo "${BLD}${CYN}━━ ${f}${RST}"
   fi
 
-  JSON=$("$VERUS_BIN" "$f" --time-expanded --output-json 2> "$STDERR_LOG")
+  # shellcheck disable=SC2086
+  JSON=$("$VERUS_BIN" "$f" $SEED_ARGS --time-expanded --output-json 2> "$STDERR_LOG")
 
   OK=$(echo "$JSON" | jq -r '."verification-results".success // false')
   VERIFIED=$(echo "$JSON" | jq -r '."verification-results".verified // 0')
@@ -127,6 +173,12 @@ echo "${BLD}──────────────────────�
 
 if [ "$TOTAL_ERRORS" -eq 0 ] && [ "$UNITS_OK" -eq "$UNITS" ]; then
   echo "${BLD} Summary${RST} [${WALL}s] ${GRN}${BLD}${TOTAL_VERIFIED} verified${RST} · 0 errors · ${UNITS_OK}/${UNITS} units"
+
+  if [ "$FULL" -eq 1 ] && [ "$TOTAL_VERIFIED" -ne "$EXPECTED_VERIFIED" ]; then
+    echo "error: expected $EXPECTED_VERIFIED verified, got $TOTAL_VERIFIED; update EXPECTED_VERIFIED and README.md together" >&2
+    exit 1
+  fi
+
   exit 0
 fi
 

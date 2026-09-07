@@ -7,14 +7,22 @@ on:
     branches: [ main ]
 
 env:
-  VERUS_VERSION: "0.2026.07.05.49b8806"
+  VERUS_VERSION: "0.2026.08.30.b432e82"
 
 jobs:
   verify:
-    name: Verus verification
+    name: Verus verification (seed ${{ matrix.seed }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        seed: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
       - uses: actions/checkout@v5
+
+      - name: Oracle sync
+        if: matrix.seed == 0
+        run: ./verus/scripts/oracle_sync.sh
 
       - name: Cache Verus toolchain
         id: cache-verus
@@ -35,9 +43,9 @@ jobs:
           rm verus.zip
 
       # A Verus release links one exact rustc;
-      # 0.2026.07.05 requires 1.96.0.
+      # 0.2026.08.30 requires 1.97.1.
       - name: Install the Verus-pinned Rust toolchain
-        run: rustup toolchain install 1.96.0 --profile minimal
+        run: rustup toolchain install 1.97.1 --profile minimal
 
       - name: Locate verus binary
         id: verus-bin
@@ -50,4 +58,8 @@ jobs:
           "$bin" --version
 
       - name: Verify proofs
-        run: VERUS="${{ steps.verus-bin.outputs.bin }}" ./verus/verify.sh
+        run: VERUS="${{ steps.verus-bin.outputs.bin }}" VERUS_SEED="${{ matrix.seed }}" ./verus/scripts/verify.sh
+
+      - name: Negative controls
+        if: matrix.seed == 0
+        run: VERUS="${{ steps.verus-bin.outputs.bin }}" ./verus/scripts/negative_controls.sh
