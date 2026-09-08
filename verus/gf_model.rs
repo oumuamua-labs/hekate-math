@@ -108,7 +108,7 @@ pub open spec fn gf_mul(a: nat, b: nat, k: nat) -> nat {
     pmod(clmul(a, b), modulus(k))
 }
 
-proof fn xor_bits(a: nat, b: nat)
+pub proof fn xor_bits(a: nat, b: nat)
     ensures
         xor(a, b) % 2 == (a % 2 + b % 2) % 2,
         xor(a, b) / 2 == xor(a / 2, b / 2),
@@ -753,7 +753,8 @@ pub proof fn clmul_pow2(a: nat, k: nat)
 {
     if k == 0 {
         clmul_one_r(a);
-        assert(pow2(0) == 1);
+        assert(a * pow2(k) == a) by (nonlinear_arith)
+            requires pow2(k) == 1;
     } else {
         clmul_pow2(a, (k - 1) as nat);
         assert(pow2(k) == 2 * pow2((k - 1) as nat));
@@ -1072,7 +1073,9 @@ pub proof fn xor_mul_pow2(m: nat, x: nat, y: nat)
     decreases m
 {
     if m == 0 {
-        assert(pow2(0) == 1);
+        assert(pow2(m) * x == x && pow2(m) * y == y && pow2(m) * xor(x, y) == xor(x, y))
+            by (nonlinear_arith)
+            requires pow2(m) == 1;
     } else {
         pow2_pos((m - 1) as nat);
         assert(pow2(m) == 2 * pow2((m - 1) as nat));
@@ -1097,7 +1100,9 @@ pub proof fn lo_plus_hipart_is_xor(m: nat, lo: nat, h: nat)
 {
     if m == 0 {
         assert(lo == 0);
-        assert(pow2(0) == 1);
+        assert(pow2(m) * h == h) by (nonlinear_arith)
+            requires pow2(m) == 1;
+
         xor_zero(h);
     } else {
         pow2_pos((m - 1) as nat);
@@ -1121,10 +1126,13 @@ pub proof fn pack_mod_div(lo: nat, hi: nat, m: nat)
 {
     pow2_pos(m);
 
-    assert((lo + pow2(m) * hi) % pow2(m) == lo) by (nonlinear_arith)
-        requires lo < pow2(m), pow2(m) > 0;
-    assert((lo + pow2(m) * hi) / pow2(m) == hi) by (nonlinear_arith)
-        requires lo < pow2(m), pow2(m) > 0;
+    vstd::arithmetic::mul::lemma_mul_is_commutative(pow2(m) as int, hi as int);
+    vstd::arithmetic::div_mod::lemma_fundamental_div_mod_converse(
+        (lo + pow2(m) * hi) as int,
+        pow2(m) as int,
+        hi as int,
+        lo as int,
+    );
 }
 
 proof fn split_pack(x: nat, m: nat)
@@ -1137,7 +1145,7 @@ proof fn split_pack(x: nat, m: nat)
         requires pow2(m) > 0;
 }
 
-proof fn xor_split(m: nat, x: nat, y: nat)
+pub proof fn xor_split(m: nat, x: nat, y: nat)
     ensures
         xor(x, y) % pow2(m) == xor(x % pow2(m), y % pow2(m)),
         xor(x, y) / pow2(m) == xor(x / pow2(m), y / pow2(m)),
@@ -1171,7 +1179,8 @@ pub proof fn pow2_add(i: nat, j: nat)
     decreases j
 {
     if j == 0 {
-        assert(pow2(0) == 1);
+        assert(pow2(i) * pow2(j) == pow2(i)) by (nonlinear_arith)
+            requires pow2(j) == 1;
     } else {
         pow2_add(i, (j - 1) as nat);
 
@@ -1253,7 +1262,10 @@ pub proof fn gf_mul_tower_distrib_r(a: nat, b: nat, c: nat, k: nat)
     ensures gf_mul_tower(a, xor(b, c), k) == xor(gf_mul_tower(a, b, k), gf_mul_tower(a, c, k))
     decreases k
 {
+    hide(gf_mul_tower);
+
     if k == 8 {
+        reveal(gf_mul_tower);
         gf_distrib(a, b, c, 8);
     } else {
         let m = (k / 2) as nat;
@@ -1266,6 +1278,10 @@ pub proof fn gf_mul_tower_distrib_r(a: nat, b: nat, c: nat, k: nat)
         let t = tau_tower(m);
 
         xor_split(m, b, c);
+
+        gf_mul_tower_unfold(a, xor(b, c), k);
+        gf_mul_tower_unfold(a, b, k);
+        gf_mul_tower_unfold(a, c, k);
 
         gf_mul_tower_distrib_r(al, bl, cl, m);
         gf_mul_tower_distrib_r(al, bh, ch, m);
@@ -1295,17 +1311,13 @@ pub proof fn gf_mul_tower_distrib_r(a: nat, b: nat, c: nat, k: nat)
         xor_rearrange4(lhb, lhc, hlb, hlc);
         xor_rearrange4(xor(lhb, hlb), xor(lhc, hlc), hhb, hhc);
 
-        gf_mul_tower_bound(al, bl, m);
-        gf_mul_tower_bound(al, cl, m);
-        gf_mul_tower_bound(hhb, t, m);
-        gf_mul_tower_bound(hhc, t, m);
-
-        let clob = xor(llb, tb);
-        let cloc = xor(llc, tc);
-
-        xor_lt_pow2(llb, tb, m);
-        xor_lt_pow2(llc, tc, m);
-        xor_pack(clob, xor(xor(lhb, hlb), hhb), cloc, xor(xor(lhc, hlc), hhc), m);
+        xor_pack(
+            tlo(al, ah, bl, bh, m),
+            thi(al, ah, bl, bh, m),
+            tlo(al, ah, cl, ch, m),
+            thi(al, ah, cl, ch, m),
+            m,
+        );
     }
 }
 
@@ -2038,14 +2050,13 @@ pub proof fn frobenius_mod_cycle(x: nat, e: nat, k: nat)
     decreases e
 {
     if e < k {
-        assert(e % k == e);
+        vstd::arithmetic::div_mod::lemma_small_mod(e, k);
     } else {
         pow_2exp_add(x, k, (e - k) as nat, k);
         frobenius_order(x, k);
         frobenius_mod_cycle(x, (e - k) as nat, k);
 
-        assert(((e - k) as nat) % k == e % k) by (nonlinear_arith)
-            requires e >= k, k > 0;
+        vstd::arithmetic::div_mod::lemma_mod_sub_multiples_vanish(e as int, k as int);
     }
 }
 
@@ -2114,45 +2125,50 @@ pub proof fn trace_idempotent(x: nat, k: nat)
 // Basis isomorphism  phi : tower <-> flat
 // ============================================================
 
-// The 128-bit multiplicative query is not SMT-dischargeable;
-// roundtrip and the generator homomorphism are proven
-// exhaustively at build time (build/main.rs::verify_isomorphism_128:
-// mutual inverse + homomorphism on all 128x128 generators) and carried
-// as axioms about the uninterpreted basis columns in axioms_t.rs.
-pub uninterp spec fn phi_basis(i: nat, k: nat) -> nat;
-
-// φ is the column map of the tower->flat matrix: the XOR of
-// basis columns over the set bits, the same shape as the
-// production map_ct kernels (verus/neon/convert.rs::bit_comb).
-// Additivity is therefore a theorem, not an axiom.
-pub closed spec fn phi_fold(x: nat, n: nat, k: nat) -> nat
+pub open spec fn bit_comb(x: nat, basis: Seq<nat>, n: nat) -> nat
     decreases n
 {
     if n == 0 {
         0
     } else {
         xor(
-            phi_fold(x, (n - 1) as nat, k),
-            if (x / pow2((n - 1) as nat)) % 2 == 1 { phi_basis((n - 1) as nat, k) } else { 0 },
+            bit_comb(x, basis, (n - 1) as nat),
+            if (x / pow2((n - 1) as nat)) % 2 == 1 { basis[n - 1] } else { 0 },
         )
     }
 }
 
-pub closed spec fn phi(x: nat, k: nat) -> nat {
-    phi_fold(x, k, k)
+pub uninterp spec fn phi_basis(i: nat, k: nat) -> nat;
+
+pub uninterp spec fn phi_inv_basis(i: nat, k: nat) -> nat;
+
+pub open spec fn phi_columns(k: nat) -> Seq<nat> {
+    Seq::new(k, |i: int| phi_basis(i as nat, k))
 }
 
-pub uninterp spec fn phi_inv(x: nat, k: nat) -> nat;
+pub open spec fn phi_inv_columns(k: nat) -> Seq<nat> {
+    Seq::new(k, |i: int| phi_inv_basis(i as nat, k))
+}
+
+pub closed spec fn phi(x: nat, k: nat) -> nat {
+    bit_comb(x, phi_columns(k), k)
+}
+
+pub closed spec fn phi_inv(x: nat, k: nat) -> nat {
+    bit_comb(x, phi_inv_columns(k), k)
+}
 
 // Bit i of an xor is the xor of the bits.
-proof fn xor_bit_at(a: nat, b: nat, i: nat)
+pub proof fn xor_bit_at(a: nat, b: nat, i: nat)
     ensures (xor(a, b) / pow2(i)) % 2 == ((a / pow2(i)) % 2 + (b / pow2(i)) % 2) % 2
     decreases i
 {
     if i == 0 {
-        assert(pow2(0) == 1);
-
         xor_bits(a, b);
+
+        assert(xor(a, b) / pow2(i) == xor(a, b) && a / pow2(i) == a && b / pow2(i) == b)
+            by (nonlinear_arith)
+            requires pow2(i) == 1;
     } else {
         xor_bits(a, b);
         xor_bit_at(a / 2, b / 2, (i - 1) as nat);
@@ -2169,20 +2185,22 @@ proof fn xor_bit_at(a: nat, b: nat, i: nat)
     }
 }
 
-proof fn phi_fold_additive(a: nat, b: nat, n: nat, k: nat)
-    ensures phi_fold(xor(a, b), n, k) == xor(phi_fold(a, n, k), phi_fold(b, n, k))
+pub proof fn bit_comb_additive(a: nat, b: nat, basis: Seq<nat>, n: nat)
+    ensures bit_comb(xor(a, b), basis, n) == xor(bit_comb(a, basis, n), bit_comb(b, basis, n))
     decreases n
 {
     if n == 0 {
     } else {
         let m = (n - 1) as nat;
-        let e = phi_basis(m, k);
+        let e = basis[m as int];
+
         let ba = (a / pow2(m)) % 2;
         let bb = (b / pow2(m)) % 2;
+
         let sa: nat = if ba == 1 { e } else { 0 };
         let sb: nat = if bb == 1 { e } else { 0 };
 
-        phi_fold_additive(a, b, m, k);
+        bit_comb_additive(a, b, basis, m);
         xor_bit_at(a, b, m);
 
         assert(xor(sa, sb) == (if (xor(a, b) / pow2(m)) % 2 == 1 { e } else { 0nat })) by {
@@ -2195,97 +2213,117 @@ proof fn phi_fold_additive(a: nat, b: nat, n: nat, k: nat)
             }
         }
 
-        xor_rearrange4(phi_fold(a, m, k), sa, phi_fold(b, m, k), sb);
-        xor_comm(sa, phi_fold(b, m, k));
-        xor_rearrange4(phi_fold(a, m, k), phi_fold(b, m, k), sa, sb);
+        xor_rearrange4(bit_comb(a, basis, m), sa, bit_comb(b, basis, m), sb);
+        xor_comm(sa, bit_comb(b, basis, m));
+        xor_rearrange4(bit_comb(a, basis, m), bit_comb(b, basis, m), sa, sb);
     }
 }
 
-// Retired axiom:
-// XOR-linearity of the column map is structural.
 pub proof fn phi_additive(a: nat, b: nat, k: nat)
     requires in_field(a, k), in_field(b, k)
     ensures phi(gf_add(a, b), k) == gf_add(phi(a, k), phi(b, k))
 {
-    phi_fold_additive(a, b, k, k);
+    bit_comb_additive(a, b, phi_columns(k), k);
+}
+
+pub proof fn phi_inv_additive(a: nat, b: nat, k: nat)
+    ensures phi_inv(xor(a, b), k) == xor(phi_inv(a, k), phi_inv(b, k))
+{
+    bit_comb_additive(a, b, phi_inv_columns(k), k);
+}
+
+pub proof fn phi_is_bit_comb(x: nat, k: nat)
+    ensures phi(x, k) == bit_comb(x, phi_columns(k), k)
+{
+}
+
+pub proof fn phi_inv_is_bit_comb(x: nat, k: nat)
+    ensures phi_inv(x, k) == bit_comb(x, phi_inv_columns(k), k)
+{
 }
 
 // Generator times any field element, by bilinear extension over the 2nd operand.
-proof fn phi_mult_row(i: nat, b: nat)
-    requires i < 128, in_field(b, 128)
-    ensures
-        phi(gf_mul_tower(pow2(i), b, 128), 128)
-            == gf_mul(phi(pow2(i), 128), phi(b, 128), 128)
+proof fn phi_mult_row(i: nat, b: nat, k: nat)
+    requires
+        k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
+        i < k,
+        in_field(b, k),
+    ensures phi(gf_mul_tower(pow2(i), b, k), k) == gf_mul(phi(pow2(i), k), phi(b, k), k)
 {
     let p = pow2(i);
-    let f = |y: nat| phi(gf_mul_tower(p, y, 128), 128);
-    let g = |y: nat| gf_mul(phi(p, 128), phi(y, 128), 128);
+    let f = |y: nat| phi(gf_mul_tower(p, y, k), k);
+    let g = |y: nat| gf_mul(phi(p, k), phi(y, k), k);
 
-    assert forall|u: nat, v: nat| in_field(u, 128) && in_field(v, 128)
+    assert forall|u: nat, v: nat| in_field(u, k) && in_field(v, k)
         implies #[trigger] f(xor(u, v)) == xor(f(u), f(v)) by {
-        gf_mul_tower_distrib_r(p, u, v, 128);
-        gf_mul_tower_bound(p, u, 128);
-        gf_mul_tower_bound(p, v, 128);
+        gf_mul_tower_distrib_r(p, u, v, k);
+        gf_mul_tower_bound(p, u, k);
+        gf_mul_tower_bound(p, v, k);
 
-        deg_lt_conv(gf_mul_tower(p, u, 128), 128);
-        deg_lt_conv(gf_mul_tower(p, v, 128), 128);
+        deg_lt_conv(gf_mul_tower(p, u, k), k);
+        deg_lt_conv(gf_mul_tower(p, v, k), k);
 
-        phi_additive(gf_mul_tower(p, u, 128), gf_mul_tower(p, v, 128), 128);
+        phi_additive(gf_mul_tower(p, u, k), gf_mul_tower(p, v, k), k);
     }
 
-    assert forall|u: nat, v: nat| in_field(u, 128) && in_field(v, 128)
+    assert forall|u: nat, v: nat| in_field(u, k) && in_field(v, k)
         implies #[trigger] g(xor(u, v)) == xor(g(u), g(v)) by {
-        phi_additive(u, v, 128);
-        gf_distrib(phi(p, 128), phi(u, 128), phi(v, 128), 128);
+        phi_additive(u, v, k);
+        gf_distrib(phi(p, k), phi(u, k), phi(v, k), k);
     }
 
-    assert forall|j: nat| j < 128 implies #[trigger] f(pow2(j)) == g(pow2(j)) by {
-        phi_mult_gen(i, j);
+    assert forall|j: nat| j < k implies #[trigger] f(pow2(j)) == g(pow2(j)) by {
+        phi_mult_gen(i, j, k);
     }
 
-    linear_determined_field(f, g, b, 128);
+    linear_determined_field(f, g, b, k);
 }
 
 // Full multiplicative homomorphism of the tower->flat map, derived from the
 // generator axiom phi_mult_gen by bilinear extension over the first operand.
-// Scoped to k = 128, the level build/main.rs::verify_isomorphism_128 checks.
 pub proof fn phi_multiplicative(a: nat, b: nat, k: nat)
-    requires k == 128, in_field(a, k), in_field(b, k)
+    requires
+        k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
+        in_field(a, k),
+        in_field(b, k),
     ensures phi(gf_mul_tower(a, b, k), k) == gf_mul(phi(a, k), phi(b, k), k)
 {
-    let f = |y: nat| phi(gf_mul_tower(y, b, 128), 128);
-    let g = |y: nat| gf_mul(phi(y, 128), phi(b, 128), 128);
+    let f = |y: nat| phi(gf_mul_tower(y, b, k), k);
+    let g = |y: nat| gf_mul(phi(y, k), phi(b, k), k);
 
-    assert forall|u: nat, v: nat| in_field(u, 128) && in_field(v, 128)
+    assert forall|u: nat, v: nat| in_field(u, k) && in_field(v, k)
         implies #[trigger] f(xor(u, v)) == xor(f(u), f(v)) by {
-        gf_mul_tower_distrib_l(u, v, b, 128);
-        gf_mul_tower_bound(u, b, 128);
-        gf_mul_tower_bound(v, b, 128);
+        gf_mul_tower_distrib_l(u, v, b, k);
+        gf_mul_tower_bound(u, b, k);
+        gf_mul_tower_bound(v, b, k);
 
-        deg_lt_conv(gf_mul_tower(u, b, 128), 128);
-        deg_lt_conv(gf_mul_tower(v, b, 128), 128);
+        deg_lt_conv(gf_mul_tower(u, b, k), k);
+        deg_lt_conv(gf_mul_tower(v, b, k), k);
 
-        phi_additive(gf_mul_tower(u, b, 128), gf_mul_tower(v, b, 128), 128);
+        phi_additive(gf_mul_tower(u, b, k), gf_mul_tower(v, b, k), k);
     }
 
-    assert forall|u: nat, v: nat| in_field(u, 128) && in_field(v, 128)
+    assert forall|u: nat, v: nat| in_field(u, k) && in_field(v, k)
         implies #[trigger] g(xor(u, v)) == xor(g(u), g(v)) by {
-        phi_additive(u, v, 128);
-        gf_mul_comm(xor(phi(u, 128), phi(v, 128)), phi(b, 128), 128);
-        gf_distrib(phi(b, 128), phi(u, 128), phi(v, 128), 128);
-        gf_mul_comm(phi(b, 128), phi(u, 128), 128);
-        gf_mul_comm(phi(b, 128), phi(v, 128), 128);
+        phi_additive(u, v, k);
+        gf_mul_comm(xor(phi(u, k), phi(v, k)), phi(b, k), k);
+        gf_distrib(phi(b, k), phi(u, k), phi(v, k), k);
+        gf_mul_comm(phi(b, k), phi(u, k), k);
+        gf_mul_comm(phi(b, k), phi(v, k), k);
     }
 
-    assert forall|i: nat| i < 128 implies #[trigger] f(pow2(i)) == g(pow2(i)) by {
-        phi_mult_row(i, b);
+    assert forall|i: nat| i < k implies #[trigger] f(pow2(i)) == g(pow2(i)) by {
+        phi_mult_row(i, b, k);
     }
 
-    linear_determined_field(f, g, a, 128);
+    linear_determined_field(f, g, a, k);
 }
 
 pub proof fn phi_is_field_iso(a: nat, b: nat, k: nat)
-    requires k == 128, in_field(a, k), in_field(b, k)
+    requires
+        k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
+        in_field(a, k),
+        in_field(b, k),
     ensures
         phi_inv(phi(a, k), k) == a,
         phi(gf_add(a, b), k) == gf_add(phi(a, k), phi(b, k)),

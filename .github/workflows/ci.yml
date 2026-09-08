@@ -14,12 +14,23 @@ jobs:
           - os: ubuntu-24.04-arm
             lane: pmull
             rustflags: "-C target-feature=+aes"
+            features: "--all-features"
+          - os: ubuntu-24.04-arm
+            lane: pmull-ct
+            rustflags: "-C target-feature=+aes"
+            features: ""
           - os: ubuntu-24.04-arm
             lane: fallback
             rustflags: ""
+            features: "--all-features"
           - os: ubuntu-24.04
             lane: x86
             rustflags: ""
+            features: "--all-features"
+          - os: ubuntu-24.04
+            lane: x86-ct
+            rustflags: ""
+            features: ""
     runs-on: ${{ matrix.os }}
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
@@ -39,20 +50,23 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Clippy
-        run: cargo clippy --all-features -- -D warnings
+        run: cargo clippy ${{ matrix.features }} --all-targets -- -D warnings
 
       - name: Assert PMULL path is live
-        if: matrix.lane == 'pmull'
+        if: startsWith(matrix.lane, 'pmull')
         run: cargo rustc --release -- --print cfg | grep -qx pmull
 
       - name: Assert PMULL path is off
-        if: matrix.lane != 'pmull'
+        if: ${{ !startsWith(matrix.lane, 'pmull') }}
         run: |
           cfg=$(cargo rustc --release -- --print cfg)
           ! grep -qx pmull <<< "$cfg"
 
+      - name: Build no_std
+        run: cargo build --no-default-features
+
       - name: Run Tests
-        run: cargo test --all-features --release
+        run: cargo test ${{ matrix.features }} --release
 
       - name: Install cargo-audit and cargo-deny
         if: matrix.lane == 'pmull'

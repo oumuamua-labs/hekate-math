@@ -22,12 +22,17 @@
 
 use vstd::prelude::*;
 
-#[path = "gf_model.rs"]
-pub mod gf_model;
+#[path = "neon/bridge.rs"]
+pub mod bridge;
 
+use bridge::gf_model;
+use bridge::{fold_step, pmod_below, r_poly};
 use gf_model::{
-    deg_xor_lt, gf_distrib, gf_mul, gf_mul_assoc, gf_mul_closed, gf_mul_comm, gf_sq_additive,
-    in_field, pow2, pow2_mono, xor, xor_assoc, xor_comm, xor_rearrange4, xor_self, xor_zero,
+    clmul, clmul_distrib_r, clmul_one_l, clmul_one_r, clmul_pow2, clmul_zero_r, deg,
+    deg_lt_conv, deg_modulus, deg_pow2, deg_xor_lt, gf_distrib, gf_mul, gf_mul_assoc,
+    gf_mul_closed, gf_mul_comm, gf_sq_additive, in_field, lo_plus_hipart_is_xor, modulus, pmod,
+    pmod_additive, pow2, pow2_mono, xor, xor_assoc, xor_comm, xor_lt_pow2, xor_rearrange4,
+    xor_self, xor_zero,
 };
 use vstd::arithmetic::div_mod::{
     lemma_div_denominator, lemma_fundamental_div_mod, lemma_fundamental_div_mod_converse_div,
@@ -866,14 +871,129 @@ proof fn xor128_reflect(x: u128, y: u128)
     }
 }
 
-// Trusted seam, never executed: stands for the production
-// flat multiply; every transform theorem in this file is
-// relative to this ensures (TRUSTED_AXIOMS.md).
-#[verifier::external_body]
 fn mul_flat(a: u128, b: u128) -> (r: u128)
     ensures r as nat == gf_mul(a as nat, b as nat, 128)
 {
-    unimplemented!()
+    let mut acc: u128 = 0;
+    let mut x: u128 = a;
+    let mut bb: u128 = b;
+    let mut i: usize = 0;
+
+    let ghost mut done: nat = 0;
+
+    proof {
+        deg_modulus(128);
+        assert(pow2(0) == 1) by (compute);
+        assert(pow2(128) == 0x1_0000_0000_0000_0000_0000_0000_0000_0000) by (compute);
+        assert(deg(0) == -1);
+
+        clmul_zero_r(a as nat);
+        pmod_below(0, 128);
+        clmul_one_r(a as nat);
+        deg_lt_conv(a as nat, 128);
+        pmod_below(a as nat, 128);
+    }
+
+    while i < 128
+        invariant
+            i <= 128,
+            b as nat == (bb as nat) * pow2(i as nat) + done,
+            done < pow2(i as nat),
+            acc as nat == gf_mul(a as nat, done, 128),
+            i < 128 ==> x as nat == gf_mul(a as nat, pow2(i as nat), 128),
+        decreases 128 - i,
+    {
+        let ghost n = i as nat;
+        let ghost p = pow2(n);
+        let ghost done0 = done;
+        let ghost q = (bb / 2) as nat;
+        let ghost xi = x as nat;
+        let bit = bb % 2;
+
+        proof {
+            deg_modulus(128);
+
+            assert(pow2(1) == 2) by (compute);
+            assert(pow2(128) == 0x1_0000_0000_0000_0000_0000_0000_0000_0000) by (compute);
+            assert(pow2(n + 1) == 2 * p);
+
+            lemma_fundamental_div_mod(bb as int, 2);
+
+            assert(bb as nat == 2 * q + (bit as nat));
+            assert((2 * q + (bit as nat)) * p == q * (2 * p) + p * (bit as nat))
+                by (nonlinear_arith);
+
+            if bit == 1 {
+                assert(p * (bit as nat) == p);
+
+                lo_plus_hipart_is_xor(n, done0, 1);
+                clmul_distrib_r(a as nat, done0, p);
+                pmod_additive(clmul(a as nat, done0), clmul(a as nat, p), modulus(128));
+                xor128_reflect(acc, x);
+            } else {
+                assert(p * (bit as nat) == 0);
+            }
+        }
+
+        if bit == 1 {
+            acc = acc ^ x;
+        }
+
+        proof {
+            done = done0 + p * (bit as nat);
+            clmul_pow2(xi, 1);
+            deg_lt_conv(xi, 128);
+        }
+
+        if x < 0x8000_0000_0000_0000_0000_0000_0000_0000u128 {
+            proof {
+                deg_lt_conv(2 * xi, 128);
+                pmod_below(2 * xi, 128);
+            }
+
+            x = x * 2;
+        } else {
+            let rr = (x - 0x8000_0000_0000_0000_0000_0000_0000_0000u128) * 2;
+
+            proof {
+                assert(2 * xi == (rr as nat) + pow2(128) * 1);
+
+                lo_plus_hipart_is_xor(128, rr as nat, 1);
+                fold_step(rr as nat, 1, 128);
+                clmul_one_l(0x87);
+                assert(r_poly(128) == 0x87);
+                xor_lt_pow2(rr as nat, 0x87, 128);
+                deg_lt_conv(xor(rr as nat, 0x87), 128);
+                pmod_below(xor(rr as nat, 0x87), 128);
+                xor128_reflect(rr, 0x87);
+            }
+
+            x = rr ^ 0x87;
+        }
+
+        proof {
+            if n + 1 < 128 {
+                gf_mul_assoc(a as nat, p, 2, 128);
+                clmul_pow2(p, 1);
+                deg_pow2(n + 1);
+                pmod_below(pow2(n + 1), 128);
+            }
+        }
+
+        bb = bb / 2;
+        i = i + 1;
+    }
+
+    proof {
+        assert(pow2(128) == 0x1_0000_0000_0000_0000_0000_0000_0000_0000) by (compute);
+
+        if bb >= 1 {
+            lemma_mul_inequality(1, bb as int, pow2(128) as int);
+            assert(false);
+        }
+    }
+
+    acc
 }
 
 fn add_flat(a: u128, b: u128) -> (r: u128)
@@ -1823,19 +1943,38 @@ impl FftTwin {
                     )
                 } by {
                     if bb < b {
+                        assert(0 <= bb * (2 * s)) by (nonlinear_arith)
+                            requires bb >= 0, s >= 1;
                         assert(bb * (2 * s) + 2 * s == (bb + 1) * (2 * s)) by (nonlinear_arith);
                         assert((bb + 1) * (2 * s) <= b * (2 * s)) by (nonlinear_arith)
                             requires bb + 1 <= b, s >= 1;
                         assert(bb * (2 * s) + r < base);
                         assert(bb * (2 * s) + s + r < base);
+                        assert(data@[bb * (2 * s) + r] == pre[bb * (2 * s) + r]);
+                        assert(data@[bb * (2 * s) + s + r] == pre[bb * (2 * s) + s + r]);
                     } else {
                         assert(bb == b);
                         assert(bb * (2 * s) == base) by (nonlinear_arith)
                             requires bb == b, base == b * (2 * s);
+                        assert(bb * (2 * s) + r == base + r);
+                        assert(bb * (2 * s) + s + r == base + s + r);
                         assert(base + 2 * s == (b + 1) * (2 * s)) by (nonlinear_arith)
                             requires base == b * (2 * s);
                         assert(base <= bb * (2 * s) + r < data@.len());
                         assert(base <= bb * (2 * s) + s + r < data@.len());
+                        assert(pre[base + r] == old(data)@[base + r]);
+                        assert(pre[base + s + r] == old(data)@[base + s + r]);
+                        assert(tw as nat == xor(coset as nat, self.twiddles@[bb] as nat));
+                        assert(data@[base + r] as nat == bfly_lo(
+                            old(data)@[base + r] as nat,
+                            old(data)@[base + s + r] as nat,
+                            xor(coset as nat, self.twiddles@[bb] as nat),
+                            128,
+                        ));
+                        assert(data@[base + s + r] as nat == xor(
+                            data@[base + r] as nat,
+                            old(data)@[base + s + r] as nat,
+                        ));
                     }
                 }
 
@@ -2144,6 +2283,7 @@ impl FftTwin {
         {
             let lo_i = base + r;
             let hi_i = base + s + r;
+            let ghost pre = data@;
 
             let a = data[lo_i];
             let b = data[hi_i];
@@ -2155,6 +2295,23 @@ impl FftTwin {
 
             data.set(lo_i, add_flat(a, mul_flat(qv, tw)));
             data.set(hi_i, qv);
+
+            proof {
+                let lo = old(data)@[base + r] as nat;
+                let hi = old(data)@[base + s + r] as nat;
+
+                assert(pre[base + r] == old(data)@[base + r]);
+                assert(pre[base + s + r] == old(data)@[base + s + r]);
+                assert(data@[base + r] as nat == bfly_lo(lo, xor(lo, hi), tw as nat, 128));
+                assert(data@[base + s + r] as nat == xor(lo, hi));
+
+                assert forall|u: int| 0 <= u < r implies #[trigger] data@[base + u] == pre[base + u]
+                    && data@[base + s + u] == pre[base + s + u] by {
+                    assert(base + u < base + r);
+                    assert(base + r < base + s + u);
+                    assert(base + s + u < base + s + r);
+                }
+            }
 
             r += 1;
         }
@@ -2251,19 +2408,38 @@ impl FftTwin {
                     )
                 } by {
                     if bb < b {
+                        assert(0 <= bb * (2 * s)) by (nonlinear_arith)
+                            requires bb >= 0, s >= 1;
                         assert(bb * (2 * s) + 2 * s == (bb + 1) * (2 * s)) by (nonlinear_arith);
                         assert((bb + 1) * (2 * s) <= b * (2 * s)) by (nonlinear_arith)
                             requires bb + 1 <= b, s >= 1;
                         assert(bb * (2 * s) + r < base);
                         assert(bb * (2 * s) + s + r < base);
+                        assert(data@[bb * (2 * s) + r] == pre[bb * (2 * s) + r]);
+                        assert(data@[bb * (2 * s) + s + r] == pre[bb * (2 * s) + s + r]);
                     } else {
                         assert(bb == b);
                         assert(bb * (2 * s) == base) by (nonlinear_arith)
                             requires bb == b, base == b * (2 * s);
+                        assert(bb * (2 * s) + r == base + r);
+                        assert(bb * (2 * s) + s + r == base + s + r);
                         assert(base + 2 * s == (b + 1) * (2 * s)) by (nonlinear_arith)
                             requires base == b * (2 * s);
                         assert(base <= bb * (2 * s) + r < data@.len());
                         assert(base <= bb * (2 * s) + s + r < data@.len());
+                        assert(pre[base + r] == old(data)@[base + r]);
+                        assert(pre[base + s + r] == old(data)@[base + s + r]);
+                        assert(tw as nat == xor(coset as nat, self.twiddles@[bb] as nat));
+                        assert(data@[base + r] as nat == bfly_lo(
+                            old(data)@[base + r] as nat,
+                            xor(old(data)@[base + r] as nat, old(data)@[base + s + r] as nat),
+                            xor(coset as nat, self.twiddles@[bb] as nat),
+                            128,
+                        ));
+                        assert(data@[base + s + r] as nat == xor(
+                            old(data)@[base + r] as nat,
+                            old(data)@[base + s + r] as nat,
+                        ));
                     }
                 }
 

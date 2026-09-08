@@ -117,6 +117,20 @@ fn bench_promote_batch(c: &mut Criterion) {
         })
     });
 
+    // Block64 to Block128:
+    // 16 elements (fills NEON chunk)
+    let input_64: Vec<Flat<Block64>> = (0..16)
+        .map(|_| Block64(rng.random::<u64>()).to_hardware())
+        .collect();
+    let mut output_128_from_64 = vec![Flat::from_raw(Block128::ZERO); 16];
+
+    group.throughput(Throughput::Elements(16));
+    group.bench_function("Block64_to_Block128_x16", |b| {
+        b.iter(|| {
+            Block128::promote_flat_batch(black_box(&input_64), &mut output_128_from_64);
+        })
+    });
+
     group.finish();
 }
 

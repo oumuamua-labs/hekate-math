@@ -19,4 +19,4 @@ jobs:
       - name: Check twin seams
         env:
           SEAM_ACK: ${{ contains(github.event.pull_request.labels.*.name, 'seam-ack') && '1' || '0' }}
-        run: ./verus/seam_guard.sh "origin/${{ github.base_ref }}"
+        run: ./verus/scripts/seam_guard.sh "origin/${{ github.base_ref }}"

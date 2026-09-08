@@ -498,14 +498,10 @@ impl FlatPromote<Block8> for Block64 {
 
         #[cfg(not(feature = "table-math"))]
         {
-            let mut acc = 0u64;
-            for i in 0..8 {
-                let bit = (val.0 >> i) & 1;
-                let mask = 0u64.wrapping_sub(bit as u64);
-                acc ^= constants::LIFT_BASIS_8_TO_64[i] & mask;
-            }
-
-            Flat::from_raw(Block64(acc))
+            Flat::from_raw(Block64(lift_ct_64::<8>(
+                val.0 as u64,
+                &constants::LIFT_BASIS_8_TO_64,
+            )))
         }
 
         #[cfg(feature = "table-math")]
@@ -522,14 +518,10 @@ impl FlatPromote<Block16> for Block64 {
 
         #[cfg(not(feature = "table-math"))]
         {
-            let mut acc = 0u64;
-            for i in 0..16 {
-                let bit = (val.0 >> i) & 1;
-                let mask = 0u64.wrapping_sub(bit as u64);
-                acc ^= constants::LIFT_BASIS_16_TO_64[i] & mask;
-            }
-
-            Flat::from_raw(Block64(acc))
+            Flat::from_raw(Block64(lift_ct_64::<16>(
+                val.0 as u64,
+                &constants::LIFT_BASIS_16_TO_64,
+            )))
         }
 
         #[cfg(feature = "table-math")]
@@ -550,14 +542,10 @@ impl FlatPromote<Block32> for Block64 {
 
         #[cfg(not(feature = "table-math"))]
         {
-            let mut acc = 0u64;
-            for i in 0..32 {
-                let bit = (val.0 >> i) & 1;
-                let mask = 0u64.wrapping_sub(bit as u64);
-                acc ^= constants::LIFT_BASIS_32_TO_64[i] & mask;
-            }
-
-            Flat::from_raw(Block64(acc))
+            Flat::from_raw(Block64(lift_ct_64::<32>(
+                val.0 as u64,
+                &constants::LIFT_BASIS_32_TO_64,
+            )))
         }
 
         #[cfg(feature = "table-math")]
@@ -610,6 +598,23 @@ pub fn apply_matrix_64(val: Block64, table: &[u64; 2048]) -> Block64 {
     Block64(res)
 }
 
+#[cfg(not(feature = "table-math"))]
+#[inline(always)]
+fn lift_ct_64<const N: usize>(x: u64, basis: &[u64; N]) -> u64 {
+    let mut acc = 0u64;
+    let mut i = 0usize;
+
+    while i < N {
+        let bit = (x >> i) & 1;
+        let mask = 0u64.wrapping_sub(bit);
+
+        acc ^= basis[i] & mask;
+        i += 1;
+    }
+
+    acc
+}
+
 #[inline(always)]
 fn map_ct_64(x: u64, basis: &[u64; 64]) -> u64 {
     let mut acc = 0u64;
@@ -618,6 +623,7 @@ fn map_ct_64(x: u64, basis: &[u64; 64]) -> u64 {
     while i < 64 {
         let bit = (x >> i) & 1;
         let mask = 0u64.wrapping_sub(bit);
+
         acc ^= basis[i] & mask;
         i += 1;
     }
@@ -928,6 +934,18 @@ mod tests {
             assert_eq!(
                 actual_flat, expected_flat,
                 "Block64 flat multiplication mismatch: (a*b)^H != a^H * b^H"
+            );
+        }
+    }
+
+    #[test]
+    fn promote_block8_matches_embedding() {
+        for v in 0u16..256 {
+            let x = Block8(v as u8);
+            assert_eq!(
+                <Block64 as FlatPromote<Block8>>::promote_flat(x.to_hardware()),
+                Block64::from(x).to_hardware(),
+                "Block8 -> Block64 promote mismatch at {v:#04x}"
             );
         }
     }

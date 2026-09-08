@@ -2,9 +2,11 @@
 # Fails when files with Verus twins change without
 # a verus/ change in the same range: twin-drift guard.
 #
-# Usage: verus/seam_guard.sh [BASE_REF]
+# Usage: verus/scripts/seam_guard.sh [BASE_REF]
 # SEAM_ACK=1 skips after human review ('seam-ack' PR label in CI).
 set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
 
 BASE="${1:-origin/main}"
 
@@ -13,7 +15,7 @@ git rev-parse --verify --quiet "$BASE^{commit}" > /dev/null || {
   exit 2
 }
 
-SEAM="src/towers src/fft/additive.rs src/algebra.rs"
+SEAM="src/towers src/fft/additive.rs src/algebra.rs src/hardware.rs src/packable.rs build"
 
 # shellcheck disable=SC2086
 CHANGED=$(git diff --name-only "$BASE"...HEAD -- $SEAM)

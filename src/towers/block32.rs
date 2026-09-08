@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // This file is part of the hekate-math project.
 // Copyright (C) 2026 Andrei Kochergin <andrei@oumuamua.dev>
-// Copyright (C) 2026 Oumuamua Labs <info@oumuamua.dev>. All rights reserved.
+// Copyright (C) 2026 Oumuamua Labs <info@oumuamua.dev>.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -488,16 +488,13 @@ impl FlatPromote<Block8> for Block32 {
     #[inline(always)]
     fn promote_flat(val: Flat<Block8>) -> Flat<Self> {
         let val = val.into_raw();
+
         #[cfg(not(feature = "table-math"))]
         {
-            let mut acc = 0u32;
-            for i in 0..8 {
-                let bit = (val.0 >> i) & 1;
-                let mask = 0u32.wrapping_sub(bit as u32);
-                acc ^= constants::LIFT_BASIS_8_TO_32[i] & mask;
-            }
-
-            Flat::from_raw(Block32(acc))
+            Flat::from_raw(Block32(lift_ct_32::<8>(
+                val.0 as u32,
+                &constants::LIFT_BASIS_8_TO_32,
+            )))
         }
 
         #[cfg(feature = "table-math")]
@@ -514,14 +511,10 @@ impl FlatPromote<Block16> for Block32 {
 
         #[cfg(not(feature = "table-math"))]
         {
-            let mut acc = 0u32;
-            for i in 0..16 {
-                let bit = (val.0 >> i) & 1;
-                let mask = 0u32.wrapping_sub(bit as u32);
-                acc ^= constants::LIFT_BASIS_16_TO_32[i] & mask;
-            }
-
-            Flat::from_raw(Block32(acc))
+            Flat::from_raw(Block32(lift_ct_32::<16>(
+                val.0 as u32,
+                &constants::LIFT_BASIS_16_TO_32,
+            )))
         }
 
         #[cfg(feature = "table-math")]
@@ -571,6 +564,23 @@ pub fn apply_matrix_32(val: Block32, table: &[u32; 1024]) -> Block32 {
     Block32(res)
 }
 
+#[cfg(not(feature = "table-math"))]
+#[inline(always)]
+fn lift_ct_32<const N: usize>(x: u32, basis: &[u32; N]) -> u32 {
+    let mut acc = 0u32;
+    let mut i = 0usize;
+
+    while i < N {
+        let bit = (x >> i) & 1;
+        let mask = 0u32.wrapping_sub(bit);
+
+        acc ^= basis[i] & mask;
+        i += 1;
+    }
+
+    acc
+}
+
 #[inline(always)]
 fn map_ct_32(x: u32, basis: &[u32; 32]) -> u32 {
     let mut acc = 0u32;
@@ -579,6 +589,7 @@ fn map_ct_32(x: u32, basis: &[u32; 32]) -> u32 {
     while i < 32 {
         let bit = (x >> i) & 1;
         let mask = 0u32.wrapping_sub(bit);
+
         acc ^= basis[i] & mask;
         i += 1;
     }
@@ -869,6 +880,18 @@ mod tests {
             let a = Block32(rng.random::<u32>());
             let b = Block32(rng.random::<u32>());
             assert_eq!(a.to_hardware() * b.to_hardware(), (a * b).to_hardware());
+        }
+    }
+
+    #[test]
+    fn promote_block8_matches_embedding() {
+        for v in 0u16..256 {
+            let x = Block8(v as u8);
+            assert_eq!(
+                <Block32 as FlatPromote<Block8>>::promote_flat(x.to_hardware()),
+                Block32::from(x).to_hardware(),
+                "Block8 -> Block32 promote mismatch at {v:#04x}"
+            );
         }
     }
 
