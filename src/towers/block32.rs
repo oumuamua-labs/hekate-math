@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // This file is part of the hekate-math project.
 // Copyright (C) 2026 Andrei Kochergin <andrei@oumuamua.dev>
-// Copyright (C) 2026 Oumuamua Labs <info@oumuamua.dev>. All rights reserved.
+// Copyright (C) 2026 Oumuamua Labs <info@oumuamua.dev>.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -589,6 +589,7 @@ fn map_ct_32(x: u32, basis: &[u32; 32]) -> u32 {
     while i < 32 {
         let bit = (x >> i) & 1;
         let mask = 0u32.wrapping_sub(bit);
+
         acc ^= basis[i] & mask;
         i += 1;
     }

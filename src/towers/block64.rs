@@ -623,6 +623,7 @@ fn map_ct_64(x: u64, basis: &[u64; 64]) -> u64 {
     while i < 64 {
         let bit = (x >> i) & 1;
         let mask = 0u64.wrapping_sub(bit);
+
         acc ^= basis[i] & mask;
         i += 1;
     }
