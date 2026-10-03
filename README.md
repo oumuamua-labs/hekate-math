@@ -47,8 +47,8 @@ Benchmarks executed on *Apple M3 Max*.
 | **Addition**             | Any               | 1.15 ns  | Vectorized XOR                      |
 | **Inversion** (Single)   | Tower             | 106.2 ns | Itoh-Tsujii / Fermat Little Theorem |
 | **Inversion** (Batch)    | Tower             | 15.6 ns  | Montgomery's Trick (SIMD)           |
-| **Basis Conv** (Default) | Tower ↔ Flat      | 84.9 ns  | Bit-Slicing (Constant-Time)         |
-| **Basis Conv** (Fast)    | Tower ↔ Flat      | 3.68 ns  | Look-Up Table (Variable-Time)       |
+| **Basis Conv** (Default) | Tower <-> Flat    | 40.2 ns  | Bit-Slicing (Constant-Time)         |
+| **Basis Conv** (Fast)    | Tower <-> Flat    | 3.68 ns  | Look-Up Table (Variable-Time)       |
 
 *Flat multiplication is ~18× faster than the canonical path.*
 
@@ -62,7 +62,7 @@ Efficiency of polynomial operations in 𝔽(2^128).
 | **Dense Eval (Hardware)** | 2²⁰ coeffs      | 8.37 ms  | 1.87 GiB/s   |
 | **Batch Eval (SIMD)**     | 256 × 16384     | 4.44 ms  | 945 Melem/s  |
 | **Additive FFT (scalar)** | 2¹⁶ · Block16   | 477.7 µs | 137 Melem/s  |
-| **Additive FFT (packed)** | 2¹⁶ · ×8 lanes  | 1.75 ms  | 300 Melem/s  |
+| **Additive FFT (packed)** | 2¹⁶ · ×8 lanes  | 386.6 µs | 1.36 Gelem/s |
 | **Interpolate MSM**       | 65536 points    | 106.5 µs | 616 Melem/s  |
 | **MLE Evaluation**        | 20 variables    | 1.00 ms  | 1.04 Gelem/s |
 
@@ -72,7 +72,7 @@ Reproduce with `cargo bench --features table-math`, or `cargo bench` for the def
 
 ```toml
 [dependencies]
-hekate-math = "0.11"
+hekate-math = "0.12"
 ```
 
 ## Examples
@@ -168,7 +168,7 @@ use hekate_math::{AdditiveFft, Block16, Flat, HardwareField, TowerField};
 
 fn example_fft() {
     let log_n = 10u32;
-    let fft = AdditiveFft::<Block16>::new(log_n);
+    let fft = AdditiveFft::<Block16>::new(log_n).unwrap();
 
     // Novel-basis coefficients, hardware (flat) basis
     let coeffs: Vec<Flat<Block16>> = (0..1u32 << log_n)
@@ -231,7 +231,7 @@ Timing behaviour is a build-time choice. Pick per deployment.
 ## Formal Verification
 
 [`verus/`](verus/README.md) holds standalone [Verus](https://github.com/verus-lang/verus) proofs,
-outside the crate build: 2872 function verifications over 685 distinct functions in 17 units, 0 errors.
+outside the crate build: 2922 function verifications over 731 distinct functions in 17 units, 0 errors.
 Tower `mul` and `invert`, the NEON kernels, the constant-time conversions and batch promotes, and the
 additive FFT are proven against the GF(2^k) model, relative to four build-discharged axioms and the
 transcription seams registered in [`verus/TRUSTED_AXIOMS.md`](verus/TRUSTED_AXIOMS.md).

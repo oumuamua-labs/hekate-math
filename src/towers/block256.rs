@@ -477,6 +477,41 @@ impl HardwareField for Block256 {
     }
 }
 
+// ===========================================
+// Binary Field Extras
+// ===========================================
+
+impl BinaryFieldExtras for Block256 {
+    #[inline(always)]
+    fn square(&self) -> Self {
+        let (lo, hi) = self.split();
+        let hi2 = hi.square();
+
+        Self::new(lo.square() + hi2.mul_tau(), hi2)
+    }
+
+    #[inline(always)]
+    fn trace(&self) -> Bit {
+        self.split().1.trace()
+    }
+
+    #[inline(always)]
+    fn solve_quadratic(c: Self) -> Option<Self> {
+        let (cl, ch) = c.split();
+        let r = Block128::solve_quadratic(ch)?;
+
+        let d = cl + r.square().mul_tau();
+        let flip = 0u128.wrapping_sub(d.trace().get() as u128);
+
+        let xh = Block128(r.0 ^ (flip & 1));
+        let d = Block128(d.0 ^ (flip & Block128::EXTENSION_TAU.0));
+
+        let xl = Block128::solve_quadratic(d)?;
+
+        Some(Self::new(xl, xh))
+    }
+}
+
 const PROMOTE_CHUNK: usize = 64;
 
 impl FlatPromote<Block8> for Block256 {

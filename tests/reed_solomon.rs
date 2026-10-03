@@ -179,6 +179,11 @@ fn rs_rejects_bad_params() {
         ReedSolomon::<Block128>::new(10, 64),
         Err(RsError::FieldTooSmall { .. })
     ));
+
+    assert_eq!(
+        ReedSolomon::<Block128>::new(1, 60).err(),
+        Some(RsError::TwiddleAlloc { log_size: 60 })
+    );
 }
 
 #[test]
@@ -216,6 +221,9 @@ fn rs_error_display_carries_values() {
     let msg = format!("{err}");
 
     assert!(msg.contains('4'), "uninformative: {msg}");
+
+    let msg = format!("{}", RsError::TwiddleAlloc { log_size: 60 });
+    assert!(msg.contains("60"), "uninformative: {msg}");
 }
 
 #[test]

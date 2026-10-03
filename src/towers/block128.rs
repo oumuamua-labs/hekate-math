@@ -725,17 +725,22 @@ pub fn apply_matrix_128(val: Block128, table: &[u128; 4096]) -> Block128 {
 
 #[inline(always)]
 fn map_ct_128_split(x: u128, basis: &[u128; 128]) -> u128 {
+    let lo = x as u64;
+    let hi = (x >> 64) as u64;
+
     let mut acc_lo = 0u64;
     let mut acc_hi = 0u64;
     let mut i = 0usize;
 
-    while i < 128 {
-        let bit = ((x >> i) & 1) as u64;
-        let mask = 0u64.wrapping_sub(bit);
+    while i < 64 {
+        let m_lo = 0u64.wrapping_sub((lo >> i) & 1);
+        let m_hi = 0u64.wrapping_sub((hi >> i) & 1);
 
-        let b = basis[i];
-        acc_lo ^= (b as u64) & mask;
-        acc_hi ^= ((b >> 64) as u64) & mask;
+        let a = basis[i];
+        let b = basis[64 + i];
+
+        acc_lo ^= ((a as u64) & m_lo) ^ ((b as u64) & m_hi);
+        acc_hi ^= (((a >> 64) as u64) & m_lo) ^ (((b >> 64) as u64) & m_hi);
 
         i += 1;
     }
@@ -1532,6 +1537,29 @@ mod tests {
         for _ in 0..1000 {
             let val = Block128(rng.random::<u128>());
             assert_eq!(val.to_hardware().to_tower(), val);
+        }
+    }
+
+    #[cfg(not(feature = "table-math"))]
+    #[test]
+    fn map_ct_128_split_is_column_map() {
+        let mut rng = rng();
+
+        for basis in [&TOWER_TO_FLAT_BASIS_128.0, &FLAT_TO_TOWER_BASIS_128.0] {
+            for (i, &col) in basis.iter().enumerate() {
+                assert_eq!(map_ct_128_split(1u128 << i, basis), col, "unit vector {i}");
+            }
+
+            for _ in 0..1000 {
+                let x = rng.random::<u128>();
+                let expected = basis
+                    .iter()
+                    .enumerate()
+                    .filter(|&(i, _)| (x >> i) & 1 == 1)
+                    .fold(0, |acc, (_, &col)| acc ^ col);
+
+                assert_eq!(map_ct_128_split(x, basis), expected, "x = {x:#x}");
+            }
         }
     }
 

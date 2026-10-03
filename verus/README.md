@@ -42,7 +42,7 @@ take the flat route instead of that Karatsuba: φ⁻¹(φ(a)·φ(b)) through
 | `tower/bridge.rs`                       | Ties the `uN` block cascade to the `nat` model via per-op reflection lemmas; `#[path]`-pulls `gf_model.rs` and `block256.rs`.                                                                                        |
 | `algebra.rs`                            | `BinaryFieldExtras` twins at GF(2^16): `square` split, default `frobenius` and `trace` loops, tied to the tower model via `tower/bridge.rs`.                                                                         |
 | `inverse.rs`                            | `invert` twins: the norm recursion at 16..256 over `quad_ext_inverse`, the Fermat chain `a^254` at 8 over `frobenius_order` and exhaustive zero-divisor freedom; `#[path]`-pulls `algebra.rs`.                       |
-| `fft.rs`                                | Additive-FFT twin and semantics: level-pass index safety, constructor twiddle schedule, `inverse ∘ forward == id` (twiddle-agnostic), and forward = novel-basis evaluation over the Cantor chain.                    |
+| `fft.rs`                                | Additive-FFT and `CantorBasis` twins: level-pass index safety, constructor twiddle schedule, `inverse ∘ forward == id` (twiddle-agnostic), forward and `evaluate_at` = novel-basis evaluation over the Cantor chain. |
 | `neon/model_t.rs`                       | Per-instruction spec of the NEON surface (PMULL, EOR, AND, TBL, TRN/UZP, shifts, moves, the LE transmute view), definitions only, each citing DDI 0487.                                                              |
 | `neon/bridge.rs`                        | PMULL ↔ `clmul` reflection at 8/64 bits, the generic double-fold congruence (`fold_step`), limb schoolbook and Karatsuba at the `clmul` level, xor/pack reflections.                                                 |
 | `neon/flat.rs`                          | Scalar flat-multiply twins proven equal to `gf_mul`: `mul_8`, `mul_flat_16/32/64`, and the 128-bit limb schoolbook with its two-stage 0x87 fold.                                                                     |
@@ -69,15 +69,15 @@ of `axioms_t.rs`. The file count is pinned at 18.
 | Measure                                      | Value                                 |
 |----------------------------------------------|---------------------------------------|
 | Toolchain                                    | Verus 0.2026.08.30.b432e82, Z3 4.16.0 |
-| Function verifications, summed over 17 units | 2872                                  |
-| Distinct functions in the 17 root modules    | 685                                   |
+| Function verifications, summed over 17 units | 2922                                  |
+| Distinct functions in the 17 root modules    | 731                                   |
 | `external_body` items, all in `axioms_t.rs`  | 4                                     |
-| Wall time per seed, Apple M3 Max             | 98 s                                  |
+| Wall time per seed, Apple M3 Max             | 104 s                                 |
 | Z3 seeds                                     | 0, 1, 2, 3, 4, 5, 6, 7                |
 
 A unit re-verifies every file it pulls through `#[path]`.
 
-`negative_controls.sh` applies eighteen one-line mutations to the
+`negative_controls.sh` applies twenty-one one-line mutations to the
 twins and requires the mutated unit to go red under `--verify-root`.
 Three outcomes fail, each named in the output: Verus accepts the
 mutant (vacuous proof), the mutation matches a line count other than

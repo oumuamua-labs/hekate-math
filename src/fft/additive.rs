@@ -17,6 +17,7 @@
 
 //! Gao–Mateer additive FFT (Cantor basis).
 
+use super::{CantorBasis, CantorError};
 use crate::{BinaryFieldExtras, Flat, HardwareField, PackedFlat};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -27,19 +28,21 @@ use rayon::prelude::*;
 const MAX_LEVELS: usize = 64;
 
 #[cfg(feature = "parallel")]
-const TILE: usize = 1024;
+const TILE_LOG: usize = 10;
+
+#[cfg(feature = "parallel")]
+const TILE: usize = 1 << TILE_LOG;
 
 #[cfg(feature = "parallel")]
 const PARALLEL_THRESHOLD_BYTES: usize = 1 << 20;
 
-#[cfg(feature = "parallel")]
-const MIN_PAR_BLOCKS: usize = 16;
-
-/// Error returned by the additive-FFT transforms.
+/// Error returned by `AdditiveFft`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FftError {
     BadLength { expected: usize, got: usize },
+    BadLogN { log_n: u32, max: u32 },
+    TwiddleAlloc { log_n: u32 },
 }
 
 impl core::fmt::Display for FftError {
@@ -48,16 +51,23 @@ impl core::fmt::Display for FftError {
             FftError::BadLength { expected, got } => {
                 write!(f, "AdditiveFft data length {got}, expected {expected}")
             }
+            FftError::BadLogN { log_n, max } => {
+                write!(f, "AdditiveFft log_n {log_n}, expected 1..={max}")
+            }
+            FftError::TwiddleAlloc { log_n } => {
+                write!(
+                    f,
+                    "AdditiveFft log_n {log_n}: twiddle table allocation failed"
+                )
+            }
         }
     }
 }
 
 impl core::error::Error for FftError {}
 
-/// In-place additive FFT over a 2^log_n subspace of a binary
-/// tower field. Transforms return `Err(FftError::BadLength)`
-/// unless data.len() == 2^log_n; on success the buffer
-/// is overwritten in place.
+/// In-place additive FFT over a 2^log_n
+/// subspace of a binary tower field.
 pub struct AdditiveFft<F> {
     log_n: u32,
 
@@ -67,50 +77,49 @@ pub struct AdditiveFft<F> {
 }
 
 impl<F: BinaryFieldExtras + HardwareField> AdditiveFft<F> {
-    /// Derives the Cantor basis (via solve_quadratic) and
-    /// the twiddle schedule for transform size 2^log_n.
-    /// This one-time allocation is the only heap use;
-    /// the transforms are in-place.
+    /// Derives the Cantor basis (via solve_quadratic)
+    /// and the twiddle schedule for transform size 2^log_n.
     ///
-    /// # Panics
-    /// If log_n is not in 1..=min(F::BITS, 63),
-    /// or F admits no Cantor basis of that size.
-    pub fn new(log_n: u32) -> Self {
-        assert!(
-            (1..=F::BITS).contains(&(log_n as usize)) && log_n < usize::BITS,
-            "AdditiveFft: log_n must be in 1..=min(F::BITS, 63)"
-        );
+    /// # Errors
+    /// `BadLogN` unless log_n is in 1..=min(F::BITS, 63)
+    /// and F admits a Cantor basis of that size;
+    /// `TwiddleAlloc` if the 2^(log_n-1)-entry
+    /// twiddle table cannot be allocated.
+    pub fn new(log_n: u32) -> Result<Self, FftError> {
+        let max = F::BITS.min(usize::BITS as usize - 1) as u32;
 
-        let dim = log_n as usize;
-
-        let mut lift: Vec<Flat<F>> = Vec::with_capacity(dim - 1);
-        let mut beta = F::ONE;
-
-        for _ in 1..dim {
-            beta = F::solve_quadratic(beta).expect("field admits no Cantor basis of this size");
-            lift.push(beta.to_hardware());
+        if log_n == 0 || log_n > max {
+            return Err(FftError::BadLogN { log_n, max });
         }
+
+        let basis = CantorBasis::<F>::new(log_n as usize).map_err(|e| match e {
+            CantorError::ChainEnds { at } => FftError::BadLogN {
+                log_n,
+                max: at as u32,
+            },
+            _ => FftError::BadLogN { log_n, max },
+        })?;
 
         let half = 1usize << (log_n - 1);
 
-        let mut twiddles = Vec::with_capacity(half);
-        for t in 0..half {
-            let mut acc = Flat::from_raw(F::ZERO);
-            let mut bits = t;
+        let mut twiddles = Vec::new();
+        twiddles
+            .try_reserve_exact(half)
+            .map_err(|_| FftError::TwiddleAlloc { log_n })?;
 
-            while bits != 0 {
-                let j = bits.trailing_zeros() as usize;
-                acc += lift[j];
-                bits &= bits - 1;
+        twiddles.push(Flat::from_raw(F::ZERO));
+
+        for &beta in &basis.betas()[1..] {
+            for t in 0..twiddles.len() {
+                let tw = twiddles[t] + beta;
+                twiddles.push(tw);
             }
-
-            twiddles.push(acc);
         }
 
-        Self {
+        Ok(Self {
             log_n,
             twiddles: twiddles.into_boxed_slice(),
-        }
+        })
     }
 
     /// Forward: novel-basis coefficients to evaluations.
@@ -190,23 +199,24 @@ impl<F: BinaryFieldExtras + HardwareField> AdditiveFft<F> {
         Ok(())
     }
 
-    // Every depth-ℓ node shares the coset σ^ℓ(offset),
-    // σ(x) = x^2 + x; a level's butterflies tile into
-    // contiguous 2s-blocks (s = 2^ℓ), block b pairing
-    // (blk[r], blk[r+s]) with twiddle coset + twiddles[b].
+    /// Every depth-ℓ node shares the coset σ^ℓ(offset),
+    /// σ(x) = x^2 + x; a level's butterflies tile into
+    /// contiguous 2s-blocks (s = 2^ℓ), block b pairing
+    /// (blk[r], blk[r+s]) with twiddle coset + twiddles[b].
     fn fwd_levels<T, K>(&self, data: &mut [T], offset: Flat<F>, kernel: K)
     where
         T: Send,
         K: Fn(&mut [T], &mut [T], Flat<F>) + Sync,
     {
         let levels = self.log_n as usize;
+        let chain = coset_chain(offset, levels);
 
-        let mut chain = [Flat::from_raw(F::ZERO); MAX_LEVELS];
-        let mut c = offset;
-
-        for slot in chain.iter_mut().take(levels) {
-            *slot = c;
-            c = c * c + c;
+        #[cfg(feature = "parallel")]
+        if parallel_eligible(data) {
+            // One pool entry per transform: from outside the pool,
+            // each parallel pass would inject and block on its own.
+            rayon::scope(|_| fwd_parallel(data, &self.twiddles, &chain[..levels], &kernel));
+            return;
         }
 
         for l in (0..levels).rev() {
@@ -214,13 +224,25 @@ impl<F: BinaryFieldExtras + HardwareField> AdditiveFft<F> {
         }
     }
 
-    // No β^-1 anywhere:
-    // paired points differ by β_0 = 1.
+    /// No β^-1 anywhere:
+    /// paired points differ by β_0 = 1.
     fn inv_levels<T, K>(&self, data: &mut [T], offset: Flat<F>, kernel: K)
     where
         T: Send,
         K: Fn(&mut [T], &mut [T], Flat<F>) + Sync,
     {
+        #[cfg(feature = "parallel")]
+        if parallel_eligible(data) {
+            let levels = self.log_n as usize;
+            let chain = coset_chain(offset, levels);
+
+            // One pool entry per transform: from outside the pool,
+            // each parallel pass would inject and block on its own.
+            rayon::scope(|_| inv_parallel(data, &self.twiddles, &chain[..levels], &kernel));
+
+            return;
+        }
+
         let mut c = offset;
         for l in 0..self.log_n as usize {
             pass(data, &self.twiddles, c, 1usize << l, &kernel);
@@ -229,56 +251,118 @@ impl<F: BinaryFieldExtras + HardwareField> AdditiveFft<F> {
     }
 }
 
-// data.len() is 2^log_n (check_len), every level
-// tiles exactly; kernel gets a block's aligned halves.
+fn coset_chain<F: HardwareField>(offset: Flat<F>, levels: usize) -> [Flat<F>; MAX_LEVELS] {
+    let mut chain = [Flat::from_raw(F::ZERO); MAX_LEVELS];
+    let mut c = offset;
+
+    for slot in chain.iter_mut().take(levels) {
+        *slot = c;
+        c = c * c + c;
+    }
+
+    chain
+}
+
+/// data.len() is 2^log_n (check_len), every level
+/// tiles exactly; kernel gets a block's aligned halves.
 fn pass<F, T, K>(data: &mut [T], twiddles: &[Flat<F>], coset: Flat<F>, s: usize, kernel: &K)
 where
     F: HardwareField,
     T: Send,
     K: Fn(&mut [T], &mut [T], Flat<F>) + Sync,
 {
-    let block = 2 * s;
-    let tws = &twiddles[..data.len() / block];
-
-    #[cfg(feature = "parallel")]
-    if size_of_val(data) >= PARALLEL_THRESHOLD_BYTES {
-        if block <= TILE {
-            assert!(
-                data.len().is_multiple_of(TILE),
-                "parallel tiling drops a tail: data.len()={} not a multiple of TILE={TILE}",
-                data.len()
-            );
-
-            // Many small blocks: tile-spans
-            // of whole blocks per work item.
-            data.par_chunks_exact_mut(TILE)
-                .zip(tws.par_chunks_exact(TILE / block))
-                .for_each(|(span, span_tws)| blocks_serial(span, span_tws, coset, s, kernel));
-        } else if tws.len() >= MIN_PAR_BLOCKS {
-            // Mid levels: one block per work item.
-            data.par_chunks_exact_mut(block)
-                .zip(tws.par_iter())
-                .for_each(|(blk, &t)| {
-                    let (lo, hi) = blk.split_at_mut(s);
-                    kernel(lo, hi, coset + t);
-                });
-        } else {
-            // Deepest levels, too few blocks to spread:
-            // split each block's halves into aligned tiles.
-            for (blk, &t) in data.chunks_exact_mut(block).zip(tws) {
-                let tw = coset + t;
-                let (lo, hi) = blk.split_at_mut(s);
-
-                lo.par_chunks_mut(TILE)
-                    .zip(hi.par_chunks_mut(TILE))
-                    .for_each(|(l, h)| kernel(l, h, tw));
-            }
-        }
-
-        return;
-    }
+    let tws = &twiddles[..data.len() / (2 * s)];
 
     blocks_serial(data, tws, coset, s, kernel);
+}
+
+#[cfg(feature = "parallel")]
+fn parallel_eligible<T>(data: &[T]) -> bool {
+    size_of_val(data) >= PARALLEL_THRESHOLD_BYTES && data.len() >= TILE
+}
+
+#[cfg(feature = "parallel")]
+fn fwd_parallel<F, T, K>(data: &mut [T], twiddles: &[Flat<F>], chain: &[Flat<F>], kernel: &K)
+where
+    F: HardwareField,
+    T: Send,
+    K: Fn(&mut [T], &mut [T], Flat<F>) + Sync,
+{
+    for l in (TILE_LOG..chain.len()).rev() {
+        wide_pass(data, twiddles, chain[l], 1usize << l, kernel);
+    }
+
+    data.par_chunks_exact_mut(TILE)
+        .enumerate()
+        .for_each(|(i, tile)| {
+            for l in (0..TILE_LOG).rev() {
+                tile_pass(tile, i, twiddles, chain[l], l, kernel);
+            }
+        });
+}
+
+#[cfg(feature = "parallel")]
+fn inv_parallel<F, T, K>(data: &mut [T], twiddles: &[Flat<F>], chain: &[Flat<F>], kernel: &K)
+where
+    F: HardwareField,
+    T: Send,
+    K: Fn(&mut [T], &mut [T], Flat<F>) + Sync,
+{
+    data.par_chunks_exact_mut(TILE)
+        .enumerate()
+        .for_each(|(i, tile)| {
+            for (l, &coset) in chain[..TILE_LOG].iter().enumerate() {
+                tile_pass(tile, i, twiddles, coset, l, kernel);
+            }
+        });
+
+    for (l, &coset) in chain.iter().enumerate().skip(TILE_LOG) {
+        wide_pass(data, twiddles, coset, 1usize << l, kernel);
+    }
+}
+
+#[cfg(feature = "parallel")]
+fn tile_pass<F, T, K>(
+    tile: &mut [T],
+    i: usize,
+    twiddles: &[Flat<F>],
+    coset: Flat<F>,
+    l: usize,
+    kernel: &K,
+) where
+    F: HardwareField,
+    K: Fn(&mut [T], &mut [T], Flat<F>) + Sync,
+{
+    let per = TILE >> (l + 1);
+
+    blocks_serial(
+        tile,
+        &twiddles[i * per..(i + 1) * per],
+        coset,
+        1usize << l,
+        kernel,
+    );
+}
+
+#[cfg(feature = "parallel")]
+fn wide_pass<F, T, K>(data: &mut [T], twiddles: &[Flat<F>], coset: Flat<F>, s: usize, kernel: &K)
+where
+    F: HardwareField,
+    T: Send,
+    K: Fn(&mut [T], &mut [T], Flat<F>) + Sync,
+{
+    let tws = &twiddles[..data.len() / (2 * s)];
+
+    data.par_chunks_exact_mut(2 * s)
+        .zip(tws.par_iter())
+        .for_each(|(blk, &t)| {
+            let tw = coset + t;
+            let (lo, hi) = blk.split_at_mut(s);
+
+            lo.par_chunks_mut(TILE)
+                .zip(hi.par_chunks_mut(TILE))
+                .for_each(|(l, h)| kernel(l, h, tw));
+        });
 }
 
 fn blocks_serial<F, T, K>(data: &mut [T], tws: &[Flat<F>], coset: Flat<F>, s: usize, kernel: &K)
