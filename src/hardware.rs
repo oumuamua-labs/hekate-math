@@ -15,63 +15,66 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! The flat basis: `HardwareField` (φ and flat arithmetic), the
+//! `Flat<F>` wrapper that keeps the bases apart, and `FlatPromote`.
+
 use crate::packable::PackedFlat;
 use crate::{PackableField, TowerField};
 use core::fmt::{self, Debug, Formatter};
 use core::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 use zeroize::Zeroize;
 
-/// Trait for Hardware Isomorphism acceleration.
+/// A [`TowerField`] with a flat basis: the isomorphism
+/// φ and the flat arithmetic behind [`Flat`] operators.
 pub trait HardwareField: TowerField + PackableField {
-    /// Convert standard Tower element
-    /// to hardware basis (Isomorphic).
+    /// Maps `self` to the flat basis: φ(self).
     fn to_hardware(self) -> Flat<Self>;
 
-    /// Convert hardware element back to Tower basis.
+    /// Maps `value` back to the tower basis: φ⁻¹(value).
     fn from_hardware(value: Flat<Self>) -> Self;
 
-    /// Sum two elements assuming they
-    /// are already in hardware basis.
+    /// Adds two flat elements (XOR).
     fn add_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self>;
 
-    /// Sum packed vectors in hardware basis.
+    /// Adds two packed flat vectors lane by lane (XOR).
     fn add_hardware_packed(lhs: PackedFlat<Self>, rhs: PackedFlat<Self>) -> PackedFlat<Self>;
 
-    /// Multiply two elements assuming
-    /// they are already in hardware basis.
+    /// Multiplies two flat elements.
     fn mul_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self>;
 
-    /// Multiply packed vectors in hardware basis.
+    /// Multiplies two packed flat vectors lane by lane.
     fn mul_hardware_packed(lhs: PackedFlat<Self>, rhs: PackedFlat<Self>) -> PackedFlat<Self>;
 
-    /// Multiply packed vectors by
-    /// a scalar in hardware basis.
+    /// Multiplies every lane of `lhs` by the flat scalar `rhs`.
     fn mul_hardware_scalar_packed(lhs: PackedFlat<Self>, rhs: Flat<Self>) -> PackedFlat<Self>;
 
-    /// Extracts the `bit_idx` bit of the
-    /// canonical Tower representation
-    /// directly from the Hardware (Flat)
-    /// representation without a full basis
-    /// conversion. Strictly constant time.
+    /// Returns bit `bit_idx` of φ⁻¹(value) without
+    /// a full conversion; constant time in `value`.
+    ///
+    /// # Panics
+    /// If `bit_idx >= Self::BITS`.
     fn tower_bit_from_hardware(value: Flat<Self>, bit_idx: usize) -> u8;
 }
 
-/// A field element stored in the hardware / flat basis.
+/// An element of `F` in the flat basis; `+`, `-` and `*` compute in that basis.
 #[derive(Copy, Clone, Default, PartialEq, Eq, Zeroize)]
 #[repr(transparent)]
 pub struct Flat<F>(F);
 
 impl<F> Flat<F> {
+    /// Wraps `raw` as flat-basis bits; does not convert.
     #[inline(always)]
     pub fn from_raw(raw: F) -> Self {
         Self(raw)
     }
 
+    /// Returns the flat-basis bits; does not convert.
     #[inline(always)]
     pub fn into_raw(self) -> F {
         self.0
     }
 
+    /// Borrows the flat-basis bits; does not convert.
     #[inline(always)]
     pub fn as_raw(&self) -> &F {
         &self.0
@@ -85,11 +88,16 @@ impl<F: Debug> Debug for Flat<F> {
 }
 
 impl<F: HardwareField> Flat<F> {
+    /// Maps `self` back to the tower basis: φ⁻¹(self).
     #[inline(always)]
     pub fn to_tower(self) -> F {
         F::from_hardware(self)
     }
 
+    /// Returns bit `bit_idx` of `self` in the tower basis.
+    ///
+    /// # Panics
+    /// If `bit_idx >= F::BITS`.
     #[inline(always)]
     pub fn tower_bit(self, bit_idx: usize) -> u8 {
         F::tower_bit_from_hardware(self, bit_idx)
@@ -144,20 +152,17 @@ impl<F: HardwareField> MulAssign for Flat<F> {
     }
 }
 
-/// Trait to efficiently promote smaller
-/// flat-basis fields to a larger flat-basis field
-/// bypassing redundant zero-byte lookups.
+/// Embedding of a flat subfield `FromF` into the flat basis of `Self`:
+/// `promote_flat(x.to_hardware())` equals `Self::from(x).to_hardware()`.
 pub trait FlatPromote<FromF>: HardwareField
 where
     FromF: HardwareField,
 {
+    /// Maps a flat `FromF` element into the flat basis of `Self`.
     fn promote_flat(val: Flat<FromF>) -> Flat<Self>;
 
-    /// Batch promote a slice of flat elements.
-    ///
-    /// Default:
-    /// Scalar loop. Implementors may override
-    /// for SIMD or table acceleration.
+    /// Promotes `input[i]` into `output[i]` for every `i` below
+    /// the shorter length; the rest of `output` is left as it is.
     fn promote_flat_batch(input: &[Flat<FromF>], output: &mut [Flat<Self>]) {
         for (o, v) in output.iter_mut().zip(input.iter()) {
             *o = Self::promote_flat(*v);

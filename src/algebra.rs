@@ -15,20 +15,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Binary-field algebraic extras.
+//! `BinaryFieldExtras` (square, Frobenius, trace, Artin–Schreier
+//! solver) and the macro that implements it for Block16 to Block128.
 
 use crate::{Bit, TowerField};
 
-/// Binary-field operations beyond core `TowerField`:
-/// Frobenius, absolute trace, and the Artin-Schreier
-/// solver underpinning the Cantor/FFT substrate.
+/// Square, Frobenius, absolute trace and the Artin–Schreier solver of
+/// a binary field; the solver builds the Cantor basis of the additive FFT.
 pub trait BinaryFieldExtras: TowerField {
+    /// Returns `self^2`; squaring is additive in characteristic 2.
     fn square(&self) -> Self {
         *self * *self
     }
 
-    /// `x^(2^k)`. `k` is taken mod the field degree
-    /// (`x^(2^BITS) = x`), so any `k` is valid.
+    /// Returns `self^(2^k)`, `k` reduced mod `BITS` since
+    /// `x^(2^BITS) = x`; costs `k % BITS` squarings.
     fn frobenius(&self, k: u32) -> Self {
         let reps = (k % Self::BITS as u32) as usize;
 
@@ -40,8 +41,8 @@ pub trait BinaryFieldExtras: TowerField {
         acc
     }
 
-    /// Absolute trace `Tr_{F/GF(2)}(x) = Σ x^(2^i)`,
-    /// always 0 or 1.
+    /// Returns the absolute trace Σ_{i<BITS} self^(2^i), always
+    /// 0 or 1; the tower fields compute it as a masked parity.
     fn trace(&self) -> Bit {
         let mut acc = Self::ZERO;
         let mut p = *self;
@@ -54,11 +55,9 @@ pub trait BinaryFieldExtras: TowerField {
         Bit::new((acc == Self::ONE) as u8)
     }
 
-    /// A root of `x^2 + x = c`, or `None` iff
-    /// `Tr(c) != 0` (then it has no solution).
-    /// When solvable, the roots are the result and
-    /// `result + ONE`. The value path is constant-time;
-    /// only the `Some`/`None` choice reveals `Tr(c)`.
+    /// Returns a root of x^2 + x = c, or `None` iff Tr(c) = 1; the other
+    /// root is `result + ONE`. The fixed choice defines the Cantor basis.
+    /// The value path is constant time; only `Some`/`None` reveals Tr(c).
     fn solve_quadratic(c: Self) -> Option<Self>;
 }
 
