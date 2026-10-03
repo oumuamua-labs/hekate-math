@@ -137,8 +137,8 @@ control tbl_swapped neon/packed.rs 'pub open spec fn reduce_tbl_8_m(' \
   'vqtbl1_m(tbl_hi_8_seq(), h_lo), vqtbl1_m(tbl_lo_8_seq(), h_hi)'
 
 control basis_lane0 neon/convert.rs 'fn map_ct_128_split_twin(' \
-  'let b = basis[i];' \
-  'let b = basis[0];'
+  'let a = basis[i];' \
+  'let a = basis[0];'
 
 control lift16_lane0 neon/convert.rs 'fn lift_ct_16_twin(' \
   'let bv = basis[i];' \
@@ -151,6 +151,18 @@ control parity_6996 neon/convert.rs 'fn tower_bit_64_twin(' \
 control fft_fold_0x86 fft.rs 'fn mul_flat(a: u128, b: u128)' \
   'x = rr ^ 0x87;' \
   'x = rr ^ 0x86;'
+
+control double_noxor fft.rs '    pub fn new(log_n: u32, lift: Vec<u128>)' \
+  'twiddles.push(tw ^ l);' \
+  'twiddles.push(tw);'
+
+control halve_swapped fft.rs 'fn halve(' \
+  'add_flat(p, mul_flat(q, tw))' \
+  'add_flat(q, mul_flat(p, tw))'
+
+control fold_right_tw fft.rs '    fn fold(' \
+  'tw = add_flat(tw0, self.betas[0]);' \
+  'tw = tw0;'
 
 control inv8_chain inverse.rs 'pub open spec fn inv8_twin(' \
   '        x2,' \
@@ -184,4 +196,4 @@ if [ "$FAIL" -ne 0 ]; then
   exit 1
 fi
 
-echo "negative controls: 18 mutants, all red"
+echo "negative controls: 21 mutants, all red"
