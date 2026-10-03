@@ -33,7 +33,7 @@ use bridge::gf_model::{
     gf_mul_tower_distrib_l, gf_mul_tower_distrib_r, in_field, phi, phi_additive, phi_columns,
     phi_inv_columns, phi_inv_is_bit_comb, phi_is_bit_comb, phi_multiplicative, phi_roundtrip, pow2,
     pow2_add, pow2_pos, tau_tower, thi, tlo, xor, xor_assoc, xor_bit_at, xor_bits, xor_comm,
-    xor_self, xor_zero,
+    xor_rearrange4, xor_self, xor_zero,
 };
 use bridge::{
     pow2_bridge, u128_pack, xor8_reflect, xor16_reflect, xor32_reflect, xor64_reflect,
@@ -257,63 +257,160 @@ fn map_ct_64_twin(x: u64, basis: &[u64; 64]) -> (r: u64)
     acc
 }
 
+proof fn bit_comb_split64(x: nat, s: Seq<nat>, n: nat)
+    requires
+        n <= 64,
+        64 + n <= s.len(),
+    ensures
+        bit_comb(x, s, 64 + n) == xor(bit_comb(x, s, 64), bit_comb(x / pow2(64), s.skip(64), n)),
+    decreases n
+{
+    pow2_pos(64);
+
+    if n == 0 {
+        assert(bit_comb(x / pow2(64), s.skip(64), 0) == 0);
+
+        xor_zero(bit_comb(x, s, 64));
+    } else {
+        let m = (n - 1) as nat;
+
+        bit_comb_split64(x, s, m);
+
+        pow2_pos(m);
+        pow2_add(64, m);
+
+        lemma_div_denominator(x as int, pow2(64) as int, pow2(m) as int);
+
+        assert((x / pow2(64)) / pow2(m) == x / pow2(64 + m));
+        assert(s.skip(64)[m as int] == s[(64 + m) as int]);
+
+        let lo = bit_comb(x, s, 64);
+        let hm = bit_comb(x / pow2(64), s.skip(64), m);
+        let t: nat = if (x / pow2(64 + m)) % 2 == 1 { s[(64 + m) as int] } else { 0 };
+
+        assert(bit_comb(x, s, 64 + n) == xor(bit_comb(x, s, 64 + m), t));
+        assert(bit_comb(x / pow2(64), s.skip(64), n) == xor(hm, t));
+
+        xor_assoc(lo, hm, t);
+    }
+}
+
 // block128.rs: the accumulator is split into two
 // u64 halves; the packed view carries the invariant.
 fn map_ct_128_split_twin(x: u128, basis: &[u128; 128]) -> (r: u128)
     ensures r as nat == bit_comb(x as nat, basis@.map_values(|v: u128| v as nat), 128)
 {
     let ghost s = basis@.map_values(|v: u128| v as nat);
+    let ghost xh = (x as nat) / pow2(64);
+
+    let lo = x as u64;
+    let hi = (x >> 64) as u64;
 
     let mut acc_lo: u64 = 0;
     let mut acc_hi: u64 = 0;
     let mut i: usize = 0;
 
     proof {
+        pow2_pos(64);
+        xor_zero(0);
+
         assert(((0u64 as u128) | ((0u64 as u128) << 64)) == 0) by (bit_vector);
     }
 
-    while i < 128
+    while i < 64
         invariant
-            i <= 128,
+            i <= 64,
             s == basis@.map_values(|v: u128| v as nat),
+            xh == (x as nat) / pow2(64),
+            lo == x as u64,
+            hi == (x >> 64) as u64,
             (((acc_lo as u128) | ((acc_hi as u128) << 64)) as nat)
-                == bit_comb(x as nat, s, i as nat),
-        decreases 128 - i,
+                == xor(bit_comb(x as nat, s, i as nat), bit_comb(xh, s.skip(64), i as nat)),
+        decreases 64 - i,
     {
-        let bit = ((x >> i) & 1) as u64;
-        let mask = 0u64.wrapping_sub(bit);
-        let b = basis[i];
+        let m_lo = 0u64.wrapping_sub((lo >> i) & 1);
+        let m_hi = 0u64.wrapping_sub((hi >> i) & 1);
+
+        let a = basis[i];
+        let b = basis[64 + i];
 
         let ghost old_lo = acc_lo;
         let ghost old_hi = acc_hi;
 
         proof {
-            bit_gate_u128(x, i as u128);
+            let iu = i as u64;
+            let bl = (lo >> i) & 1;
+            let bh = (hi >> i) & 1;
 
-            assert((x >> (i as u128)) == (x >> i)) by (bit_vector) requires i < 128usize;
+            assert(bl == (((x >> (iu as u128)) & 1u128) as u64)) by (bit_vector)
+                requires lo == x as u64, iu == i as u64, i < 64usize, bl == (lo >> i) & 1;
+            assert(bh == (((x >> add(iu as u128, 64u128)) & 1u128) as u64)) by (bit_vector)
+                requires hi == (x >> 64u128) as u64, iu == i as u64, i < 64usize,
+                    bh == (hi >> i) & 1;
+
+            bit_gate_u128(x, i as u128);
+            bit_gate_u128(x, (64 + i) as u128);
+
+            pow2_pos(64);
+            pow2_pos(i as nat);
+            pow2_add(64, i as nat);
+
+            lemma_div_denominator(x as int, pow2(64) as int, pow2(i as nat) as int);
+
+            assert(xh / pow2(i as nat) == (x as nat) / pow2(64 + i as nat));
+            assert(s[i as int] == a as nat && s.skip(64)[i as int] == b as nat);
+
+            let ta: nat = if ((x as nat) / pow2(i as nat)) % 2 == 1 { s[i as int] } else { 0 };
+            let tb: nat = if (xh / pow2(i as nat)) % 2 == 1 { s.skip(64)[i as int] } else { 0 };
+
+            assert(bit_comb(x as nat, s, (i + 1) as nat)
+                == xor(bit_comb(x as nat, s, i as nat), ta));
+            assert(bit_comb(xh, s.skip(64), (i + 1) as nat)
+                == xor(bit_comb(xh, s.skip(64), i as nat), tb));
 
             // The split masked update is the packed
-            // update by the duplicated mask.
-            let m = 0u64.wrapping_sub(bit);
+            // update by the two duplicated masks.
+            assert((((old_lo ^ (((a as u64) & m_lo) ^ ((b as u64) & m_hi))) as u128) |
+                (((old_hi ^ ((((a >> 64) as u64) & m_lo) ^ (((b >> 64) as u64) & m_hi))) as u128)
+                    << 64)) ==
+                ((((old_lo as u128) | ((old_hi as u128) << 64)) ^
+                    (a & ((m_lo as u128) | ((m_lo as u128) << 64)))) ^
+                    (b & ((m_hi as u128) | ((m_hi as u128) << 64))))) by (bit_vector);
+            assert(a & ((m_lo as u128) | ((m_lo as u128) << 64))
+                == (if bl == 1 { a } else { 0u128 })) by (bit_vector)
+                requires m_lo == 0u64.wrapping_sub(bl), bl < 2u64;
+            assert(b & ((m_hi as u128) | ((m_hi as u128) << 64))
+                == (if bh == 1 { b } else { 0u128 })) by (bit_vector)
+                requires m_hi == 0u64.wrapping_sub(bh), bh < 2u64;
 
-            assert(((old_lo ^ ((b as u64) & m)) as u128)
-                | (((old_hi ^ (((b >> 64) as u64) & m)) as u128) << 64)
-                == ((old_lo as u128) | ((old_hi as u128) << 64))
-                    ^ (b & ((m as u128) | ((m as u128) << 64)))) by (bit_vector);
-            assert(b & ((m as u128) | ((m as u128) << 64))
-                == (if bit == 1 { b } else { 0u128 })) by (bit_vector)
-                requires m == 0u64.wrapping_sub(bit), bit < 2u64;
-            assert(s[i as int] == basis[i as int] as nat);
+            let packed = (old_lo as u128) | ((old_hi as u128) << 64);
+            let ga = a & ((m_lo as u128) | ((m_lo as u128) << 64));
+            let gb = b & ((m_hi as u128) | ((m_hi as u128) << 64));
 
-            xor128_reflect(
-                (old_lo as u128) | ((old_hi as u128) << 64),
-                b & ((m as u128) | ((m as u128) << 64)),
+            xor128_reflect(packed, ga);
+            xor128_reflect(packed ^ ga, gb);
+
+            xor_assoc(
+                xor(bit_comb(x as nat, s, i as nat), bit_comb(xh, s.skip(64), i as nat)),
+                ta,
+                tb,
+            );
+            xor_rearrange4(
+                bit_comb(x as nat, s, i as nat),
+                bit_comb(xh, s.skip(64), i as nat),
+                ta,
+                tb,
             );
         }
 
-        acc_lo ^= (b as u64) & mask;
-        acc_hi ^= ((b >> 64) as u64) & mask;
+        acc_lo ^= ((a as u64) & m_lo) ^ ((b as u64) & m_hi);
+        acc_hi ^= (((a >> 64) as u64) & m_lo) ^ (((b >> 64) as u64) & m_hi);
+
         i += 1;
+    }
+
+    proof {
+        bit_comb_split64(x as nat, s, 64);
     }
 
     (acc_lo as u128) | ((acc_hi as u128) << 64)
