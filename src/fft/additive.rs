@@ -40,9 +40,29 @@ const PARALLEL_THRESHOLD_BYTES: usize = 1 << 20;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FftError {
-    BadLength { expected: usize, got: usize },
-    BadLogN { log_n: u32, max: u32 },
-    TwiddleAlloc { log_n: u32 },
+    /// The slice length `got` is not 2^log_n = `expected`.
+    BadLength {
+        /// 2^log_n, the length the transform needs.
+        expected: usize,
+
+        /// The length of the slice passed in.
+        got: usize,
+    },
+
+    /// `log_n` is outside `1..=max`, the sizes `F` supports.
+    BadLogN {
+        /// The `log_n` passed to `new`.
+        log_n: u32,
+
+        /// The largest `log_n` that `F` supports on this target.
+        max: u32,
+    },
+
+    /// Allocating the 2^(log_n-1)-entry twiddle table failed.
+    TwiddleAlloc {
+        /// The `log_n` passed to `new`.
+        log_n: u32,
+    },
 }
 
 impl core::fmt::Display for FftError {
@@ -68,6 +88,26 @@ impl core::error::Error for FftError {}
 
 /// In-place additive FFT over a 2^log_n
 /// subspace of a binary tower field.
+///
+/// # Examples
+///
+/// ```
+/// use hekate_math::{AdditiveFft, Block16, Flat, HardwareField};
+///
+/// let log_n = 10;
+/// let fft = AdditiveFft::<Block16>::new(log_n)?;
+///
+/// let coeffs: Vec<Flat<Block16>> = (0..1u32 << log_n)
+///     .map(|i| Block16::from(i).to_hardware())
+///     .collect();
+///
+/// let mut data = coeffs.clone();
+/// fft.forward_scalar(&mut data)?;
+/// fft.inverse_scalar(&mut data)?;
+///
+/// assert_eq!(data, coeffs);
+/// # Ok::<(), hekate_math::FftError>(())
+/// ```
 pub struct AdditiveFft<F> {
     log_n: u32,
 
@@ -81,7 +121,7 @@ impl<F: BinaryFieldExtras + HardwareField> AdditiveFft<F> {
     /// and the twiddle schedule for transform size 2^log_n.
     ///
     /// # Errors
-    /// `BadLogN` unless log_n is in 1..=min(F::BITS, 63)
+    /// `BadLogN` unless log_n is in 1..=min(F::BITS, usize::BITS - 1)
     /// and F admits a Cantor basis of that size;
     /// `TwiddleAlloc` if the 2^(log_n-1)-entry
     /// twiddle table cannot be allocated.
@@ -122,17 +162,28 @@ impl<F: BinaryFieldExtras + HardwareField> AdditiveFft<F> {
         })
     }
 
-    /// Forward: novel-basis coefficients to evaluations.
+    /// Evaluates in place: novel-basis coefficients of f become
+    /// `data[j] = f(point(j))`, point as in [`CantorBasis::point`].
+    ///
+    /// # Errors
+    /// `BadLength` unless `data.len() == 2^log_n`.
     pub fn forward_scalar(&self, data: &mut [Flat<F>]) -> Result<(), FftError> {
         self.forward_coset_scalar(data, Flat::from_raw(F::ZERO))
     }
 
-    /// Inverse: evaluations to novel-basis coefficients.
+    /// Interpolates in place: the inverse of [`Self::forward_scalar`].
+    ///
+    /// # Errors
+    /// `BadLength` unless `data.len() == 2^log_n`.
     pub fn inverse_scalar(&self, data: &mut [Flat<F>]) -> Result<(), FftError> {
         self.inverse_coset_scalar(data, Flat::from_raw(F::ZERO))
     }
 
-    /// Forward over the coset offset + W_log_n.
+    /// Evaluates in place on the coset `offset + W_log_n`:
+    /// `data[j] = f(offset + point(j))`.
+    ///
+    /// # Errors
+    /// `BadLength` unless `data.len() == 2^log_n`.
     pub fn forward_coset_scalar(
         &self,
         data: &mut [Flat<F>],
@@ -144,7 +195,11 @@ impl<F: BinaryFieldExtras + HardwareField> AdditiveFft<F> {
         Ok(())
     }
 
-    /// Inverse over the coset offset + W_log_n.
+    /// Interpolates in place: the inverse of
+    /// [`Self::forward_coset_scalar`] at the same `offset`.
+    ///
+    /// # Errors
+    /// `BadLength` unless `data.len() == 2^log_n`.
     pub fn inverse_coset_scalar(
         &self,
         data: &mut [Flat<F>],
@@ -156,17 +211,27 @@ impl<F: BinaryFieldExtras + HardwareField> AdditiveFft<F> {
         Ok(())
     }
 
-    /// Forward, F::WIDTH column-lanes per element in lockstep.
+    /// Runs [`Self::forward_scalar`] on each of the `F::WIDTH`
+    /// lanes: lane l of `data[j]` is element j of input l.
+    ///
+    /// # Errors
+    /// `BadLength` unless `data.len() == 2^log_n`.
     pub fn forward(&self, data: &mut [PackedFlat<F>]) -> Result<(), FftError> {
         self.forward_coset(data, Flat::from_raw(F::ZERO))
     }
 
-    /// Inverse, F::WIDTH column-lanes per element in lockstep.
+    /// Runs [`Self::inverse_scalar`] on each of the `F::WIDTH` lanes.
+    ///
+    /// # Errors
+    /// `BadLength` unless `data.len() == 2^log_n`.
     pub fn inverse(&self, data: &mut [PackedFlat<F>]) -> Result<(), FftError> {
         self.inverse_coset(data, Flat::from_raw(F::ZERO))
     }
 
-    /// Packed forward over the coset offset + W_log_n.
+    /// Runs [`Self::forward_coset_scalar`] on each of the `F::WIDTH` lanes.
+    ///
+    /// # Errors
+    /// `BadLength` unless `data.len() == 2^log_n`.
     pub fn forward_coset(
         &self,
         data: &mut [PackedFlat<F>],
@@ -178,7 +243,10 @@ impl<F: BinaryFieldExtras + HardwareField> AdditiveFft<F> {
         Ok(())
     }
 
-    /// Packed inverse over the coset offset + W_log_n.
+    /// Runs [`Self::inverse_coset_scalar`] on each of the `F::WIDTH` lanes.
+    ///
+    /// # Errors
+    /// `BadLength` unless `data.len() == 2^log_n`.
     pub fn inverse_coset(
         &self,
         data: &mut [PackedFlat<F>],
@@ -202,7 +270,7 @@ impl<F: BinaryFieldExtras + HardwareField> AdditiveFft<F> {
     /// Every depth-ℓ node shares the coset σ^ℓ(offset),
     /// σ(x) = x^2 + x; a level's butterflies tile into
     /// contiguous 2s-blocks (s = 2^ℓ), block b pairing
-    /// (blk[r], blk[r+s]) with twiddle coset + twiddles[b].
+    /// (`blk[r]`, `blk[r+s]`) with twiddle `coset + twiddles[b]`.
     fn fwd_levels<T, K>(&self, data: &mut [T], offset: Flat<F>, kernel: K)
     where
         T: Send,

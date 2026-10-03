@@ -15,6 +15,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Systematic Reed–Solomon encoding on the additive FFT.
+
 use super::{AdditiveFft, FftError};
 use crate::{BinaryFieldExtras, Flat, HardwareField, PackedFlat};
 
@@ -22,10 +24,38 @@ use crate::{BinaryFieldExtras, Flat, HardwareField, PackedFlat};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RsError {
-    BadRate { log_k: u32, log_n: u32 },
-    FieldTooSmall { log_n: u32, max_log_n: u32 },
-    BadLength { expected: usize, got: usize },
-    TwiddleAlloc { log_size: u32 },
+    /// `log_k` is outside `1..log_n`.
+    BadRate {
+        /// The `log_k` passed to `new`.
+        log_k: u32,
+
+        /// The `log_n` passed to `new`.
+        log_n: u32,
+    },
+
+    /// `log_n` exceeds `max_log_n`, the largest size `F` supports.
+    FieldTooSmall {
+        /// The `log_n` passed to `new`.
+        log_n: u32,
+
+        /// The largest `log_n` that `F` supports on this target.
+        max_log_n: u32,
+    },
+
+    /// `msg` or `out` has length `got`; it needs `expected`, k or n.
+    BadLength {
+        /// k for `msg`, n for `out`.
+        expected: usize,
+
+        /// The length of the rejected buffer.
+        got: usize,
+    },
+
+    /// Allocating a 2^log_size-point twiddle table failed.
+    TwiddleAlloc {
+        /// The `log_k` or `log_n` of the failing transform.
+        log_size: u32,
+    },
 }
 
 impl core::fmt::Display for RsError {
@@ -83,9 +113,13 @@ pub struct ReedSolomon<F> {
 }
 
 impl<F: BinaryFieldExtras + HardwareField> ReedSolomon<F> {
-    /// `k = 2^log_k` message and `n = 2^log_n` codeword symbols,
-    /// `1 <= log_k < log_n <= min(F::BITS, usize::BITS - 1)`.
-    /// The only allocation is the two twiddle schedules.
+    /// Builds the encoder for `k = 2^log_k` message and `n = 2^log_n`
+    /// codeword symbols. The only allocation is the two twiddle schedules.
+    ///
+    /// # Errors
+    /// `BadRate` unless `1 <= log_k < log_n`; `FieldTooSmall`
+    /// if `log_n > min(F::BITS, usize::BITS - 1)`;
+    /// `TwiddleAlloc` if a twiddle table cannot be allocated.
     pub fn new(log_k: u32, log_n: u32) -> Result<Self, RsError> {
         if log_k < 1 || log_k >= log_n {
             return Err(RsError::BadRate { log_k, log_n });
@@ -105,16 +139,21 @@ impl<F: BinaryFieldExtras + HardwareField> ReedSolomon<F> {
         })
     }
 
+    /// Returns k, the message length per row.
     pub fn message_len(&self) -> usize {
         self.k
     }
 
+    /// Returns n, the codeword length per row.
     pub fn codeword_len(&self) -> usize {
         self.n
     }
 
-    /// Encode one row: `msg.len() == k`,
-    /// `out.len() == n`, `out[..k] == msg` on return.
+    /// Encodes one row: `out[..k] == msg` on return,
+    /// `out[k..]` the n - k parity symbols.
+    ///
+    /// # Errors
+    /// `BadLength` unless `msg.len() == k` and `out.len() == n`.
     pub fn encode_scalar(&self, msg: &[Flat<F>], out: &mut [Flat<F>]) -> Result<(), RsError> {
         self.check(msg.len(), out.len())?;
 
@@ -127,8 +166,11 @@ impl<F: BinaryFieldExtras + HardwareField> ReedSolomon<F> {
         Ok(())
     }
 
-    /// Encode `F::WIDTH` rows in lockstep. Lengths are in
-    /// packed elements: `msg.len() == k`, `out.len() == n`.
+    /// Encodes `F::WIDTH` rows in lockstep, one per lane;
+    /// lengths count packed elements.
+    ///
+    /// # Errors
+    /// `BadLength` unless `msg.len() == k` and `out.len() == n`.
     pub fn encode(&self, msg: &[PackedFlat<F>], out: &mut [PackedFlat<F>]) -> Result<(), RsError> {
         self.check(msg.len(), out.len())?;
 

@@ -15,7 +15,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Additive FFT over GF(2^N) (Cantor basis).
+//! Additive FFT over the Cantor basis of a binary tower field
+//! (Gao–Mateer 2010), evaluation at chosen domain points, and a
+//! systematic Reed–Solomon encoder.
+//!
+//! Polynomials are given by their coefficients in the novel basis
+//! of Lin–Chung–Han 2014: X_t = Π s_j over the set bits j of t,
+//! with s_j = [`vanish_eval`]`(j, ·)`. Domain index i is the point
+//! Σ β_j over the set bits j of i ([`CantorBasis::point`]).
+//! Coefficients, points and evaluations are in the flat basis.
 
 mod additive;
 mod cantor;
@@ -27,8 +35,8 @@ pub use reed_solomon::{ReedSolomon, RsError};
 
 use crate::BinaryFieldExtras;
 
-/// s_i(x): the GF(2)-linear vanishing polynomial
-/// of W_i = span(β_0..β_{i-1}). Equals the i-fold
+/// Evaluates at `x` the GF(2)-linear vanishing polynomial
+/// s_i of W_i = span(β_0..β_{i-1}). Equals the i-fold
 /// composition of σ(t) = t^2 + t; deg s_i = 2^i.
 pub fn vanish_eval<F: BinaryFieldExtras>(i: usize, x: F) -> F {
     let mut t = x;
