@@ -15,7 +15,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! BLOCK 256 (GF(2^256))
+//! GF(2^256) as `Block128[X] / (X^2 + X + τ)`, its flat form as a pair
+//! of GF(2^128) flat elements, and scalar packed lanes (no SIMD kernel).
+
 use crate::{BinaryFieldExtras, Bit, Block8, Block16, Block32, Block64, Block128};
 use crate::{
     CanonicalDeserialize, CanonicalSerialize, Flat, FlatPromote, HardwareField, PackableField,
@@ -29,17 +31,21 @@ use zeroize::Zeroize;
 // τ_flat = to_hardware(Block128::EXTENSION_TAU).
 const TAU_FLAT: u128 = 0x66340c45203fe3685d08f8c248334a81;
 
+/// GF(2^256) in the tower basis: `lo + hi·X`
+/// over [`Block128`], stored as `[lo, hi]`.
 #[derive(Copy, Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Zeroize)]
 #[repr(C, align(32))]
-pub struct Block256(pub [u128; 2]); // [lo, hi]
+pub struct Block256(pub [u128; 2]);
 
 impl Block256 {
     const TAU: Self = Block256([0, 0x2000_0000_0000_0000_0000_0000_0000_0000]);
 
+    /// Builds `lo + hi·X` from its halves.
     pub fn new(lo: Block128, hi: Block128) -> Self {
         Self([lo.0, hi.0])
     }
 
+    /// Returns the halves `(lo, hi)` of `lo + hi·X`.
     #[inline(always)]
     pub fn split(self) -> (Block128, Block128) {
         (Block128(self.0[0]), Block128(self.0[1]))
@@ -237,18 +243,22 @@ impl From<Block128> for Block256 {
 // PACKED BLOCK 256 (Width = 2)
 // ===================================
 
+/// Lanes in [`PackedBlock256`].
 pub const PACKED_WIDTH_256: usize = 2;
 
+/// Two [`Block256`] lanes; operators run the scalar operation per lane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[repr(C, align(64))]
 pub struct PackedBlock256(pub [Block256; PACKED_WIDTH_256]);
 
 impl PackedBlock256 {
+    /// Returns the packed value with every lane zero.
     #[inline(always)]
     pub fn zero() -> Self {
         Self([Block256::ZERO; PACKED_WIDTH_256])
     }
 
+    /// Returns `val` in every lane.
     #[inline(always)]
     pub fn broadcast(val: Block256) -> Self {
         Self([val; PACKED_WIDTH_256])
@@ -484,6 +494,9 @@ impl HardwareField for Block256 {
 impl BinaryFieldExtras for Block256 {
     #[inline(always)]
     fn square(&self) -> Self {
+        // char 2:
+        // (lo + hi·X)^2 = lo^2 + hi^2·X^2,
+        // no cross term.
         let (lo, hi) = self.split();
         let hi2 = hi.square();
 
@@ -492,11 +505,16 @@ impl BinaryFieldExtras for Block256 {
 
     #[inline(always)]
     fn trace(&self) -> Bit {
+        // Tr_{256/128}(lo + hi·X) = hi:
+        // the conjugate of X is X + 1.
         self.split().1.trace()
     }
 
     #[inline(always)]
     fn solve_quadratic(c: Self) -> Option<Self> {
+        // xh^2 + xh = ch, then xl^2 + xl = cl + xh^2·τ.
+        // Tr_128(τ) = 1: exactly one root xh leaves
+        // the second equation solvable.
         let (cl, ch) = c.split();
         let r = Block128::solve_quadratic(ch)?;
 

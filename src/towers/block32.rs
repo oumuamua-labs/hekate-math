@@ -15,7 +15,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! BLOCK 32 (GF(2^32))
+//! GF(2^32) as `Block16[X] / (X^2 + X + τ)`, its flat basis
+//! modulo x^32 + x^7 + x^3 + x^2 + 1, and the aarch64 NEON kernels.
+
 use crate::algebra::impl_binary_field_extras;
 use crate::towers::bit::Bit;
 use crate::towers::block8::Block8;
@@ -40,18 +42,23 @@ static TOWER_TO_FLAT_BASIS_32: CtConvertBasisU32<32> =
 static FLAT_TO_TOWER_BASIS_32: CtConvertBasisU32<32> =
     CtConvertBasisU32(constants::RAW_FLAT_TO_TOWER_32);
 
+/// GF(2^32) in the tower basis: `lo + hi·X`
+/// over [`Block16`], `lo` in the low 16 bits.
 #[derive(Copy, Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Zeroize)]
 #[repr(transparent)]
 pub struct Block32(pub u32);
 
 impl Block32 {
-    // 0x2000 << 16 = 0x2000_0000
+    /// τ of the next level, `Block32[X] / (X^2 + X + τ)`;
+    /// equals [`TowerField::EXTENSION_TAU`].
     pub const TAU: Self = Block32(0x2000_0000);
 
+    /// Builds `lo + hi·X` from its halves.
     pub fn new(lo: Block16, hi: Block16) -> Self {
         Self((hi.0 as u32) << 16 | (lo.0 as u32))
     }
 
+    /// Returns the halves `(lo, hi)` of `lo + hi·X`.
     #[inline(always)]
     pub fn split(self) -> (Block16, Block16) {
         (Block16(self.0 as u16), Block16((self.0 >> 16) as u16))
@@ -235,13 +242,16 @@ impl From<Block16> for Block32 {
 // PACKED BLOCK 32 (Width = 4)
 // ========================================
 
+/// Lanes in [`PackedBlock32`].
 pub const PACKED_WIDTH_32: usize = 4;
 
+/// Four [`Block32`] lanes; operators act lane by lane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[repr(C, align(16))]
 pub struct PackedBlock32(pub [Block32; PACKED_WIDTH_32]);
 
 impl PackedBlock32 {
+    /// Returns the packed value with every lane zero.
     #[inline(always)]
     pub fn zero() -> Self {
         Self([Block32::ZERO; PACKED_WIDTH_32])
@@ -538,6 +548,8 @@ impl_binary_field_extras!(Block32, map_ct_32, TRACE_MASK_32, SOLVE_QUADRATIC_BAS
 // UTILS
 // ===========================================
 
+/// Returns `a * b` through the flat basis, φ⁻¹(φ(a) · φ(b)), with
+/// the PMULL kernel; aarch64 with the `aes` target feature only.
 #[cfg(pmull)]
 #[inline(always)]
 pub fn mul_iso_32(a: Block32, b: Block32) -> Block32 {
@@ -550,7 +562,7 @@ pub fn mul_iso_32(a: Block32, b: Block32) -> Block32 {
 
 #[cfg(feature = "table-math")]
 #[inline(always)]
-pub fn apply_matrix_32(val: Block32, table: &[u32; 1024]) -> Block32 {
+pub(crate) fn apply_matrix_32(val: Block32, table: &[u32; 1024]) -> Block32 {
     let mut res = 0u32;
     let v = val.0;
 
@@ -558,6 +570,9 @@ pub fn apply_matrix_32(val: Block32, table: &[u32; 1024]) -> Block32 {
     for i in 0..4 {
         let byte = (v >> (i * 8)) & 0xFF;
         let idx = (i * 256) + (byte as usize);
+
+        // SAFETY:
+        // idx = i * 256 + byte < 4 * 256 = table.len().
         res ^= unsafe { *table.get_unchecked(idx) };
     }
 

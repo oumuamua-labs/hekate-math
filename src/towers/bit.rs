@@ -15,6 +15,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! GF(2) at one byte per element and per packed lane, its flat
+//! basis equal to the tower basis, and the aarch64 NEON kernels.
+
 use crate::{
     CanonicalDeserialize, CanonicalSerialize, Flat, HardwareField, PackableField, PackedFlat,
     TowerField,
@@ -33,11 +36,13 @@ use zeroize::Zeroize;
 pub struct Bit(u8);
 
 impl Bit {
+    /// Builds the element from the low bit of `val`.
     #[inline]
     pub const fn new(val: u8) -> Self {
         Self(val & 1)
     }
 
+    /// Returns the element if `val` is 0 or 1, else `None`.
     #[inline]
     pub const fn try_new(val: u8) -> Option<Self> {
         match val {
@@ -46,6 +51,7 @@ impl Bit {
         }
     }
 
+    /// Returns the value, always 0 or 1.
     #[inline]
     pub const fn get(self) -> u8 {
         self.0
@@ -206,9 +212,11 @@ impl From<u128> for Bit {
 // PACKED BIT (Width = 64)
 // ===================================
 
+/// Lanes in [`PackedBit`].
 // 64 bytes = 512 bits = 4 SIMD registers (128-bit each)
 pub const PACKED_WIDTH_BIT: usize = 64;
 
+/// 64 [`Bit`] lanes, one byte each; operators act lane by lane.
 #[repr(C, align(64))]
 pub struct PackedBit(pub [Bit; PACKED_WIDTH_BIT]);
 
@@ -245,6 +253,7 @@ impl core::fmt::Debug for PackedBit {
 }
 
 impl PackedBit {
+    /// Returns the packed value with every lane zero.
     #[inline(always)]
     pub fn zero() -> Self {
         Self([Bit::ZERO; PACKED_WIDTH_BIT])

@@ -15,6 +15,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! The Cantor basis of a binary tower field, its domain
+//! points, and pruned novel-basis evaluation at sorted indices.
+
 use crate::{BinaryFieldExtras, Flat, HardwareField};
 
 const MAX_DIM: usize = 64;
@@ -23,13 +26,59 @@ const MAX_DIM: usize = 64;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CantorError {
-    BadDim { dim: usize, max: usize },
-    ChainEnds { at: usize },
-    BadCoeffLength { got: usize },
-    IndexOutOfRange { index: usize, dim: usize },
-    UnsortedIndices { at: usize },
-    ShortScratch { need: usize, got: usize },
-    BadOutLength { expected: usize, got: usize },
+    /// `dim` is outside `1..=max`, `max = min(F::BITS, 64)`.
+    BadDim {
+        /// The `dim` passed to `new`.
+        dim: usize,
+
+        /// `min(F::BITS, 64)`.
+        max: usize,
+    },
+
+    /// β_at does not exist: x^2 + x = β_{at-1} has no root.
+    ChainEnds {
+        /// Index of the first β the chain lacks.
+        at: usize,
+    },
+
+    /// The coefficient count `got` is not a power of two.
+    BadCoeffLength {
+        /// `coeffs.len()`.
+        got: usize,
+    },
+
+    /// `index >= 2^dim`, outside the domain.
+    IndexOutOfRange {
+        /// The rejected domain index.
+        index: usize,
+
+        /// The basis dimension.
+        dim: usize,
+    },
+
+    /// `indices[at] < indices[at - 1]`.
+    UnsortedIndices {
+        /// The first position where `indices` decreases.
+        at: usize,
+    },
+
+    /// `scratch.len()` is `got`, under `need = coeffs.len() - 1`.
+    ShortScratch {
+        /// `coeffs.len() - 1`.
+        need: usize,
+
+        /// `scratch.len()`.
+        got: usize,
+    },
+
+    /// `out.len()` is `got`; `indices.len()` is `expected`.
+    BadOutLength {
+        /// `indices.len()`.
+        expected: usize,
+
+        /// `out.len()`.
+        got: usize,
+    },
 }
 
 impl core::fmt::Display for CantorError {
@@ -103,11 +152,13 @@ impl<F: BinaryFieldExtras + HardwareField> CantorBasis<F> {
         Ok(Self { dim, betas })
     }
 
+    /// Returns β_0..β_{dim-1} in the flat basis.
     pub fn betas(&self) -> &[Flat<F>] {
         &self.betas[..self.dim]
     }
 
-    /// The point of domain index `index`.
+    /// Returns the domain point of `index`:
+    /// Σ β_i over its set bits i.
     ///
     /// # Errors
     /// `IndexOutOfRange` if `index >= 2^dim`.
@@ -117,7 +168,7 @@ impl<F: BinaryFieldExtras + HardwareField> CantorBasis<F> {
         Ok(self.beta_sum(index, 0))
     }
 
-    /// `out[i] = f(shift + point(indices[i]))`, f having
+    /// Writes `out[i] = f(shift + point(indices[i]))`, f having
     /// novel-basis `coeffs`: `forward_coset_scalar` of
     /// zero-extended `coeffs`, read at sorted `indices`.
     ///

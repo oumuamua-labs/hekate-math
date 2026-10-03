@@ -15,15 +15,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! `PackableField` and `PackedFlat<F>`: `WIDTH` lanes
+//! per packed value, flat-basis arithmetic lane by lane.
+
 use crate::{Flat, HardwareField};
 use core::fmt;
 use core::fmt::{Debug, Formatter};
 use core::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
-/// A trait linking a Field element
-/// to its SIMD packed representation.
+/// A scalar type with a packed form of `WIDTH` lanes.
 pub trait PackableField: Sized + Copy + Clone + Default {
-    /// The packed vector type (e.g., PackedBlock128).
+    /// The packed form; operators act lane by lane.
     type Packed: Add<Output = Self::Packed>
         + Sub<Output = Self::Packed>
         + Mul<Output = Self::Packed>
@@ -39,11 +41,17 @@ pub trait PackableField: Sized + Copy + Clone + Default {
     /// How many elements fit in one packed vector.
     const WIDTH: usize;
 
-    /// Pack a slice of scalars into a vector.
-    /// Panics if slice len < WIDTH.
+    /// Packs `chunk[..WIDTH]` into one value; ignores the rest.
+    ///
+    /// # Panics
+    /// If `chunk.len() < WIDTH`.
     fn pack(chunk: &[Self]) -> Self::Packed;
 
-    /// Unpack vector back to scalars.
+    /// Writes the lanes of `packed` to `output[..WIDTH]`;
+    /// the rest of `output` is left as it is.
+    ///
+    /// # Panics
+    /// If `output.len() < WIDTH`.
     fn unpack(packed: Self::Packed, output: &mut [Self]);
 }
 
@@ -63,8 +71,29 @@ impl<F: HardwareField> PackableField for Flat<F> {
     }
 }
 
-/// A packed SIMD register storing
-/// hardware / flat-basis field elements.
+/// `F::WIDTH` flat-basis elements of `F` in one packed value;
+/// operators act lane by lane.
+///
+/// # Examples
+///
+/// ```
+/// use hekate_math::{Block32, Flat, HardwareField, PackableField};
+///
+/// let data: Vec<Flat<Block32>> = (1..=8u32)
+///     .map(|i| Block32::from(i).to_hardware())
+///     .collect();
+///
+/// let a = Flat::<Block32>::pack(&data[..4]);
+/// let b = Flat::<Block32>::pack(&data[4..]);
+///
+/// let mut out = [Flat::<Block32>::default(); 4];
+/// Flat::<Block32>::unpack(a * b, &mut out);
+///
+/// for (i, lane) in out.iter().enumerate() {
+///     let expected = data[i].to_tower() * data[4 + i].to_tower();
+///     assert_eq!(lane.to_tower(), expected);
+/// }
+/// ```
 #[repr(transparent)]
 pub struct PackedFlat<F: PackableField>(<F as PackableField>::Packed);
 
@@ -72,16 +101,19 @@ impl<F> PackedFlat<F>
 where
     F: PackableField,
 {
+    /// Wraps `raw` lanes as flat-basis bits; does not convert.
     #[inline(always)]
     pub fn from_raw(raw: F::Packed) -> Self {
         Self(raw)
     }
 
+    /// Returns the packed flat-basis bits; does not convert.
     #[inline(always)]
     pub fn into_raw(self) -> F::Packed {
         self.0
     }
 
+    /// Borrows the packed flat-basis bits; does not convert.
     #[inline(always)]
     pub fn as_raw(&self) -> &F::Packed {
         &self.0
@@ -204,10 +236,16 @@ impl<F: HardwareField> Mul<Flat<F>> for PackedFlat<F> {
 
 #[inline(always)]
 fn flat_slice_as_raw<F>(slice: &[Flat<F>]) -> &[F] {
+    // SAFETY:
+    // Flat<F> is #[repr(transparent)] over F: same size and alignment;
+    // the result borrows `slice` for its lifetime.
     unsafe { core::slice::from_raw_parts(slice.as_ptr().cast::<F>(), slice.len()) }
 }
 
 #[inline(always)]
 fn flat_slice_as_raw_mut<F>(slice: &mut [Flat<F>]) -> &mut [F] {
+    // SAFETY:
+    // Flat<F> is #[repr(transparent)] over F: same size and alignment;
+    // the result reborrows `slice` exclusively.
     unsafe { core::slice::from_raw_parts_mut(slice.as_mut_ptr().cast::<F>(), slice.len()) }
 }
