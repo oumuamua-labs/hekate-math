@@ -15,7 +15,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! BLOCK 8 (GF(2^8))
+//! GF(2^8), the AES field modulo x^8 + x^4 + x^3 + x + 1
+//! in both bases, and the aarch64 NEON kernels.
+
 use crate::constants::FLAT_TO_TOWER_BIT_MASKS_8;
 use crate::towers::bit::Bit;
 use crate::{
@@ -47,30 +49,34 @@ static FLAT_TO_TOWER_BASIS_8: CtConvertBasisU8<8> =
 /// Exponentiation Table: g^i
 /// Maps index i -> value inside the field.
 /// Range: [0..255].
-/// Note that EXP_TABLE[0] == 1 and EXP_TABLE[255] == 1.
+/// `EXP_TABLE[0]` == 1 and `EXP_TABLE[255]` == 1.
 #[cfg(feature = "table-math")]
 const EXP_TABLE: [u8; 256] = generate_exp_table();
 
 /// Logarithm Table: log_g(x)
 /// Maps value x -> power i such that g^i = x.
 /// Range: LOG_TABLE[1..=255] contain values 0..254.
-/// LOG_TABLE[0] is 0 (undefined).
+/// `LOG_TABLE[0]` is 0 (undefined).
 #[cfg(feature = "table-math")]
 const LOG_TABLE: [u8; 256] = generate_log_table();
 
 #[cfg(feature = "table-math")]
 const TAU_TABLE: [u8; 256] = generate_tau_table();
 
-/// Field element GF(2^8).
+/// GF(2^8) in the tower basis: bit i is the coefficient of x^i
+/// modulo x^8 + x^4 + x^3 + x + 1, as in AES (FIPS-197 §4.2).
+/// The flat basis has the same modulus, and φ(a) = a^32.
 #[derive(Copy, Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Zeroize)]
 #[repr(transparent)]
 pub struct Block8(pub u8);
 
 impl Block8 {
+    /// Builds the element from its tower-basis byte `val`.
     pub const fn new(val: u8) -> Self {
         Self(val)
     }
 
+    /// Returns `self^2`; squaring is additive in characteristic 2.
     #[inline(always)]
     pub fn square(self) -> Self {
         #[cfg(feature = "table-math")]
@@ -327,14 +333,17 @@ impl From<Bit> for Block8 {
 // PACKED BLOCK 8 (Width = 16)
 // ===================================
 
+/// Lanes in [`PackedBlock8`].
 // 128 bits / 8 = 16 elements
 pub const PACKED_WIDTH_8: usize = 16;
 
+/// 16 [`Block8`] lanes; operators act lane by lane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[repr(C, align(16))]
 pub struct PackedBlock8(pub [Block8; PACKED_WIDTH_8]);
 
 impl PackedBlock8 {
+    /// Returns the packed value with every lane zero.
     #[inline(always)]
     pub fn zero() -> Self {
         Self([Block8::ZERO; PACKED_WIDTH_8])
@@ -592,6 +601,9 @@ fn mul_iso_8(a: Block8, b: Block8) -> Block8 {
 #[inline(always)]
 fn apply_matrix_8(val: Block8, table: &[u8; 256]) -> Block8 {
     let idx = val.0 as usize;
+
+    // SAFETY:
+    // idx = val.0 < 256 = table.len().
     Block8(unsafe { *table.get_unchecked(idx) })
 }
 
@@ -1050,6 +1062,34 @@ mod tests {
                 val.to_hardware().to_tower(),
                 val,
                 "Block8 isomorphism roundtrip failed"
+            );
+        }
+    }
+
+    #[test]
+    fn isomorphism_is_frobenius() {
+        for i in 0u16..=255 {
+            let x = Block8(i as u8);
+
+            let mut x8 = x;
+            for _ in 0..3 {
+                x8 = x8.square();
+            }
+
+            let mut x32 = x8;
+            for _ in 0..2 {
+                x32 = x32.square();
+            }
+
+            assert_eq!(
+                x.to_hardware().into_raw(),
+                x32,
+                "Block8 to_hardware is not a^32 at {i:#04x}"
+            );
+            assert_eq!(
+                Flat::from_raw(x).to_tower(),
+                x8,
+                "Block8 from_hardware is not a^8 at {i:#04x}"
             );
         }
     }

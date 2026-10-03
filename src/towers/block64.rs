@@ -15,7 +15,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! BLOCK 64 (GF(2^64))
+//! GF(2^64) as `Block32[X] / (X^2 + X + τ)`, its flat basis
+//! modulo x^64 + x^4 + x^3 + x + 1, and the aarch64 NEON kernels.
+
 use crate::algebra::impl_binary_field_extras;
 use crate::constants::FLAT_TO_TOWER_BIT_MASKS_64;
 use crate::towers::bit::Bit;
@@ -42,18 +44,23 @@ static TOWER_TO_FLAT_BASIS_64: CtConvertBasisU64<64> =
 static FLAT_TO_TOWER_BASIS_64: CtConvertBasisU64<64> =
     CtConvertBasisU64(constants::RAW_FLAT_TO_TOWER_64);
 
+/// GF(2^64) in the tower basis: `lo + hi·X`
+/// over [`Block32`], `lo` in the low 32 bits.
 #[derive(Copy, Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Zeroize)]
 #[repr(transparent)]
 pub struct Block64(pub u64);
 
 impl Block64 {
-    // 0x2000_0000 << 32 = 0x2000_0000_0000_0000
+    /// τ of the next level, `Block64[X] / (X^2 + X + τ)`;
+    /// equals [`TowerField::EXTENSION_TAU`].
     pub const TAU: Self = Block64(0x2000_0000_0000_0000);
 
+    /// Builds `lo + hi·X` from its halves.
     pub fn new(lo: Block32, hi: Block32) -> Self {
         Self((hi.0 as u64) << 32 | (lo.0 as u64))
     }
 
+    /// Returns the halves `(lo, hi)` of `lo + hi·X`.
     #[inline(always)]
     pub fn split(self) -> (Block32, Block32) {
         (Block32(self.0 as u32), Block32((self.0 >> 32) as u32))
@@ -246,13 +253,16 @@ impl From<Block32> for Block64 {
 // PACKED BLOCK 64 (Width = 2)
 // ===================================
 
+/// Lanes in [`PackedBlock64`].
 pub const PACKED_WIDTH_64: usize = 2;
 
+/// Two [`Block64`] lanes; operators act lane by lane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[repr(C, align(16))] // 128-bit alignment
 pub struct PackedBlock64(pub [Block64; PACKED_WIDTH_64]);
 
 impl PackedBlock64 {
+    /// Returns the packed value with every lane zero.
     #[inline(always)]
     pub fn zero() -> Self {
         Self([Block64::ZERO; PACKED_WIDTH_64])
@@ -571,6 +581,8 @@ impl_binary_field_extras!(Block64, map_ct_64, TRACE_MASK_64, SOLVE_QUADRATIC_BAS
 // UTILS
 // ===========================================
 
+/// Returns `a * b` through the flat basis, φ⁻¹(φ(a) · φ(b)), with
+/// the PMULL kernel; aarch64 with the `aes` target feature only.
 #[cfg(pmull)]
 #[inline(always)]
 pub fn mul_iso_64(a: Block64, b: Block64) -> Block64 {
@@ -584,7 +596,7 @@ pub fn mul_iso_64(a: Block64, b: Block64) -> Block64 {
 
 #[cfg(feature = "table-math")]
 #[inline(always)]
-pub fn apply_matrix_64(val: Block64, table: &[u64; 2048]) -> Block64 {
+pub(crate) fn apply_matrix_64(val: Block64, table: &[u64; 2048]) -> Block64 {
     let mut res = 0u64;
     let v = val.0;
 
@@ -592,6 +604,9 @@ pub fn apply_matrix_64(val: Block64, table: &[u64; 2048]) -> Block64 {
     for i in 0..8 {
         let byte = (v >> (i * 8)) & 0xFF;
         let idx = (i * 256) + (byte as usize);
+
+        // SAFETY:
+        // idx = i * 256 + byte < 8 * 256 = table.len().
         res ^= unsafe { *table.get_unchecked(idx) };
     }
 

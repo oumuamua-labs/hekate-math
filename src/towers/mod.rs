@@ -15,6 +15,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! The tower types, `Bit` and `Block8` through `Block256`,
+//! one file per level, each re-exported at the crate root.
+
 mod bit;
 mod block128;
 mod block16;

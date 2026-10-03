@@ -15,7 +15,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! BLOCK 16 (GF(2^16))
+//! GF(2^16) as `Block8[X] / (X^2 + X + τ)`, its flat basis
+//! modulo x^16 + x^5 + x^3 + x + 1, and the aarch64 NEON kernels.
+
 use crate::algebra::impl_binary_field_extras;
 use crate::towers::bit::Bit;
 use crate::towers::block8::Block8;
@@ -39,17 +41,23 @@ static TOWER_TO_FLAT_BASIS_16: CtConvertBasisU16<16> =
 static FLAT_TO_TOWER_BASIS_16: CtConvertBasisU16<16> =
     CtConvertBasisU16(constants::RAW_FLAT_TO_TOWER_16);
 
+/// GF(2^16) in the tower basis: `lo + hi·X`
+/// over [`Block8`], `lo` in the low 8 bits.
 #[derive(Copy, Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Zeroize)]
 #[repr(transparent)]
 pub struct Block16(pub u16);
 
 impl Block16 {
+    /// τ of the next level, `Block16[X] / (X^2 + X + τ)`;
+    /// equals [`TowerField::EXTENSION_TAU`].
     pub const TAU: Self = Block16(0x2000);
 
+    /// Builds `lo + hi·X` from its halves.
     pub fn new(lo: Block8, hi: Block8) -> Self {
         Self((hi.0 as u16) << 8 | (lo.0 as u16))
     }
 
+    /// Returns the halves `(lo, hi)` of `lo + hi·X`.
     #[inline(always)]
     pub fn split(self) -> (Block8, Block8) {
         (Block8(self.0 as u8), Block8((self.0 >> 8) as u8))
@@ -228,14 +236,17 @@ impl From<Block8> for Block16 {
 // PACKED BLOCK 16 (Width = 8)
 // ===================================
 
+/// Lanes in [`PackedBlock16`].
 // 128 bits / 16 = 8 elements
 pub const PACKED_WIDTH_16: usize = 8;
 
+/// Eight [`Block16`] lanes; operators act lane by lane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[repr(C, align(16))]
 pub struct PackedBlock16(pub [Block16; PACKED_WIDTH_16]);
 
 impl PackedBlock16 {
+    /// Returns the packed value with every lane zero.
     #[inline(always)]
     pub fn zero() -> Self {
         Self([Block16::ZERO; PACKED_WIDTH_16])
@@ -517,6 +528,8 @@ impl_binary_field_extras!(Block16, map_ct_16, TRACE_MASK_16, SOLVE_QUADRATIC_BAS
 // UTILS
 // ===========================================
 
+/// Returns `a * b` through the flat basis, φ⁻¹(φ(a) · φ(b)), with
+/// the PMULL kernel; aarch64 with the `aes` target feature only.
 #[cfg(pmull)]
 #[inline(always)]
 pub fn mul_iso_16(a: Block16, b: Block16) -> Block16 {
@@ -529,13 +542,16 @@ pub fn mul_iso_16(a: Block16, b: Block16) -> Block16 {
 
 #[cfg(feature = "table-math")]
 #[inline(always)]
-pub fn apply_matrix_16(val: Block16, table: &[u16; 512]) -> Block16 {
+pub(crate) fn apply_matrix_16(val: Block16, table: &[u16; 512]) -> Block16 {
     let v = val.0;
     let mut res = 0u16;
 
     // 2 lookups (8-bit window)
     for i in 0..2 {
         let idx = (i * 256) + ((v >> (i * 8)) & 0xFF) as usize;
+
+        // SAFETY:
+        // idx = i * 256 + byte < 2 * 256 = table.len().
         res ^= unsafe { *table.get_unchecked(idx) };
     }
 

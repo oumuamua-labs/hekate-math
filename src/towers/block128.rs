@@ -15,7 +15,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! BLOCK 128 (GF(2^128))
+//! GF(2^128) as `Block64[X] / (X^2 + X + τ)`, its flat basis
+//! modulo x^128 + x^7 + x^2 + x + 1, and the aarch64 NEON kernels.
+
 use crate::algebra::impl_binary_field_extras;
 use crate::towers::bit::Bit;
 use crate::towers::block8::Block8;
@@ -42,6 +44,8 @@ static TOWER_TO_FLAT_BASIS_128: CtConvertBasisU128<128> =
 static FLAT_TO_TOWER_BASIS_128: CtConvertBasisU128<128> =
     CtConvertBasisU128(constants::RAW_FLAT_TO_TOWER_128);
 
+/// GF(2^128) in the tower basis: `lo + hi·X`
+/// over [`Block64`], `lo` in the low 64 bits.
 #[derive(Copy, Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize, Zeroize)]
 #[repr(transparent)]
 pub struct Block128(pub u128);
@@ -50,10 +54,12 @@ impl Block128 {
     // 0x2000_0000_0000_0000 << 64
     const TAU: Self = Block128(0x2000_0000_0000_0000_0000_0000_0000_0000);
 
+    /// Builds `lo + hi·X` from its halves.
     pub fn new(lo: Block64, hi: Block64) -> Self {
         Self((hi.0 as u128) << 64 | (lo.0 as u128))
     }
 
+    /// Returns the halves `(lo, hi)` of `lo + hi·X`.
     #[inline(always)]
     pub fn split(self) -> (Block64, Block64) {
         (Block64(self.0 as u64), Block64((self.0 >> 64) as u64))
@@ -252,23 +258,23 @@ impl From<Block64> for Block128 {
 // PACKED BLOCK 128 (Width = 4)
 // ===================================
 
+/// Lanes in [`PackedBlock128`].
 pub const PACKED_WIDTH_128: usize = 4;
 
-/// A SIMD register containing `PACKED_WIDTH`
-/// of Block128 elements. Force 32-byte alignment
-/// for AVX2 compatibility.
+/// Four [`Block128`] lanes; operators act lane by lane.
+/// 32-byte alignment matches the AVX2 load width.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[repr(C, align(32))]
 pub struct PackedBlock128(pub [Block128; PACKED_WIDTH_128]);
 
 impl PackedBlock128 {
-    /// Create a zeroed vector.
+    /// Returns the packed value with every lane zero.
     #[inline(always)]
     pub fn zero() -> Self {
         Self([Block128::ZERO; PACKED_WIDTH_128])
     }
 
-    /// Fill vector with the same value (Broadcast).
+    /// Returns `val` in every lane.
     #[inline(always)]
     pub fn broadcast(val: Block128) -> Self {
         Self([val; PACKED_WIDTH_128])
@@ -695,6 +701,8 @@ impl_binary_field_extras!(
 // UTILS
 // ===========================================
 
+/// Returns `a * b` through the flat basis, φ⁻¹(φ(a) · φ(b)), with
+/// the PMULL kernel; aarch64 with the `aes` target feature only.
 #[cfg(pmull)]
 #[inline(always)]
 pub fn mul_iso_128(a: Block128, b: Block128) -> Block128 {
@@ -707,7 +715,7 @@ pub fn mul_iso_128(a: Block128, b: Block128) -> Block128 {
 
 #[cfg(feature = "table-math")]
 #[inline(always)]
-pub fn apply_matrix_128(val: Block128, table: &[u128; 4096]) -> Block128 {
+pub(crate) fn apply_matrix_128(val: Block128, table: &[u128; 4096]) -> Block128 {
     let mut res = 0u128;
     let v = val.0;
 
@@ -717,6 +725,9 @@ pub fn apply_matrix_128(val: Block128, table: &[u128; 4096]) -> Block128 {
     for i in 0..16 {
         let byte = (v >> (i * 8)) & 0xFF;
         let idx = (i * 256) + (byte as usize);
+
+        // SAFETY:
+        // idx = i * 256 + byte < 16 * 256 = table.len().
         res ^= unsafe { *table.get_unchecked(idx) };
     }
 
@@ -779,6 +790,10 @@ fn promote_batch_neon<Src>(
 
     for chunk in 0..full {
         let i = chunk * 16;
+
+        // SAFETY:
+        // i + 16 <= n <= both lengths; `kernel` reads 16 `Src`
+        // from `input[i..]` and writes 16 to `output[i..]`.
         unsafe {
             kernel(
                 input.as_ptr().add(i).cast::<u8>(),
