@@ -15,7 +15,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use hekate_math::{BinaryFieldExtras, Bit, Block16, Block32, Block64, Block128, TowerField};
+use hekate_math::{
+    BinaryFieldExtras, Bit, Block16, Block32, Block64, Block128, Block256, TowerField,
+};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 // Independent trace oracle:
@@ -226,4 +228,24 @@ fn block64_field_laws() {
 fn block128_field_laws() {
     let mut r = StdRng::seed_from_u64(0x5eed_a15e_0b7a_0128);
     wide_field_laws(|| Block128(r.random()));
+}
+
+#[test]
+fn block256_field_laws() {
+    let mut r = StdRng::seed_from_u64(0x5eed_a15e_0b7a_0256);
+    wide_field_laws(|| Block256([r.random(), r.random()]));
+}
+
+#[test]
+fn block256_solve_quadratic_agrees_on_block128() {
+    let mut r = StdRng::seed_from_u64(0x5eed_a15e_0b7a_1256);
+    for _ in 0..4096 {
+        let c = Block128(r.random());
+        let wide = Block256::solve_quadratic(Block256::new(c, Block128::ZERO));
+
+        match Block128::solve_quadratic(c) {
+            Some(x) => assert_eq!(wide, Some(Block256::new(x, Block128::ZERO))),
+            None => assert!(wide.is_some_and(|w| w.split().1 != Block128::ZERO)),
+        }
+    }
 }
