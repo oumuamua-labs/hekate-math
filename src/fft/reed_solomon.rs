@@ -25,6 +25,7 @@ pub enum RsError {
     BadRate { log_k: u32, log_n: u32 },
     FieldTooSmall { log_n: u32, max_log_n: u32 },
     BadLength { expected: usize, got: usize },
+    TwiddleAlloc { log_size: u32 },
 }
 
 impl core::fmt::Display for RsError {
@@ -46,6 +47,12 @@ impl core::fmt::Display for RsError {
             RsError::BadLength { expected, got } => {
                 write!(f, "ReedSolomon buffer length {got}, expected {expected}")
             }
+            RsError::TwiddleAlloc { log_size } => {
+                write!(
+                    f,
+                    "ReedSolomon 2^{log_size}-point twiddle table allocation failed"
+                )
+            }
         }
     }
 }
@@ -56,6 +63,11 @@ impl From<FftError> for RsError {
     fn from(e: FftError) -> Self {
         match e {
             FftError::BadLength { expected, got } => RsError::BadLength { expected, got },
+            FftError::BadLogN { log_n, max } => RsError::FieldTooSmall {
+                log_n,
+                max_log_n: max,
+            },
+            FftError::TwiddleAlloc { log_n } => RsError::TwiddleAlloc { log_size: log_n },
         }
     }
 }
@@ -86,8 +98,8 @@ impl<F: BinaryFieldExtras + HardwareField> ReedSolomon<F> {
         }
 
         Ok(Self {
-            fft_k: AdditiveFft::new(log_k),
-            fft_n: AdditiveFft::new(log_n),
+            fft_k: AdditiveFft::new(log_k)?,
+            fft_n: AdditiveFft::new(log_n)?,
             k: 1usize << log_k,
             n: 1usize << log_n,
         })

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // This file is part of the hekate-math project.
 // Copyright (C) 2026 Andrei Kochergin <andrei@oumuamua.dev>
-// Copyright (C) 2026 Oumuamua Labs <info@oumuamua.dev>. All rights reserved.
+// Copyright (C) 2026 Oumuamua Labs <info@oumuamua.dev>.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -54,6 +54,10 @@ fn bench_poly_arithmetic(c: &mut Criterion) {
     // 5. Multilinear Eval (Binius-style)
     // 2^20 coefficients (1M size), 20 variables.
     bench_eval_multilinear::<Block128>(&mut group, "Block128", 20);
+
+    // 6. Additive FFT (Gao–Mateer, Block128).
+    // Plan build and forward (n=65536).
+    bench_fft_block128(&mut group, 16);
 
     group.finish();
 }
@@ -171,7 +175,7 @@ fn bench_eval_batch_block128(
 // 3. Additive FFT (Gao–Mateer, Block16)
 fn bench_fft_additive(group: &mut BenchmarkGroup<WallTime>, log_n: u32) {
     let n = 1usize << log_n;
-    let fft = AdditiveFft::<Block16>::new(log_n);
+    let fft = AdditiveFft::<Block16>::new(log_n).unwrap();
 
     let mut rng = rng();
 
@@ -297,6 +301,59 @@ where
             black_box(unsafe { *data.get_unchecked(0) });
         })
     });
+}
+
+// 6. Additive FFT (Gao–Mateer, Block128)
+fn bench_fft_block128(group: &mut BenchmarkGroup<WallTime>, log_n: u32) {
+    for log in [log_n, log_n + 1] {
+        group.throughput(Throughput::Elements(1 << (log - 1)));
+        group.bench_function(format!("Block128/fft_new_{}", 1usize << log), |bencher| {
+            bencher.iter(|| black_box(AdditiveFft::<Block128>::new(black_box(log)).unwrap()))
+        });
+    }
+
+    let n = 1usize << log_n;
+    let fft = AdditiveFft::<Block128>::new(log_n).unwrap();
+
+    let mut rng = rng();
+
+    let src: Vec<Flat<Block128>> = (0..n)
+        .map(|_| Block128::from(rng.random::<u128>()).to_hardware())
+        .collect();
+
+    group.throughput(Throughput::Elements(n as u64));
+    group.bench_function(format!("Block128/fft_forward_scalar_{}", n), |bencher| {
+        bencher.iter_batched_ref(
+            || src.clone(),
+            |data| {
+                fft.forward_scalar(data).unwrap();
+                black_box(&data[0]);
+            },
+            BatchSize::LargeInput,
+        )
+    });
+
+    #[cfg(feature = "parallel")]
+    {
+        let one_thread = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .unwrap();
+
+        group.bench_function(
+            format!("Block128/fft_forward_scalar_{}_one_thread", n),
+            |bencher| {
+                bencher.iter_batched_ref(
+                    || src.clone(),
+                    |data| {
+                        one_thread.install(|| fft.forward_scalar(data)).unwrap();
+                        black_box(&data[0]);
+                    },
+                    BatchSize::LargeInput,
+                )
+            },
+        );
+    }
 }
 
 criterion_group!(benches, bench_poly_arithmetic);

@@ -15,55 +15,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod common;
+
+use common::{eval_point, horner_eval};
 use hekate_math::fft::vanish_eval;
 use hekate_math::{
     AdditiveFft, BinaryFieldExtras, Block16, Block32, Block64, Block128, CantorBasis, FftError,
     Flat, HardwareField, PackableField, PackedFlat, TowerField,
 };
 use rand::{RngExt, SeedableRng, rng, rngs::StdRng};
-
-fn eval_point(j: usize) -> Block16 {
-    let mut acc = Block16::ZERO;
-    let mut bits = j;
-
-    while bits != 0 {
-        let i = bits.trailing_zeros() as usize;
-        acc += CantorBasis::beta_tower(i);
-        bits &= bits - 1;
-    }
-
-    acc
-}
-
-// Independent O(n^2) oracle:
-// f(x) = Σ a_t X_t(x),
-// X_t = ∏_{bit i of t} s_i,
-// s_i the i-fold σ(t)=t^2+t.
-fn horner_eval(coeffs: &[Block16], x: Block16, log_n: u32) -> Block16 {
-    let mut s = [Block16::ZERO; 16];
-    s[0] = x;
-
-    for i in 1..log_n as usize {
-        s[i] = s[i - 1].square() + s[i - 1];
-    }
-
-    let mut acc = Block16::ZERO;
-
-    for (t, &a) in coeffs.iter().enumerate() {
-        let mut xt = Block16::ONE;
-        let mut bits = t;
-
-        while bits != 0 {
-            let i = bits.trailing_zeros() as usize;
-            xt *= s[i];
-            bits &= bits - 1;
-        }
-
-        acc += a * xt;
-    }
-
-    acc
-}
 
 fn lanewise_differential(
     seed: u64,
@@ -78,7 +38,7 @@ fn lanewise_differential(
     // schedule is differentially pinned to serial scalar.
     for log_n in [1u32, 3, 6, 10, 16] {
         let n = 1usize << log_n;
-        let fft = AdditiveFft::<Block16>::new(log_n);
+        let fft = AdditiveFft::<Block16>::new(log_n).unwrap();
 
         let mut r = StdRng::seed_from_u64(seed ^ u64::from(log_n));
 
@@ -120,7 +80,7 @@ fn lanewise_differential(
 
 fn roundtrip_scalar<F: BinaryFieldExtras + HardwareField>(log_n: u32, mut mk: impl FnMut() -> F) {
     let n = 1usize << log_n;
-    let fft = AdditiveFft::<F>::new(log_n);
+    let fft = AdditiveFft::<F>::new(log_n).unwrap();
 
     let orig: Vec<Flat<F>> = (0..n).map(|_| mk().to_hardware()).collect();
 
@@ -137,15 +97,34 @@ fn roundtrip_scalar<F: BinaryFieldExtras + HardwareField>(log_n: u32, mut mk: im
     assert_eq!(data2, orig, "forward∘inverse != id");
 }
 
-#[test]
-fn cantor_self_check() {
-    assert!(CantorBasis::self_check());
+fn horner_check<F: BinaryFieldExtras + HardwareField>(
+    log_n: u32,
+    offset: F,
+    mut mk: impl FnMut() -> F,
+) {
+    let n = 1usize << log_n;
+    let fft = AdditiveFft::<F>::new(log_n).unwrap();
+
+    let coeffs: Vec<F> = (0..n).map(|_| mk()).collect();
+
+    let mut data: Vec<Flat<F>> = coeffs.iter().map(|c| c.to_hardware()).collect();
+    fft.forward_coset_scalar(&mut data, offset.to_hardware())
+        .unwrap();
+
+    for (j, slot) in data.iter().enumerate() {
+        let expected = horner_eval(&coeffs, offset + eval_point(j), log_n);
+        assert_eq!(
+            slot.to_tower(),
+            expected,
+            "{}-bit FFT != Horner at log_n={log_n}, j={j}",
+            F::BITS
+        );
+    }
 }
 
 #[test]
 fn vanish_eval_linearity_and_recurrence() {
     let mut r = rng();
-
     for i in 0..=16usize {
         for _ in 0..256 {
             let u = Block16(r.random());
@@ -173,7 +152,7 @@ fn vanish_eval_linearity_and_recurrence() {
 fn additive_fft_eq_horner() {
     let log_n = 8u32;
     let n = 1usize << log_n;
-    let fft = AdditiveFft::<Block16>::new(log_n);
+    let fft = AdditiveFft::<Block16>::new(log_n).unwrap();
 
     let mut r = rng();
 
@@ -204,7 +183,7 @@ fn additive_fft_eq_horner_above_parallel_threshold() {
         "packed buffer must reach the 1 MiB parallel threshold; got {bytes} B"
     );
 
-    let fft = AdditiveFft::<Block16>::new(log_n);
+    let fft = AdditiveFft::<Block16>::new(log_n).unwrap();
 
     let mut r = StdRng::seed_from_u64(0x5eed_ff70_8000);
 
@@ -249,7 +228,7 @@ fn additive_fft_roundtrip_scalar() {
 fn additive_fft_roundtrip_packed() {
     let log_n = 9u32;
     let n = 1usize << log_n;
-    let fft = AdditiveFft::<Block16>::new(log_n);
+    let fft = AdditiveFft::<Block16>::new(log_n).unwrap();
 
     let mut r = rng();
 
@@ -272,7 +251,7 @@ fn additive_fft_roundtrip_packed() {
 fn additive_fft_packed_eq_scalar() {
     let log_n = 6u32;
     let n = 1usize << log_n;
-    let fft = AdditiveFft::<Block16>::new(log_n);
+    let fft = AdditiveFft::<Block16>::new(log_n).unwrap();
 
     let mut r = rng();
 
@@ -311,7 +290,7 @@ fn additive_fft_packed_eq_scalar() {
 fn additive_fft_coset_eq_horner() {
     let log_n = 7u32;
     let n = 1usize << log_n;
-    let fft = AdditiveFft::<Block16>::new(log_n);
+    let fft = AdditiveFft::<Block16>::new(log_n).unwrap();
 
     let mut r = rng();
 
@@ -329,6 +308,27 @@ fn additive_fft_coset_eq_horner() {
 }
 
 #[test]
+fn additive_fft_eq_horner_wide_fields() {
+    let mut r = StdRng::seed_from_u64(0x5eed_ff70_4e00);
+    for log_n in [1u32, 3, 7] {
+        horner_check(log_n, Block32::ZERO, || Block32(r.random()));
+
+        let offset = Block32(r.random());
+        horner_check(log_n, offset, || Block32(r.random()));
+
+        horner_check(log_n, Block64::ZERO, || Block64(r.random()));
+
+        let offset = Block64(r.random());
+        horner_check(log_n, offset, || Block64(r.random()));
+
+        horner_check(log_n, Block128::ZERO, || Block128(r.random()));
+
+        let offset = Block128(r.random());
+        horner_check(log_n, offset, || Block128(r.random()));
+    }
+}
+
+#[test]
 fn additive_fft_deterministic() {
     let log_n = 9u32;
     let n = 1usize << log_n;
@@ -339,8 +339,8 @@ fn additive_fft_deterministic() {
         .map(|_| Flat::from_raw(Block16(r.random())))
         .collect();
 
-    let fft1 = AdditiveFft::<Block16>::new(log_n);
-    let fft2 = AdditiveFft::<Block16>::new(log_n);
+    let fft1 = AdditiveFft::<Block16>::new(log_n).unwrap();
+    let fft2 = AdditiveFft::<Block16>::new(log_n).unwrap();
 
     let mut a = input.clone();
     let mut b = input.clone();
@@ -353,7 +353,7 @@ fn additive_fft_deterministic() {
 
 #[test]
 fn additive_fft_rejects_bad_length() {
-    let fft = AdditiveFft::<Block16>::new(8);
+    let fft = AdditiveFft::<Block16>::new(8).unwrap();
     let mut data = vec![Flat::from_raw(Block16::ZERO); 100];
 
     assert!(matches!(
@@ -366,7 +366,7 @@ fn additive_fft_rejects_bad_length() {
 fn additive_fft_coset_roundtrip_scalar() {
     let log_n = 8u32;
     let n = 1usize << log_n;
-    let fft = AdditiveFft::<Block16>::new(log_n);
+    let fft = AdditiveFft::<Block16>::new(log_n).unwrap();
 
     let mut r = rng();
 
@@ -392,7 +392,7 @@ fn additive_fft_coset_roundtrip_scalar() {
 fn additive_fft_coset_packed_eq_scalar() {
     let log_n = 6u32;
     let n = 1usize << log_n;
-    let fft = AdditiveFft::<Block16>::new(log_n);
+    let fft = AdditiveFft::<Block16>::new(log_n).unwrap();
 
     let mut r = rng();
 
@@ -445,7 +445,7 @@ fn additive_fft_coset_packed_eq_scalar() {
 #[test]
 fn additive_fft_eq_horner_min() {
     let log_n = 1u32;
-    let fft = AdditiveFft::<Block16>::new(log_n);
+    let fft = AdditiveFft::<Block16>::new(log_n).unwrap();
 
     let mut r = rng();
 
@@ -468,7 +468,7 @@ fn additive_fft_eq_horner_min() {
 fn additive_fft_roundtrip_field_max() {
     let log_n = Block16::BITS as u32;
     let n = 1usize << log_n;
-    let fft = AdditiveFft::<Block16>::new(log_n);
+    let fft = AdditiveFft::<Block16>::new(log_n).unwrap();
 
     let mut r = rng();
 
@@ -487,7 +487,7 @@ fn additive_fft_roundtrip_field_max() {
 fn additive_fft_roundtrip_field_max_packed() {
     let log_n = Block16::BITS as u32;
     let n = 1usize << log_n;
-    let fft = AdditiveFft::<Block16>::new(log_n);
+    let fft = AdditiveFft::<Block16>::new(log_n).unwrap();
 
     let mut r = rng();
 
@@ -507,21 +507,37 @@ fn additive_fft_roundtrip_field_max_packed() {
 }
 
 #[test]
-#[should_panic(expected = "log_n must be in")]
 fn additive_fft_new_rejects_zero() {
-    let _ = AdditiveFft::<Block16>::new(0);
+    assert_eq!(
+        AdditiveFft::<Block16>::new(0).err(),
+        Some(FftError::BadLogN { log_n: 0, max: 16 })
+    );
 }
 
 #[test]
-#[should_panic(expected = "log_n must be in")]
 fn additive_fft_new_rejects_above_field_bits() {
-    let _ = AdditiveFft::<Block16>::new(Block16::BITS as u32 + 1);
+    assert_eq!(
+        AdditiveFft::<Block16>::new(Block16::BITS as u32 + 1).err(),
+        Some(FftError::BadLogN { log_n: 17, max: 16 })
+    );
+    assert_eq!(
+        AdditiveFft::<Block128>::new(64).err(),
+        Some(FftError::BadLogN { log_n: 64, max: 63 })
+    );
 }
 
 #[test]
-#[should_panic]
-fn cantor_beta_tower_out_of_range_panics() {
-    let _ = CantorBasis::beta_tower(CantorBasis::DIM);
+fn additive_fft_new_reports_twiddle_alloc() {
+    // First sizes past isize::MAX bytes:
+    // no allocation is attempted.
+    assert_eq!(
+        AdditiveFft::<Block128>::new(60).err(),
+        Some(FftError::TwiddleAlloc { log_n: 60 })
+    );
+    assert_eq!(
+        AdditiveFft::<Block64>::new(61).err(),
+        Some(FftError::TwiddleAlloc { log_n: 61 })
+    );
 }
 
 #[test]
@@ -570,7 +586,7 @@ fn additive_fft_lanewise_inverse_coset() {
 
 #[test]
 fn fft_error_display_carries_lengths() {
-    let fft = AdditiveFft::<Block16>::new(8);
+    let fft = AdditiveFft::<Block16>::new(8).unwrap();
     let mut data = vec![Flat::from_raw(Block16::ZERO); 7];
 
     let err = fft.forward_scalar(&mut data).unwrap_err();
@@ -587,6 +603,15 @@ fn fft_error_display_carries_lengths() {
         msg.contains("256") && msg.contains('7'),
         "uninformative: {msg}"
     );
+
+    let msg = format!("{}", FftError::BadLogN { log_n: 70, max: 63 });
+    assert!(
+        msg.contains("70") && msg.contains("63"),
+        "uninformative: {msg}"
+    );
+
+    let msg = format!("{}", FftError::TwiddleAlloc { log_n: 61 });
+    assert!(msg.contains("61"), "uninformative: {msg}");
 }
 
 #[test]
@@ -611,7 +636,7 @@ fn additive_fft_roundtrip_block128() {
 fn additive_fft_coset_roundtrip_block128() {
     let log_n = 8u32;
     let n = 1usize << log_n;
-    let fft = AdditiveFft::<Block128>::new(log_n);
+    let fft = AdditiveFft::<Block128>::new(log_n).unwrap();
 
     let mut r = StdRng::seed_from_u64(0x5eed_ff70_c128);
 
@@ -634,7 +659,7 @@ fn additive_fft_roundtrip_block128_packed() {
 
     let log_n = 8u32;
     let n = 1usize << log_n;
-    let fft = AdditiveFft::<Block128>::new(log_n);
+    let fft = AdditiveFft::<Block128>::new(log_n).unwrap();
 
     let mut r = StdRng::seed_from_u64(0x5eed_ff70_a128);
 
@@ -658,4 +683,51 @@ fn additive_fft_roundtrip_block128_packed() {
 fn additive_fft_roundtrip_block128_2p20() {
     let mut r = StdRng::seed_from_u64(0x5eed_ff70_2020);
     roundtrip_scalar(20, || Block128(r.random()));
+}
+
+#[test]
+fn additive_fft_parallel_eq_evaluate_at_block128() {
+    let mut r = StdRng::seed_from_u64(0x5eed_ca07_9a70);
+
+    let log_n = 16u32;
+    let n = 1usize << log_n;
+
+    let fft = AdditiveFft::<Block128>::new(log_n).unwrap();
+    let basis = CantorBasis::<Block128>::new(log_n as usize + 1).unwrap();
+    let shift = basis.betas()[log_n as usize];
+
+    let coeffs: Vec<Flat<Block128>> = (0..n).map(|_| Block128(r.random()).to_hardware()).collect();
+
+    let mut data = coeffs.clone();
+    fft.forward_coset_scalar(&mut data, shift).unwrap();
+
+    let indices: Vec<usize> = (0..n).collect();
+
+    let mut scratch = vec![Flat::from_raw(Block128::ZERO); n - 1];
+    let mut expected = vec![Flat::from_raw(Block128::ZERO); n];
+
+    basis
+        .evaluate_at(&coeffs, shift, &indices, &mut scratch, &mut expected)
+        .unwrap();
+
+    assert_eq!(data, expected, "parallel forward != evaluate_at");
+
+    let mut back = data.clone();
+    fft.inverse_coset_scalar(&mut back, shift).unwrap();
+
+    assert_eq!(back, coeffs, "parallel inverse != coefficients");
+
+    #[cfg(feature = "parallel")]
+    {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(3)
+            .build()
+            .unwrap();
+
+        let mut inside = coeffs.clone();
+        pool.install(|| fft.forward_coset_scalar(&mut inside, shift))
+            .unwrap();
+
+        assert_eq!(inside, data, "in-pool forward != out-of-pool forward");
+    }
 }

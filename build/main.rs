@@ -25,6 +25,13 @@ mod gf_oracle {
     include!(concat!(env!("CARGO_MANIFEST_DIR"), "/build/gf_oracle.rs"));
 }
 
+mod cantor_oracle {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/build/cantor_oracle.rs"
+    ));
+}
+
 // Mirror constants::POLY_* and Block8::EXTENSION_TAU.
 // x^k + POLY_k is the flat-basis modulus; verify_isomorphism_*
 // and write_algebra_extras_16 pin them against the oracle at build time.
@@ -1604,6 +1611,17 @@ fn write_algebra_extras_16(file: &mut File) {
         }
     }
 
+    for (i, (&beta, &pinned)) in cantor_tower
+        .iter()
+        .zip(&cantor_oracle::CANTOR_TOWER)
+        .enumerate()
+    {
+        assert_eq!(
+            beta as u64, pinned,
+            "Cantor chain drifted from build/cantor_oracle.rs at beta_{i}"
+        );
+    }
+
     // The FFT applies sigma in the flat basis; pin the chain
     // there too, independent of the isomorphism transport.
     let mut prev_flat = apply_16(cantor_tower[0], &TOWER_TO_FLAT_16);
@@ -1620,8 +1638,6 @@ fn write_algebra_extras_16(file: &mut File) {
 
         prev_flat = bf;
     }
-
-    write_raw_16(file, "CANTOR_BASIS_TOWER_16", &cantor_tower);
 }
 
 fn xorshift64(s: &mut u64) -> u64 {
@@ -1731,6 +1747,14 @@ macro_rules! impl_write_algebra_extras_wide {
                         "Cantor chain broken: sigma(beta_i) != beta_(i-1)"
                     );
                 }
+            }
+
+            for (i, (&b, &pinned)) in chain.iter().zip(&cantor_oracle::CANTOR_TOWER).enumerate() {
+                assert_eq!(
+                    b as u128, pinned as u128,
+                    "Cantor chain drifted from build/cantor_oracle.rs at beta_{}",
+                    i
+                );
             }
 
             writeln!(
@@ -1972,4 +1996,5 @@ fn main() {
 
     println!("cargo::rerun-if-changed=build/main.rs");
     println!("cargo::rerun-if-changed=build/gf_oracle.rs");
+    println!("cargo::rerun-if-changed=build/cantor_oracle.rs");
 }

@@ -18,71 +18,17 @@
 //! Additive FFT over GF(2^N) (Cantor basis).
 
 mod additive;
+mod cantor;
 mod reed_solomon;
 
 pub use additive::{AdditiveFft, FftError};
+pub use cantor::{CantorBasis, CantorError};
 pub use reed_solomon::{ReedSolomon, RsError};
 
-use crate::{BinaryFieldExtras, Bit, Block16, TowerField, constants};
+use crate::BinaryFieldExtras;
 
-/// The GF(2)-basis {β_0, …, β_15} of GF(2^16) with
-/// β_0 = 1 and β_{i-1} = β_i^2 + β_i (Cantor 1989).
-/// Baked at build time; this is a typed view over it.
-pub struct CantorBasis;
-
-impl CantorBasis {
-    pub const DIM: usize = 16;
-
-    pub fn beta_tower(i: usize) -> Block16 {
-        Block16(constants::CANTOR_BASIS_TOWER_16[i])
-    }
-
-    /// Verifies the baked basis against live field arithmetic:
-    /// independence, β_0 = 1, σ(β_i) = β_{i-1},
-    /// s_i(β_i) = 1, and the trace pattern.
-    pub fn self_check() -> bool {
-        if Self::beta_tower(0) != Block16::ONE {
-            return false;
-        }
-
-        let mut piv = [0u16; 16];
-        let mut rank = 0;
-
-        for i in 0..Self::DIM {
-            let b = Self::beta_tower(i);
-
-            if vanish_eval(i, b) != Block16::ONE {
-                return false;
-            }
-
-            if (b.trace() == Bit::ONE) != (i == Self::DIM - 1) {
-                return false;
-            }
-
-            if i >= 1 && b.square() + b != Self::beta_tower(i - 1) {
-                return false;
-            }
-
-            let mut x = b.0;
-            while x != 0 {
-                let p = x.trailing_zeros() as usize;
-
-                if piv[p] == 0 {
-                    piv[p] = x;
-                    rank += 1;
-                    break;
-                }
-
-                x ^= piv[p];
-            }
-        }
-
-        rank == Self::DIM
-    }
-}
-
-/// s_i(x): the GF(2)-linear vanishing polynomial of
-/// W_i = span(β_0..β_{i-1}). Equals the i-fold
+/// s_i(x): the GF(2)-linear vanishing polynomial
+/// of W_i = span(β_0..β_{i-1}). Equals the i-fold
 /// composition of σ(t) = t^2 + t; deg s_i = 2^i.
 pub fn vanish_eval<F: BinaryFieldExtras>(i: usize, x: F) -> F {
     let mut t = x;
