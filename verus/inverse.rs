@@ -45,16 +45,17 @@ use algebra::bridge::b256::b128::{
     mul128_matches_schoolbook, pack as pk128, schoolbook128,
 };
 use algebra::bridge::gf_model::{
-    clmul_one_l, clmul_one_r, deg_lt_conv, deg_modulus, deg_upper, ext_norm, frobenius_order,
-    gf_mul_tower, gf_mul_tower_assoc, gf_mul_tower_bound, gf_mul_tower_comm,
-    gf_mul_tower_distrib_r, in_field, is_correct_inverse, modulus, pack_mod_div, pmod, pow_2exp,
-    pow2, pow2_add, quad_ext_inverse, tau_tower, xor, xor_assoc, xor_comm, xor_lt_pow2, xor_self,
-    xor_zero,
+    deg_lt_conv, deg_upper, ext_norm, gf_mul_tower, gf_mul_tower_assoc, gf_mul_tower_bound,
+    gf_mul_tower_comm, gf_mul_tower_distrib_l, gf_mul_tower_distrib_r, gf_mul_tower_zero_l,
+    gf_mul_tower_zero_r, hi_half, in_field, is_correct_inverse, lo_half, pack_mod_div, pow_2exp,
+    pow2, pow2_add, quad_ext_inverse, tau_tower, trace_spec, xor, xor_assoc, xor_comm, xor_eq_zero,
+    xor_lt_pow2, xor_self, xor_zero,
 };
 use algebra::{
-    square8_spread, square8_spread_is_schoolbook, square16_is_schoolbook, square16_twin,
-    square32_is_schoolbook, square32_twin, square64_is_schoolbook, square64_twin,
-    square128_is_schoolbook, square128_twin,
+    frobenius_and_trace, frobenius_order, halves, one_in_field, sq_of_product, square8_spread,
+    square8_spread_is_schoolbook, square16_is_schoolbook, square16_twin, square32_is_schoolbook,
+    square32_twin, square64_is_schoolbook, square64_twin, square128_is_schoolbook, square128_twin,
+    tau_in_field, tower_one, trace_additive, trace_idempotent, trace_of_square,
 };
 use bridge::{
     bridge8, bridge16, bridge32, bridge64, bridge128, pack16, pack32, pack64, pack128, split16,
@@ -92,19 +93,6 @@ pub open spec fn powm(x: nat, n: nat) -> nat
     }
 }
 
-proof fn one8(x: nat)
-    requires in_field(x, 8)
-    ensures
-        gf_mul_tower(x, 1, 8) == x,
-        gf_mul_tower(1, x, 8) == x,
-{
-    deg_modulus(8);
-    clmul_one_r(x);
-    clmul_one_l(x);
-
-    assert(pmod(x, modulus(8)) == x);
-}
-
 proof fn powm_in_field(x: nat, n: nat)
     requires in_field(x, 8)
     ensures in_field(powm(x, n), 8)
@@ -126,7 +114,7 @@ proof fn powm_add(x: nat, a: nat, b: nat)
 {
     if b == 0 {
         powm_in_field(x, a);
-        one8(powm(x, a));
+        tower_one(powm(x, a), 8);
     } else {
         powm_add(x, a, (b - 1) as nat);
         gf_mul_tower_assoc(powm(x, a), powm(x, (b - 1) as nat), x, 8);
@@ -143,7 +131,7 @@ proof fn pow_2exp_is_powm(x: nat, j: nat)
         assert(powm(x, 0) == 1);
         assert(powm(x, 1) == gf_mul_tower(1, x, 8));
 
-        one8(x);
+        tower_one(x, 8);
     } else {
         let h = pow2((j - 1) as nat);
 
@@ -264,7 +252,7 @@ pub proof fn inv8_correct(x: u8)
 
         gf_mul_tower_comm(y, xn, 8);
         gf_mul_tower_distrib_r(xn, y, 1, 8);
-        one8(xn);
+        tower_one(xn, 8);
         xor_self(xn);
 
         assert(gf_mul_tower(xn, xor(y, 1), 8) == 0);
@@ -290,6 +278,80 @@ pub proof fn inv8_correct(x: u8)
 // ============================================================
 // GF(2^2m): a^-1 = conj(a) · N(a)^-1, block{16..256}.rs
 // ============================================================
+
+pub proof fn norm_nonzero(a: nat, k: nat, w: nat)
+    requires
+        k == 16 || k == 32 || k == 64 || k == 128 || k == 256,
+        in_field(a, k),
+        a != 0,
+        is_correct_inverse(
+            if hi_half(a, k) == 0 { lo_half(a, k) } else { hi_half(a, k) },
+            w,
+            (k / 2) as nat,
+        ),
+    ensures ext_norm(lo_half(a, k), hi_half(a, k), (k / 2) as nat) != 0
+{
+    hide(gf_mul_tower);
+
+    let m = (k / 2) as nat;
+    let lo = lo_half(a, k);
+    let hi = hi_half(a, k);
+    let t = tau_tower(m);
+    let ww = gf_mul_tower(w, w, m);
+    let ll = gf_mul_tower(lo, lo, m);
+    let nrm = ext_norm(lo, hi, m);
+
+    halves(a, k);
+    frobenius_and_trace(m);
+    tau_in_field(m);
+    one_in_field(m);
+    tower_one(1, m);
+    gf_mul_tower_zero_l(ww, m);
+
+    if hi == 0 {
+        gf_mul_tower_zero_r(lo, m);
+        gf_mul_tower_zero_l(0, m);
+        gf_mul_tower_zero_l(t, m);
+        xor_zero(ll);
+        sq_of_product(lo, w, m);
+
+        assert(a == lo + pow2(m) * 0);
+        assert(nrm == ll);
+    } else {
+        let u = gf_mul_tower(lo, w, m);
+        let uu = gf_mul_tower(u, u, m);
+        let s = trace_spec(u, m, m);
+        let lh = gf_mul_tower(lo, hi, m);
+        let hh = gf_mul_tower(hi, hi, m);
+
+        gf_mul_tower_bound(lo, w, m);
+        deg_lt_conv(u, m);
+
+        gf_mul_tower_distrib_l(xor(ll, lh), gf_mul_tower(hh, t, m), ww, m);
+        gf_mul_tower_distrib_l(ll, lh, ww, m);
+        sq_of_product(lo, w, m);
+
+        gf_mul_tower_assoc(lo, hi, ww, m);
+        gf_mul_tower_assoc(hi, w, w, m);
+        tower_one(w, m);
+
+        gf_mul_tower_assoc(hh, t, ww, m);
+        gf_mul_tower_comm(t, ww, m);
+        gf_mul_tower_assoc(hh, ww, t, m);
+        sq_of_product(hi, w, m);
+        tower_one(t, m);
+
+        assert(gf_mul_tower(nrm, ww, m) == xor(xor(uu, u), t));
+
+        if nrm == 0 {
+            xor_eq_zero(xor(uu, u), t);
+            trace_additive(uu, u, m, m);
+            trace_of_square(u, m, m);
+            trace_idempotent(u, m);
+            xor_self(s);
+        }
+    }
+}
 
 pub open spec fn inv16_twin(a: u16) -> u16 {
     let l = lo16(a);
@@ -352,6 +414,15 @@ pub proof fn inv16_correct(a: u16)
     assert(norm as nat == ext_norm(ln, hn, 8));
 
     inv8_correct(norm);
+
+    let s = if h == 0 { l } else { h };
+
+    inv8_correct(s);
+
+    if a != 0 {
+        norm_nonzero(a as nat, 16, inv8_twin(s) as nat);
+    }
+
     quad_ext_inverse(a as nat, 16, ninv as nat);
 
     xor8(h, l);
@@ -429,6 +500,15 @@ pub proof fn inv32_correct(a: u32)
     assert(norm as nat == ext_norm(ln, hn, 16));
 
     inv16_correct(norm);
+
+    let s = if h == 0 { l } else { h };
+
+    inv16_correct(s);
+
+    if a != 0 {
+        norm_nonzero(a as nat, 32, inv16_twin(s) as nat);
+    }
+
     quad_ext_inverse(a as nat, 32, ninv as nat);
 
     xor16(h, l);
@@ -508,6 +588,15 @@ pub proof fn inv64_correct(a: u64)
     assert(norm as nat == ext_norm(ln, hn, 32));
 
     inv32_correct(norm);
+
+    let s = if h == 0 { l } else { h };
+
+    inv32_correct(s);
+
+    if a != 0 {
+        norm_nonzero(a as nat, 64, inv32_twin(s) as nat);
+    }
+
     quad_ext_inverse(a as nat, 64, ninv as nat);
 
     xor32(h, l);
@@ -587,6 +676,15 @@ pub proof fn inv128_correct(a: u128)
     assert(norm as nat == ext_norm(ln, hn, 64));
 
     inv64_correct(norm);
+
+    let s = if h == 0 { l } else { h };
+
+    inv64_correct(s);
+
+    if a != 0 {
+        norm_nonzero(a as nat, 128, inv64_twin(s) as nat);
+    }
+
     quad_ext_inverse(a as nat, 128, ninv as nat);
 
     xor64(h, l);
@@ -678,6 +776,15 @@ pub proof fn inv256_correct(alo: u128, ahi: u128)
     assert(norm as nat == ext_norm(ln, hn, 128));
 
     inv128_correct(norm);
+
+    let s = if ahi == 0 { alo } else { ahi };
+
+    inv128_correct(s);
+
+    if a != 0 {
+        norm_nonzero(a, 256, inv128_twin(s) as nat);
+    }
+
     quad_ext_inverse(a, 256, ninv as nat);
 
     xor128(ahi, alo);
