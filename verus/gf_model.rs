@@ -20,7 +20,7 @@ use vstd::prelude::*;
 #[path = "axioms_t.rs"]
 pub mod axioms_t;
 
-pub use axioms_t::{frobenius_order_gen, norm_nonzero, phi_mult_gen, phi_roundtrip};
+pub use axioms_t::{phi_mult_gen, phi_roundtrip};
 
 verus! {
 
@@ -574,7 +574,7 @@ pub proof fn pow2_mono(i: nat, j: nat)
     }
 }
 
-proof fn xor_eq_zero(a: nat, b: nat)
+pub proof fn xor_eq_zero(a: nat, b: nat)
     requires xor(a, b) == 0
     ensures a == b
     decreases a + b
@@ -1135,7 +1135,7 @@ pub proof fn pack_mod_div(lo: nat, hi: nat, m: nat)
     );
 }
 
-proof fn split_pack(x: nat, m: nat)
+pub proof fn split_pack(x: nat, m: nat)
     ensures x == xor(x % pow2(m), pow2(m) * (x / pow2(m)))
 {
     pow2_pos(m);
@@ -1201,7 +1201,7 @@ pub proof fn xor_lt_pow2(u: nat, v: nat, m: nat)
     deg_upper(xor(u, v), m);
 }
 
-proof fn xor_pack(l1: nat, h1: nat, l2: nat, h2: nat, m: nat)
+pub proof fn xor_pack(l1: nat, h1: nat, l2: nat, h2: nat, m: nat)
     requires l1 < pow2(m), l2 < pow2(m)
     ensures xor(l1 + pow2(m) * h1, l2 + pow2(m) * h2) == xor(l1, l2) + pow2(m) * xor(h1, h2)
 {
@@ -1331,7 +1331,7 @@ pub proof fn gf_mul_tower_distrib_l(a: nat, b: nat, c: nat, k: nat)
     gf_mul_tower_comm(c, b, k);
 }
 
-proof fn gf_mul_tower_zero_l(b: nat, k: nat)
+pub proof fn gf_mul_tower_zero_l(b: nat, k: nat)
     requires k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
     ensures gf_mul_tower(0, b, k) == 0
     decreases k
@@ -1375,7 +1375,7 @@ proof fn gf_mul_tower_zero_l(b: nat, k: nat)
     }
 }
 
-proof fn gf_mul_tower_zero_r(a: nat, k: nat)
+pub proof fn gf_mul_tower_zero_r(a: nat, k: nat)
     requires k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
     ensures gf_mul_tower(a, 0, k) == 0
 {
@@ -1676,11 +1676,12 @@ pub open spec fn ext_norm(lo: nat, hi: nat, m: nat) -> nat {
 
 // a^-1 = conj(a) * N(a)^-1, conj = (lo+hi, hi). block128.rs.
 // The reduction a * (conj(a) * ninv) == N(a) * ninv is proven algebra (tau-generic);
-// only N(a) != 0 for a != 0 is trusted (norm_nonzero).
+// N(a) != 0 for a != 0 is the caller's (inverse.rs::norm_nonzero).
 pub proof fn quad_ext_inverse(a: nat, k: nat, ninv: nat)
     requires
         k == 16 || k == 32 || k == 64 || k == 128 || k == 256,
         in_field(a, k),
+        a != 0 ==> ext_norm(lo_half(a, k), hi_half(a, k), (k / 2) as nat) != 0,
         is_correct_inverse(
             ext_norm(lo_half(a, k), hi_half(a, k), (k / 2) as nat),
             ninv,
@@ -1798,7 +1799,6 @@ pub proof fn quad_ext_inverse(a: nat, k: nat, ninv: nat)
 
         assert(res == 0);
     } else {
-        norm_nonzero(a, k);
         assert(gf_mul_tower(a, res, k) == 1);
     }
 }
@@ -1959,8 +1959,7 @@ pub proof fn gf_mul_tower_square_unfold(a: nat, k: nat)
 }
 
 // ============================================================
-// Frobenius order and trace
-// x^(2^k) == x on GF(2^k); Tr(x)^2 == Tr(x)
+// Frobenius iterates and trace
 // ============================================================
 
 // e-fold tower squaring: x^(2^e).
@@ -2014,53 +2013,7 @@ pub proof fn pow_2exp_add(x: nat, e1: nat, e2: nat, k: nat)
     }
 }
 
-// x^(2^k) == x for every field element: the generator axiom
-// extends over GF(2)-linearity (squaring is additive).
-pub proof fn frobenius_order(x: nat, k: nat)
-    requires
-        k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
-        in_field(x, k),
-    ensures pow_2exp(x, k, k) == x
-{
-    let f = |y: nat| pow_2exp(y, k, k);
-    let g = |y: nat| y;
-
-    assert forall|u: nat, v: nat| in_field(u, k) && in_field(v, k)
-        implies #[trigger] f(xor(u, v)) == xor(f(u), f(v)) by {
-        pow_2exp_additive(u, v, k, k);
-    }
-
-    assert forall|u: nat, v: nat| in_field(u, k) && in_field(v, k)
-        implies #[trigger] g(xor(u, v)) == xor(g(u), g(v)) by {
-    }
-
-    assert forall|i: nat| i < k implies #[trigger] f(pow2(i)) == g(pow2(i)) by {
-        frobenius_order_gen(i, k);
-    }
-
-    linear_determined_field(f, g, x, k);
-}
-
-// Justifies production frobenius's `k % BITS` reduction.
-pub proof fn frobenius_mod_cycle(x: nat, e: nat, k: nat)
-    requires
-        k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
-        in_field(x, k),
-    ensures pow_2exp(x, e, k) == pow_2exp(x, (e % k) as nat, k)
-    decreases e
-{
-    if e < k {
-        vstd::arithmetic::div_mod::lemma_small_mod(e, k);
-    } else {
-        pow_2exp_add(x, k, (e - k) as nat, k);
-        frobenius_order(x, k);
-        frobenius_mod_cycle(x, (e - k) as nat, k);
-
-        vstd::arithmetic::div_mod::lemma_mod_sub_multiples_vanish(e as int, k as int);
-    }
-}
-
-proof fn trace_sq_shift(x: nat, n: nat, k: nat)
+pub proof fn trace_sq_shift(x: nat, n: nat, k: nat)
     requires k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
     ensures ({
         let t = trace_spec(x, n, k);
@@ -2096,29 +2049,6 @@ proof fn trace_sq_shift(x: nat, n: nat, k: nat)
 
         assert(trace_spec(x, n + 1, k) == xor(trace_spec(x, n, k), sq_p));
     }
-}
-
-// Tr(x)^2 == Tr(x): the trace lands in the
-// Frobenius-fixed subfield GF(2).
-pub proof fn trace_idempotent(x: nat, k: nat)
-    requires
-        k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
-        in_field(x, k),
-    ensures ({
-        let t = trace_spec(x, k, k);
-        gf_mul_tower(t, t, k) == t
-    })
-{
-    trace_sq_shift(x, k, k);
-    frobenius_order(x, k);
-
-    let t = trace_spec(x, k, k);
-
-    assert(trace_spec(x, k + 1, k) == xor(t, x));
-
-    xor_assoc(t, x, x);
-    xor_self(x);
-    xor_zero(t);
 }
 
 // ============================================================

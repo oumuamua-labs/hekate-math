@@ -18,11 +18,11 @@
 //! Per-instruction model of the aarch64 NEON surface the flat
 //! path uses. Definitions only, zero proof content: every spec
 //! fn transcribes one instruction's operation from the Arm ARM
-//! (DDI 0487, A-profile). The tie to real silicon is dynamic,
-//! `tests/neon_differential.rs`, and every row is trusted, per
-//! TRUSTED_AXIOMS.md. Vectors are lane Seqs, lane 0 first; the
-//! `u128`/lane-array transmute view is little-endian (AAPCS64,
-//! `aarch64_be` unsupported).
+//! (DDI 0487 M.d, A-profile). The tie to real silicon is dynamic,
+//! `verus/exec/rows.rs` and `tests/neon_differential.rs`, and
+//! every row is trusted, per TRUSTED_AXIOMS.md. Vectors are lane
+//! Seqs, lane 0 first; the `u128`/lane-array transmute view
+//! is little-endian (AAPCS64, `aarch64_be` unsupported).
 
 use vstd::prelude::*;
 
@@ -32,7 +32,7 @@ verus! {
 // PMULL: polynomial (carry-less) multiply
 // ============================================================
 
-// PMULL Vd.1Q, Vn.1D, Vm.1D (vmull_p64), DDI 0487 C7.2.246:
+// PMULL Vd.1Q, Vn.1D, Vm.1D (vmull_p64), DDI 0487 M.d C7.2.258:
 // 64×64 → 128 product over GF(2)[x], low-bit recursion.
 pub open spec fn vmull_p64_m(a: u64, b: u64) -> u128
     decreases a
@@ -55,16 +55,21 @@ pub open spec fn clmul8_lane(a: u8, b: u8) -> u16
     }
 }
 
-// PMULL Vd.8H, Vn.8B, Vm.8B (vmull_p8), DDI 0487 C7.2.246.
+// PMULL Vd.8H, Vn.8B, Vm.8B (vmull_p8), DDI 0487 M.d C7.2.258.
 pub open spec fn vmull_p8_m(a: Seq<u8>, b: Seq<u8>) -> Seq<u16> {
     Seq::new(8, |i: int| clmul8_lane(a[i], b[i]))
+}
+
+// PMULL2 Vd.1Q, Vn.2D, Vm.2D (vmull_high_p64), DDI 0487 M.d C7.2.258.
+pub open spec fn vmull_high_p64_m(a: u128, b: u128) -> u128 {
+    vmull_p64_m(hi64(a), hi64(b))
 }
 
 // ============================================================
 // Lane-wise logic and shifts
 // ============================================================
 
-// EOR Vd.16B (veor/veorq), DDI 0487 C7.2.126.
+// EOR Vd.16B (veor/veorq), DDI 0487 M.d C7.2.43.
 pub open spec fn veor_m8(a: Seq<u8>, b: Seq<u8>) -> Seq<u8> {
     Seq::new(a.len(),|i: int| a[i] ^ b[i])
 }
@@ -73,17 +78,21 @@ pub open spec fn veor_m16(a: Seq<u16>, b: Seq<u16>) -> Seq<u16> {
     Seq::new(a.len(),|i: int| a[i] ^ b[i])
 }
 
-// AND Vd.16B (vand/vandq), DDI 0487 C7.2.10.
+pub open spec fn veor_m64(a: Seq<u64>, b: Seq<u64>) -> Seq<u64> {
+    Seq::new(a.len(),|i: int| a[i] ^ b[i])
+}
+
+// AND Vd.16B (vand/vandq), DDI 0487 M.d C7.2.11.
 pub open spec fn vand_m8(a: Seq<u8>, b: Seq<u8>) -> Seq<u8> {
     Seq::new(a.len(),|i: int| a[i] & b[i])
 }
 
-// SHL Vd.8H, #n (vshlq_n_u16), DDI 0487 C7.2.315: truncating.
+// SHL Vd.8H, #n (vshlq_n_u16), DDI 0487 M.d C7.2.298: truncating.
 pub open spec fn vshl_m16(a: Seq<u16>, n: u16) -> Seq<u16> {
     Seq::new(a.len(),|i: int| a[i] << n)
 }
 
-// USHR Vd.8H, #n (vshrq_n_u16), DDI 0487 C7.2.416.
+// USHR Vd.8H, #n (vshrq_n_u16), DDI 0487 M.d C7.2.451.
 pub open spec fn vshr_m16(a: Seq<u16>, n: u16) -> Seq<u16> {
     Seq::new(a.len(),|i: int| a[i] >> n)
 }
@@ -97,18 +106,23 @@ pub open spec fn vshr_m8(a: Seq<u8>, n: u8) -> Seq<u8> {
 // Moves, narrowing, table lookup, permutes
 // ============================================================
 
-// DUP Vd.16B, Wn (vdup_n_u8 / vdupq_n_u8), DDI 0487 C7.2.39.
+// DUP (general) Vd.16B, Wn (vdup_n_u8 / vdupq_n_u8) and
+// Vd.2D, Xn (vdupq_n_p64), DDI 0487 M.d C7.2.41.
 pub open spec fn vdup_m8(x: u8, lanes: nat) -> Seq<u8> {
     Seq::new(lanes, |_i: int| x)
 }
 
-// XTN Vd.8B, Vn.8H (vmovn_u16), DDI 0487 C7.2.435: per-lane
-// truncate to the low byte.
+pub open spec fn vdupq_n_p64_m(x: u64) -> u128 {
+    (x as u128) | ((x as u128) << 64)
+}
+
+// XTN Vd.8B, Vn.8H (vmovn_u16), DDI 0487 M.d C7.2.461:
+// per-lane truncate to the low byte.
 pub open spec fn vmovn_m16(a: Seq<u16>) -> Seq<u8> {
     Seq::new(a.len(),|i: int| a[i] as u8)
 }
 
-// TBL Vd.8B, {Vn.16B}, Vm.8B (vqtbl1_u8), DDI 0487 C7.2.358:
+// TBL Vd.8B, {Vn.16B}, Vm.8B (vqtbl1_u8), DDI 0487 M.d C7.2.397:
 // index < 16 selects, out-of-range yields 0.
 pub open spec fn vqtbl1_m(t: Seq<u8>, idx: Seq<u8>) -> Seq<u8> {
     Seq::new(idx.len(), |i: int| if idx[i] < 16 { t[idx[i] as int] } else { 0 })
@@ -128,7 +142,17 @@ pub open spec fn vcombine_m8(lo: Seq<u8>, hi: Seq<u8>) -> Seq<u8> {
     lo + hi
 }
 
-// TRN1/TRN2 Vd.16B (vtrn1q/vtrn2q), DDI 0487 C7.2.367-368:
+// EXT Vd.16B, Vn.16B, Vm.16B, #n (vextq_u8), DDI 0487 M.d C7.2.44:
+// bytes n..15 of Vn, then bytes 0..n-1 of Vm.
+pub open spec fn vextq_m(a: u128, b: u128, n: nat) -> u128 {
+    if n == 0 {
+        a
+    } else {
+        (a >> ((8 * n) as u128)) | (b << ((128 - 8 * n) as u128))
+    }
+}
+
+// TRN1/TRN2 Vd.16B (vtrn1q/vtrn2q), DDI 0487 M.d C7.2.399-400:
 // interleave even (TRN1) or odd (TRN2) lanes of the pair.
 pub open spec fn vtrn1_m<T>(a: Seq<T>, b: Seq<T>) -> Seq<T> {
     Seq::new(a.len(),|i: int| if i % 2 == 0 { a[i] } else { b[i - 1] })
@@ -138,7 +162,7 @@ pub open spec fn vtrn2_m<T>(a: Seq<T>, b: Seq<T>) -> Seq<T> {
     Seq::new(a.len(),|i: int| if i % 2 == 0 { a[i + 1] } else { b[i] })
 }
 
-// UZP1/UZP2 Vd.16B (vuzp1q/vuzp2q), DDI 0487 C7.2.425-426:
+// UZP1/UZP2 Vd.16B (vuzp1q/vuzp2q), DDI 0487 M.d C7.2.458-459:
 // concatenate, then take even (UZP1) or odd (UZP2) lanes.
 pub open spec fn vuzp1_m<T>(a: Seq<T>, b: Seq<T>) -> Seq<T> {
     Seq::new(a.len(),|i: int| if 2 * i < a.len() { a[2 * i] } else { b[2 * i - a.len()] })
@@ -165,7 +189,7 @@ pub open spec fn hi64(x: u128) -> u64 {
     (x >> 64) as u64
 }
 
-// u16 ↔ byte pair inside a lane: low byte first.
+// u16 <-> byte pair inside a lane: low byte first.
 pub open spec fn lo8(x: u16) -> u8 {
     x as u8
 }
@@ -212,6 +236,14 @@ pub open spec fn bytes64(s: Seq<u64>) -> Seq<u8> {
 
 pub open spec fn u128_bytes(x: u128) -> Seq<u8> {
     Seq::new(16, |i: int| (x >> ((8 * i) as u128)) as u8)
+}
+
+pub open spec fn u128_lanes64(x: u128) -> Seq<u64> {
+    seq![lo64(x), hi64(x)]
+}
+
+pub open spec fn lanes64_u128(s: Seq<u64>) -> u128 {
+    (s[0] as u128) | ((s[1] as u128) << 64)
 }
 
 fn main() {

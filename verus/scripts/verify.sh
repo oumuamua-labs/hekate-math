@@ -6,7 +6,7 @@
 #
 # Usage:
 #   verus/scripts/verify.sh # every unit under verus/
-#   verus/scripts/verify.sh verus/neon/flat.rs [...]
+#   verus/scripts/verify.sh verus/flat/mul.rs [...]
 #
 # Runs from the repo root; unit paths are repo-relative.
 # Binary resolution:
@@ -40,8 +40,8 @@ if ! command -v jq > /dev/null; then
 fi
 
 # Silent-shrink guard: bump with TRUSTED_AXIOMS.md.
-EXPECTED_EXTERNAL_BODY=4
-EXPECTED_VERIFIED=2922
+EXPECTED_EXTERNAL_BODY=2
+EXPECTED_VERIFIED=3050
 
 # The whole verifier::external* family is trusted;
 # only external_body, only in axioms_t.rs, only on its own line.
@@ -73,13 +73,13 @@ if [ "$#" -gt 0 ]; then
   FILES="$*"
 else
   FULL=1
-  FILES=$(find verus -name '*.rs' | sort)
+  FILES=$(find verus -name '*.rs' -not -path 'verus/exec/*' | sort)
   N=$(echo "$FILES" | wc -l | tr -d ' ')
 
   # Silent-shrink guard:
   # bump when adding or removing a proof file.
-  if [ "$N" -ne 18 ]; then
-    echo "error: expected 18 verus files, found $N" >&2
+  if [ "$N" -ne 19 ]; then
+    echo "error: expected 19 verus files, found $N" >&2
     exit 2
   fi
 

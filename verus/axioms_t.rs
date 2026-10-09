@@ -23,9 +23,7 @@
 
 use vstd::prelude::*;
 
-use super::{
-    ext_norm, gf_mul, gf_mul_tower, hi_half, in_field, lo_half, phi, phi_inv, pow_2exp, pow2,
-};
+use super::{gf_mul, gf_mul_tower, in_field, phi, phi_inv, pow2};
 
 verus! {
 
@@ -46,23 +44,6 @@ pub proof fn phi_mult_gen(i: nat, j: nat, k: nat)
     ensures
         phi(gf_mul_tower(pow2(i), pow2(j), k), k)
             == gf_mul(phi(pow2(i), k), phi(pow2(j), k), k)
-{}
-
-#[verifier::external_body]
-pub proof fn norm_nonzero(a: nat, k: nat)
-    requires
-        k == 16 || k == 32 || k == 64 || k == 128 || k == 256,
-        in_field(a, k),
-        a != 0,
-    ensures ext_norm(lo_half(a, k), hi_half(a, k), (k / 2) as nat) != 0,
-{}
-
-#[verifier::external_body]
-pub proof fn frobenius_order_gen(i: nat, k: nat)
-    requires
-        k == 8 || k == 16 || k == 32 || k == 64 || k == 128,
-        i < k,
-    ensures pow_2exp(pow2(i), k, k) == pow2(i)
 {}
 
 } // verus!

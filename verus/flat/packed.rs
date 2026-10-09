@@ -25,24 +25,26 @@
 
 use vstd::prelude::*;
 
-#[path = "flat.rs"]
-pub mod flat;
+#[path = "mul.rs"]
+pub mod mul;
 
-use flat::bridge;
-use flat::bridge::gf_model::{
+use mul::bridge;
+use mul::bridge::gf_model::{
     clmul, clmul_distrib_l, clmul_distrib_r, clmul_one_r, clmul_pow2, deg_lt_conv, deg_modulus,
     gf_mul, lo_plus_hipart_is_xor, modulus, pmod, pmod_additive, pow2, pow2_mono, xor, xor_assoc,
     xor_comm, xor_lt_pow2, xor_mul_pow2,
 };
-use flat::bridge::neon_model::{
-    clmul8_lane, hi8, lo8, vand_m8, vcombine_m8, vdup_m8, veor_m8, veor_m16, vget_high_m8,
-    vget_low_m8, vmovn_m16, vmull_p8_m, vqtbl1_m, vshl_m16, vshr_m8, vshr_m16,
+use mul::bridge::neon_model::{
+    clmul8_lane, hi8, hi64, lanes64_u128, lo8, lo64, u128_lanes64, vand_m8, vcombine_m8, vdup_m8,
+    vdupq_n_p64_m, veor_m8, veor_m16, veor_m64, vget_high_m8, vget_low_m8, vmovn_m16,
+    vmull_high_p64_m, vmull_p8_m, vmull_p64_m, vqtbl1_m, vshl_m16, vshr_m8, vshr_m16, vuzp1_m,
+    vuzp2_m,
 };
-use flat::bridge::{
+use mul::bridge::{
     clmul_bound, clmul8_bridge, fold_step, karatsuba_clmul, pmod_below, r_poly, u128_pack,
     xor8_reflect, xor16_reflect, xor32_reflect,
 };
-use flat::{mul_flat_32_twin, mul_flat_64_twin, mul_flat_128_twin, u16_split8};
+use mul::{mul_flat_32_twin, mul_flat_64_lanes, mul_flat_128_twin, u16_split8};
 use vstd::arithmetic::mul::lemma_mul_is_commutative;
 
 verus! {
@@ -555,14 +557,50 @@ pub proof fn mul_flat_scalar_packed_16_correct(a: Seq<u16>, s: u16)
 }
 
 // ============================================================
-// The remaining packed kernels compute the proven scalar dataflow
-// per lane: block64.rs (PMULL/PMULL2 pairs with uzp lane regroup,
-// lane values unchanged), block32.rs (scalar-kernel loop),
-// and the mul_hardware_packed loop in block128.rs.
+// mul_flat_packed_64, block64.rs
 // ============================================================
 
+proof fn lanes64_u128_lanes(s: Seq<u64>)
+    ensures
+        lo64(lanes64_u128(s)) == s[0],
+        hi64(lanes64_u128(s)) == s[1],
+{
+    let x = s[0];
+    let y = s[1];
+
+    assert((((x as u128) | ((y as u128) << 64u128)) as u64) == x) by (bit_vector);
+    assert(((((x as u128) | ((y as u128) << 64u128)) >> 64u128) as u64) == y) by (bit_vector);
+}
+
+proof fn uzp_lanes(p: u128, q: u128)
+    ensures
+        vuzp1_m(u128_lanes64(p), u128_lanes64(q)) =~= seq![lo64(p), lo64(q)],
+        vuzp2_m(u128_lanes64(p), u128_lanes64(q)) =~= seq![hi64(p), hi64(q)],
+{
+}
+
 pub open spec fn mul_flat_packed_64_twin(a: Seq<u64>, b: Seq<u64>) -> Seq<u64> {
-    Seq::new(a.len(), |i: int| mul_flat_64_twin(a[i], b[i]))
+    let ap = lanes64_u128(a);
+    let bp = lanes64_u128(b);
+    let rv = vdupq_n_p64_m(0x1b);
+
+    let p0 = vmull_p64_m(lo64(ap), lo64(bp));
+    let p1 = vmull_high_p64_m(ap, bp);
+
+    let los = vuzp1_m(u128_lanes64(p0), u128_lanes64(p1));
+    let his = lanes64_u128(vuzp2_m(u128_lanes64(p0), u128_lanes64(p1)));
+
+    let hr0 = vmull_p64_m(lo64(his), lo64(rv));
+    let hr1 = vmull_high_p64_m(his, rv);
+
+    let folded = vuzp1_m(u128_lanes64(hr0), u128_lanes64(hr1));
+    let carries = lanes64_u128(vuzp2_m(u128_lanes64(hr0), u128_lanes64(hr1)));
+
+    let cr0 = vmull_p64_m(lo64(carries), lo64(rv));
+    let cr1 = vmull_high_p64_m(carries, rv);
+    let carry_red = vuzp1_m(u128_lanes64(cr0), u128_lanes64(cr1));
+
+    veor_m64(veor_m64(los, folded), carry_red)
 }
 
 pub proof fn mul_flat_packed_64_correct(a: Seq<u64>, b: Seq<u64>)
@@ -572,11 +610,47 @@ pub proof fn mul_flat_packed_64_correct(a: Seq<u64>, b: Seq<u64>)
     ensures forall|l: int| 0 <= l < 2 ==> #[trigger] mul_flat_packed_64_twin(a, b)[l] as nat
         == gf_mul(a[l] as nat, b[l] as nat, 64),
 {
+    assert(((0x1bu64 as u128) | ((0x1bu64 as u128) << 64u128)) as u64 == 0x1bu64) by (bit_vector);
+    assert((((0x1bu64 as u128) | ((0x1bu64 as u128) << 64u128)) >> 64u128) as u64 == 0x1bu64)
+        by (bit_vector);
+
+    lanes64_u128_lanes(a);
+    lanes64_u128_lanes(b);
+
+    let p0 = vmull_p64_m(a[0], b[0]);
+    let p1 = vmull_p64_m(a[1], b[1]);
+
+    uzp_lanes(p0, p1);
+    lanes64_u128_lanes(seq![hi64(p0), hi64(p1)]);
+
+    let hr0 = vmull_p64_m(hi64(p0), 0x1b);
+    let hr1 = vmull_p64_m(hi64(p1), 0x1b);
+
+    uzp_lanes(hr0, hr1);
+    lanes64_u128_lanes(seq![hi64(hr0), hi64(hr1)]);
+
+    let cr0 = vmull_p64_m(hi64(hr0), 0x1b);
+    let cr1 = vmull_p64_m(hi64(hr1), 0x1b);
+
+    uzp_lanes(cr0, cr1);
+
+    assert(mul_flat_packed_64_twin(a, b) =~= seq![
+        mul_flat_64_lanes(a[0], b[0]),
+        mul_flat_64_lanes(a[1], b[1]),
+    ]);
+
     assert forall|l: int| 0 <= l < 2 implies #[trigger] mul_flat_packed_64_twin(a, b)[l] as nat
         == gf_mul(a[l] as nat, b[l] as nat, 64) by {
-        flat::mul_flat_64_correct(a[l], b[l]);
+        mul::mul_flat_64_correct(a[l], b[l]);
+        mul::mul_flat_64_twin_is_lanes(a[l], b[l]);
     }
 }
+
+// ============================================================
+// The remaining packed kernels compute the proven scalar
+// dataflow per lane: block32.rs (scalar-kernel loop) and
+// the mul_hardware_packed loop in block128.rs.
+// ============================================================
 
 pub open spec fn mul_flat_packed_32_twin(a: Seq<u32>, b: Seq<u32>) -> Seq<u32> {
     Seq::new(a.len(), |i: int| mul_flat_32_twin(a[i], b[i]))
@@ -591,7 +665,7 @@ pub proof fn mul_flat_packed_32_correct(a: Seq<u32>, b: Seq<u32>)
 {
     assert forall|l: int| 0 <= l < 4 implies #[trigger] mul_flat_packed_32_twin(a, b)[l] as nat
         == gf_mul(a[l] as nat, b[l] as nat, 32) by {
-        flat::mul_flat_32_correct(a[l], b[l]);
+        mul::mul_flat_32_correct(a[l], b[l]);
     }
 }
 
@@ -608,7 +682,7 @@ pub proof fn mul_flat_packed_128_correct(a: Seq<u128>, b: Seq<u128>)
 {
     assert forall|l: int| 0 <= l < 4 implies #[trigger] mul_flat_packed_128_twin(a, b)[l] as nat
         == gf_mul(a[l] as nat, b[l] as nat, 128) by {
-        flat::mul_flat_128_correct(a[l], b[l]);
+        mul::mul_flat_128_correct(a[l], b[l]);
     }
 }
 

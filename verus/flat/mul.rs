@@ -33,7 +33,10 @@ use bridge::gf_model::{
     lo_plus_hipart_is_xor, pow2, pow2_add, pow2_mono, pow2_pos, xor, xor_assoc, xor_comm,
     xor_lt_pow2, xor_mul_pow2, xor_rearrange4,
 };
-use bridge::neon_model::{clmul8_lane, hi8, hi64, lo8, lo64, vdup_m8, vmull_p8_m, vmull_p64_m};
+use bridge::neon_model::{
+    clmul8_lane, hi8, hi64, lo8, lo64, vdup_m8, vdupq_n_p64_m, vextq_m, vmull_high_p64_m,
+    vmull_p8_m, vmull_p64_m,
+};
 use bridge::{
     clmul_bound, clmul_shift_limb, clmul8_bridge, clmul64_bridge, fold_step, pmod_below, r_poly,
     schoolbook_clmul, u128_pack, u128_split, xor8_reflect, xor16_reflect, xor32_reflect,
@@ -405,6 +408,16 @@ pub proof fn mul_8_correct(a: u8, b: u8)
 // ============================================================
 
 pub open spec fn mul_flat_64_twin(a: u64, b: u64) -> u64 {
+    let rv = vdupq_n_p64_m(0x1b);
+
+    let prod = vmull_p64_m(a, b);
+    let h_red = vmull_high_p64_m(prod, rv);
+    let c_red = vmull_high_p64_m(h_red, rv);
+
+    lo64((prod ^ h_red) ^ c_red)
+}
+
+pub open spec fn mul_flat_64_lanes(a: u64, b: u64) -> u64 {
     let prod = vmull_p64_m(a, b);
     let l = lo64(prod);
     let h = hi64(prod);
@@ -418,9 +431,24 @@ pub open spec fn mul_flat_64_twin(a: u64, b: u64) -> u64 {
     (l ^ folded) ^ lo64(carry_red)
 }
 
+pub proof fn mul_flat_64_twin_is_lanes(a: u64, b: u64)
+    ensures mul_flat_64_twin(a, b) == mul_flat_64_lanes(a, b)
+{
+    assert(hi64(vdupq_n_p64_m(0x1b)) == 0x1b) by (compute);
+
+    let prod = vmull_p64_m(a, b);
+    let h_red = vmull_p64_m(hi64(prod), 0x1b);
+    let c_red = vmull_p64_m(hi64(h_red), 0x1b);
+
+    assert(((prod ^ h_red) ^ c_red) as u64 == ((prod as u64) ^ (h_red as u64)) ^ (c_red as u64))
+        by (bit_vector);
+}
+
 pub proof fn mul_flat_64_correct(a: u64, b: u64)
     ensures mul_flat_64_twin(a, b) as nat == gf_mul(a as nat, b as nat, 64)
 {
+    mul_flat_64_twin_is_lanes(a, b);
+
     assert(pow2(64) == 0x1_0000_0000_0000_0000) by (compute);
     assert(pow2(127) == 0x8000_0000_0000_0000_0000_0000_0000_0000) by (compute);
     assert(pow2(63) == 0x8000_0000_0000_0000) by (compute);
@@ -488,6 +516,32 @@ pub proof fn mul_flat_64_correct(a: u64, b: u64)
 // ============================================================
 
 pub open spec fn mul_flat_128_twin(a: u128, b: u128) -> u128 {
+    let bs = vextq_m(b, b, 8);
+
+    let d0 = vmull_p64_m(lo64(a), lo64(b));
+    let d2 = vmull_high_p64_m(a, b);
+    let x0 = vmull_p64_m(lo64(a), lo64(bs));
+    let x1 = vmull_high_p64_m(a, bs);
+
+    let mid = x0 ^ x1;
+
+    let zero = 0u128;
+    let lo = d0 ^ vextq_m(zero, mid, 8);
+    let hi = d2 ^ vextq_m(mid, zero, 8);
+
+    let rv = vdupq_n_p64_m(0x87);
+
+    let p0 = vmull_p64_m(lo64(hi), lo64(rv));
+    let p1 = vmull_high_p64_m(hi, rv);
+
+    let fold = p0 ^ vextq_m(zero, p1, 8);
+
+    let carry_mul = vmull_high_p64_m(p1, rv);
+
+    (lo ^ fold) ^ carry_mul
+}
+
+pub open spec fn mul_flat_128_lanes(a: u128, b: u128) -> u128 {
     let a0 = lo64(a);
     let a1 = hi64(a);
     let b0 = lo64(b);
@@ -521,6 +575,48 @@ pub open spec fn mul_flat_128_twin(a: u128, b: u128) -> u128 {
     (((final_0 as u128) | ((final_1 as u128) << 64))) ^ carry_mul
 }
 
+proof fn vextq_8(a: u128, b: u128)
+    ensures vextq_m(a, b, 8) == (a >> 64u128) | (b << 64u128)
+{
+    assert((8 * 8nat) as u128 == 64u128);
+    assert((128 - 8 * 8nat) as u128 == 64u128);
+}
+
+pub proof fn mul_flat_128_twin_is_lanes(a: u128, b: u128)
+    ensures mul_flat_128_twin(a, b) == mul_flat_128_lanes(a, b)
+{
+    assert(((0x87u64 as u128) | ((0x87u64 as u128) << 64u128)) as u64 == 0x87u64) by (bit_vector);
+    assert((((0x87u64 as u128) | ((0x87u64 as u128) << 64u128)) >> 64u128) as u64 == 0x87u64)
+        by (bit_vector);
+
+    vextq_8(b, b);
+
+    assert((((b >> 64u128) | (b << 64u128)) as u64) == ((b >> 64u128) as u64)) by (bit_vector);
+    assert(((((b >> 64u128) | (b << 64u128)) >> 64u128) as u64) == (b as u64)) by (bit_vector);
+
+    let d0 = vmull_p64_m(lo64(a), lo64(b));
+    let d2 = vmull_p64_m(hi64(a), hi64(b));
+    let mid = vmull_p64_m(lo64(a), hi64(b)) ^ vmull_p64_m(hi64(a), lo64(b));
+
+    vextq_8(0u128, mid);
+    vextq_8(mid, 0u128);
+
+    assert((0u128 >> 64u128) | (mid << 64u128) == mid << 64u128) by (bit_vector);
+    assert((mid >> 64u128) | (0u128 << 64u128) == mid >> 64u128) by (bit_vector);
+    assert(((d2 ^ (mid >> 64u128)) as u64) == (d2 as u64) ^ ((mid >> 64u128) as u64)) by (bit_vector);
+    assert((((d2 ^ (mid >> 64u128)) >> 64u128) as u64) == ((d2 >> 64u128) as u64)) by (bit_vector);
+
+    let p0 = vmull_p64_m(lo64(d2) ^ hi64(mid), 0x87);
+    let p1 = vmull_p64_m(hi64(d2), 0x87);
+
+    vextq_8(0u128, p1);
+
+    assert((0u128 >> 64u128) | (p1 << 64u128) == p1 << 64u128) by (bit_vector);
+    assert((d0 ^ (mid << 64u128)) ^ (p0 ^ (p1 << 64u128)) == ((((d0 as u64) ^ (p0 as u64)) as u128)
+        | (((((d0 >> 64u128) as u64) ^ (mid as u64)) ^ (((p0 >> 64u128) as u64) ^ (p1 as u64)))
+        as u128) << 64u128)) by (bit_vector);
+}
+
 proof fn mul_comm_p64(x: nat)
     ensures pow2(64) * x == x * pow2(64)
 {
@@ -530,6 +626,8 @@ proof fn mul_comm_p64(x: nat)
 pub proof fn mul_flat_128_correct(a: u128, b: u128)
     ensures mul_flat_128_twin(a, b) as nat == gf_mul(a as nat, b as nat, 128)
 {
+    mul_flat_128_twin_is_lanes(a, b);
+
     let p = pow2(64);
 
     assert(pow2(64) == 0x1_0000_0000_0000_0000) by (compute);
