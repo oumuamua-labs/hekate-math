@@ -231,9 +231,9 @@ Timing behaviour is a build-time choice. Pick per deployment.
 ## Formal Verification
 
 [`verus/`](verus/README.md) holds standalone [Verus](https://github.com/verus-lang/verus) proofs,
-outside the crate build: 2922 function verifications over 731 distinct functions in 17 units, 0 errors.
+outside the crate build: 3050 function verifications over 839 distinct functions in 18 units, 0 errors.
 Tower `mul` and `invert`, the NEON kernels, the constant-time conversions and batch promotes, and the
-additive FFT are proven against the GF(2^k) model, relative to four build-discharged axioms and the
+additive FFT are proven against the GF(2^k) model, relative to two build-discharged axioms and the
 transcription seams registered in [`verus/TRUSTED_AXIOMS.md`](verus/TRUSTED_AXIOMS.md).
 
 ## Hardware Support
