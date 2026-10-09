@@ -1,0 +1,157 @@
+src/towers/block8.rs | impl Block8::square | verus/algebra.rs::square8_spread | 12d580dc696cdd6f
+src/towers/block8.rs | impl Block8::mul_tau | verus/tower/block8.rs::mul_tau8 | 156f3eac4bfb2b1f
+src/towers/block8.rs | mul_tau_fold | verus/tower/block8.rs::mul_tau8 | f6caa12b6bbb9cb3
+src/towers/block8.rs | impl Mul for Block8::mul | verus/tower/block8.rs::mul8 | eb9298e57003882e
+src/towers/block8.rs | impl TowerField for Block8::invert | verus/inverse.rs::inv8_twin | 6b71026779deb594
+src/towers/block8.rs | impl HardwareField for Block8::to_hardware | verus/flat/convert.rs::map_ct_8_twin | e4a60d41b4109445
+src/towers/block8.rs | impl HardwareField for Block8::from_hardware | verus/flat/convert.rs::map_ct_8_twin | f8d4c810a0143464
+src/towers/block8.rs | impl HardwareField for Block8::mul_hardware | verus/flat/convert.rs::fallback_mul_correct | f7146d2a1a250306
+src/towers/block8.rs | impl HardwareField for Block8::mul_hardware_packed | verus/flat/packed.rs::mul_flat_packed_8_twin | 5243a74070b7f4fe
+src/towers/block8.rs | impl HardwareField for Block8::tower_bit_from_hardware | verus/flat/convert.rs::tower_bit_8_twin | 8f308015ba47e406
+src/towers/block8.rs | mul_iso_8 | verus/flat/convert.rs::mul_iso_correct | 87fb95f0f2b36874
+src/towers/block8.rs | map_ct_8 | verus/flat/convert.rs::map_ct_8_twin | f9ff0fd3c8bec6f5
+src/towers/block8.rs | neon::mul_8 | verus/flat/mul.rs::mul_8_twin | b00460a779178aab
+src/towers/block8.rs | neon::mul_flat_packed_8 | verus/flat/packed.rs::mul_flat_packed_8_twin | 7f24d5b30642cbe8
+
+src/towers/block16.rs | impl Block16::new | verus/tower/block16.rs::pack | e84dfa55f6ca3a1b
+src/towers/block16.rs | impl Block16::split | verus/tower/block16.rs::lo::hi | 67ade409221a3637
+src/towers/block16.rs | impl Block16::mul_tau | verus/tower/block16.rs::mul_tau16 | f517a81533d6c8d2
+src/towers/block16.rs | impl Mul for Block16::mul | verus/tower/block16.rs::mul16_k | 02d8eee8894ea883
+src/towers/block16.rs | impl TowerField for Block16::invert | verus/inverse.rs::inv16_twin | ac0ae51dd1c2b4e3
+src/towers/block16.rs | impl HardwareField for Block16::to_hardware | verus/flat/convert.rs::map_ct_16_twin | 40d6340d49099784
+src/towers/block16.rs | impl HardwareField for Block16::from_hardware | verus/flat/convert.rs::map_ct_16_twin | 057fbcefa76d9107
+src/towers/block16.rs | impl HardwareField for Block16::mul_hardware | verus/flat/convert.rs::fallback_mul_correct | dcf3d2cfe1f5a9df
+src/towers/block16.rs | impl HardwareField for Block16::mul_hardware_packed | verus/flat/packed.rs::mul_flat_packed_16_twin | 948a64c040308929
+src/towers/block16.rs | impl HardwareField for Block16::mul_hardware_scalar_packed | verus/flat/packed.rs::mul_flat_scalar_packed_16_twin | b554e361059ee108
+src/towers/block16.rs | impl HardwareField for Block16::tower_bit_from_hardware | verus/flat/convert.rs::tower_bit_16_twin | e96363cbdd500197
+src/towers/block16.rs | impl FlatPromote<Block8> for Block16::promote_flat | verus/flat/convert.rs::lift_ct_16_twin | d35db91ece918996
+src/towers/block16.rs | mul_iso_16 | verus/flat/convert.rs::mul_iso_correct | a87f4323c6bdb96a
+src/towers/block16.rs | lift_ct_16 | verus/flat/convert.rs::lift_ct_16_twin | b4dffd7d9333fa1e
+src/towers/block16.rs | map_ct_16 | verus/flat/convert.rs::map_ct_16_twin | dc4ae8d875eb9979
+src/towers/block16.rs | neon::mul_flat_16 | verus/flat/mul.rs::mul_flat_16_twin | 547bbcbfc4fb0cdf
+src/towers/block16.rs | neon::mul_flat_packed_16 | verus/flat/packed.rs::mul_flat_packed_16_twin | c2d3574f93cd23f7
+src/towers/block16.rs | neon::mul_flat_scalar_packed_16 | verus/flat/packed.rs::mul_flat_scalar_packed_16_twin | 5f7ff0f78c08fa21
+src/towers/block16.rs | neon::reduce_packed_16 | verus/flat/packed.rs::reduce_packed_16_lane | 4a447500ce73c9f9
+src/towers/block16.rs | impl_binary_field_extras! | verus/algebra.rs::square16_twin | 7a5f85aef0c3d203
+
+src/towers/block32.rs | impl Block32::new | verus/tower/block32.rs::pack | 4f13c417280ba246
+src/towers/block32.rs | impl Block32::split | verus/tower/block32.rs::lo::hi | 30274a08c1977106
+src/towers/block32.rs | impl Block32::mul_tau | verus/tower/block32.rs::mul_tau32 | f517a81533d6c8d2
+src/towers/block32.rs | impl Mul for Block32::mul | verus/tower/block32.rs::mul32_k | 02d8eee8894ea883
+src/towers/block32.rs | impl TowerField for Block32::invert | verus/inverse.rs::inv32_twin | ac0ae51dd1c2b4e3
+src/towers/block32.rs | impl HardwareField for Block32::to_hardware | verus/flat/convert.rs::map_ct_32_twin | 6e5bab575edd9006
+src/towers/block32.rs | impl HardwareField for Block32::from_hardware | verus/flat/convert.rs::map_ct_32_twin | 85834385a9db82a9
+src/towers/block32.rs | impl HardwareField for Block32::mul_hardware | verus/flat/convert.rs::fallback_mul_correct | 242e5b5d90f35885
+src/towers/block32.rs | impl HardwareField for Block32::mul_hardware_packed | verus/flat/packed.rs::mul_flat_packed_32_twin | 1ebb7f337030b713
+src/towers/block32.rs | impl HardwareField for Block32::tower_bit_from_hardware | verus/flat/convert.rs::tower_bit_32_twin | 39363b05ff9dc8a8
+src/towers/block32.rs | impl FlatPromote<Block8> for Block32::promote_flat | verus/flat/convert.rs::lift_ct_32_twin | b5f0992187905c66
+src/towers/block32.rs | impl FlatPromote<Block16> for Block32::promote_flat | verus/flat/convert.rs::lift_ct_32_twin | 4838b25939bfdfcd
+src/towers/block32.rs | mul_iso_32 | verus/flat/convert.rs::mul_iso_correct | 7024bd5335cb67cc
+src/towers/block32.rs | lift_ct_32 | verus/flat/convert.rs::lift_ct_32_twin | 2eb3c554bcbc37a6
+src/towers/block32.rs | map_ct_32 | verus/flat/convert.rs::map_ct_32_twin | 0cb79ca1559e0095
+src/towers/block32.rs | neon::mul_flat_packed_32 | verus/flat/packed.rs::mul_flat_packed_32_twin | 0d3fd24efb989e87
+src/towers/block32.rs | neon::mul_flat_32 | verus/flat/mul.rs::mul_flat_32_twin | 7e8c8747fe32bb9f
+src/towers/block32.rs | impl_binary_field_extras! | verus/algebra.rs::square32_twin | b2d92346ffada8a7
+
+src/towers/block64.rs | impl Block64::new | verus/tower/block64.rs::pack | 36f0410982a25ad6
+src/towers/block64.rs | impl Block64::split | verus/tower/block64.rs::lo::hi | dbfa8c4ab51a96b8
+src/towers/block64.rs | impl Block64::mul_tau | verus/tower/block64.rs::mul_tau64 | f517a81533d6c8d2
+src/towers/block64.rs | impl Mul for Block64::mul | verus/tower/block64.rs::mul64_k | e5347aeff20a7b7d
+src/towers/block64.rs | impl TowerField for Block64::invert | verus/inverse.rs::inv64_twin | ac0ae51dd1c2b4e3
+src/towers/block64.rs | impl HardwareField for Block64::to_hardware | verus/flat/convert.rs::map_ct_64_twin | 9160f60fa433899f
+src/towers/block64.rs | impl HardwareField for Block64::from_hardware | verus/flat/convert.rs::map_ct_64_twin | ab190ac8e6998e90
+src/towers/block64.rs | impl HardwareField for Block64::mul_hardware | verus/flat/convert.rs::fallback_mul_correct | 49bff25cde9773c4
+src/towers/block64.rs | impl HardwareField for Block64::mul_hardware_packed | verus/flat/packed.rs::mul_flat_packed_64_twin | 1ad4b91c4a45a48c
+src/towers/block64.rs | impl HardwareField for Block64::tower_bit_from_hardware | verus/flat/convert.rs::tower_bit_64_twin | 2aeb164e6bdc25e5
+src/towers/block64.rs | impl FlatPromote<Block8> for Block64::promote_flat | verus/flat/convert.rs::lift_ct_64_twin | d193241e913c6ace
+src/towers/block64.rs | impl FlatPromote<Block16> for Block64::promote_flat | verus/flat/convert.rs::lift_ct_64_twin | 726b2a17d7e7899a
+src/towers/block64.rs | impl FlatPromote<Block32> for Block64::promote_flat | verus/flat/convert.rs::lift_ct_64_twin | a67ec7105f2bc104
+src/towers/block64.rs | mul_iso_64 | verus/flat/convert.rs::mul_iso_correct | c4e2e3d354ffb799
+src/towers/block64.rs | lift_ct_64 | verus/flat/convert.rs::lift_ct_64_twin | 1b1e4ddf980d99b6
+src/towers/block64.rs | map_ct_64 | verus/flat/convert.rs::map_ct_64_twin | bd86fc5879c98b21
+src/towers/block64.rs | neon::mul_flat_packed_64 | verus/flat/packed.rs::mul_flat_packed_64_twin | 4fdcf6718e87cd13
+src/towers/block64.rs | neon::mul_flat_64 | verus/flat/mul.rs::mul_flat_64_twin | 0079772461632211
+src/towers/block64.rs | impl_binary_field_extras! | verus/algebra.rs::square64_twin | dec6fe8051a657e9
+
+src/towers/block128.rs | impl Block128::new | verus/tower/block128.rs::pack | 17113d9562b046eb
+src/towers/block128.rs | impl Block128::split | verus/tower/block128.rs::lo::hi | 21b2a668c589c6b3
+src/towers/block128.rs | impl Block128::mul_tau | verus/tower/block128.rs::mul_tau128 | f517a81533d6c8d2
+src/towers/block128.rs | impl Mul for Block128::mul | verus/tower/block128.rs::mul128_k | 385b602bc1df71ee
+src/towers/block128.rs | impl TowerField for Block128::invert | verus/inverse.rs::inv128_twin | ac0ae51dd1c2b4e3
+src/towers/block128.rs | impl HardwareField for Block128::to_hardware | verus/flat/convert.rs::map_ct_128_split_twin | 119c4cde10412a80
+src/towers/block128.rs | impl HardwareField for Block128::from_hardware | verus/flat/convert.rs::map_ct_128_split_twin | 1f6620911cd522c2
+src/towers/block128.rs | impl HardwareField for Block128::mul_hardware | verus/flat/convert.rs::fallback_mul_correct | 8037a3fdfd0370b7
+src/towers/block128.rs | impl HardwareField for Block128::mul_hardware_packed | verus/flat/packed.rs::mul_flat_packed_128_twin | 61d68becdb715228
+src/towers/block128.rs | impl HardwareField for Block128::tower_bit_from_hardware | verus/flat/convert.rs::tower_bit_128_twin | 21032b645e1ad40f
+src/towers/block128.rs | impl FlatPromote<Block8> for Block128::promote_flat | verus/flat/convert.rs::lift_ct_twin | 7ac0b3aa66b9c778
+src/towers/block128.rs | impl FlatPromote<Block16> for Block128::promote_flat | verus/flat/convert.rs::lift_ct_twin | d9ee5e65cf786b9c
+src/towers/block128.rs | impl FlatPromote<Block32> for Block128::promote_flat | verus/flat/convert.rs::lift_ct_twin | f79ae1f0272079a8
+src/towers/block128.rs | impl FlatPromote<Block64> for Block128::promote_flat | verus/flat/convert.rs::lift_ct_twin | 406e873d3bb6d9c5
+src/towers/block128.rs | impl FlatPromote<Block8> for Block128::promote_flat_batch | verus/flat/promote.rs::promote_batch_8_twin | 3ef970652b94929c
+src/towers/block128.rs | impl FlatPromote<Block16> for Block128::promote_flat_batch | verus/flat/promote.rs::promote_batch_16_twin | 943011f9a7179050
+src/towers/block128.rs | impl FlatPromote<Block32> for Block128::promote_flat_batch | verus/flat/promote.rs::promote_batch_32_twin | 05f0a46ff36887f0
+src/towers/block128.rs | impl FlatPromote<Block64> for Block128::promote_flat_batch | verus/flat/promote.rs::promote_batch_64_twin | aeb3d8241ed1d8e6
+src/towers/block128.rs | mul_iso_128 | verus/flat/convert.rs::mul_iso_correct | 2e12903413a35946
+src/towers/block128.rs | map_ct_128_split | verus/flat/convert.rs::map_ct_128_split_twin | 18999bc4e9437838
+src/towers/block128.rs | lift_ct | verus/flat/convert.rs::lift_ct_twin | 02f18f7e6e4892b4
+src/towers/block128.rs | promote_batch_neon | verus/flat/promote.rs::promote_batch_8_twin | 32f2835b8f211316
+src/towers/block128.rs | neon::mul_flat_128 | verus/flat/mul.rs::mul_flat_128_twin | e63a5eb70e1175f9
+src/towers/block128.rs | neon::promote_batch_8_to_128 | verus/flat/promote.rs::promote_batch_8_twin | 809c0d6ed5c1af2c
+src/towers/block128.rs | neon::promote_batch_16_to_128 | verus/flat/promote.rs::promote_batch_16_twin | c0d56a4137024ef9
+src/towers/block128.rs | neon::promote_batch_32_to_128 | verus/flat/promote.rs::promote_batch_32_twin | cb99715a99457130
+src/towers/block128.rs | neon::promote_batch_64_to_128 | verus/flat/promote.rs::promote_batch_64_twin | 501dfdb9d99e7141
+src/towers/block128.rs | neon::transpose_16x16 | verus/flat/promote.rs::transpose_16x16_twin | b123fcce90d1d49b
+src/towers/block128.rs | impl_binary_field_extras! | verus/algebra.rs::square128_twin | ff9484cdc0e67924
+
+src/towers/block256.rs | impl Block256::new | verus/tower/block256.rs::mul256_k | ead46477ac1ea64e
+src/towers/block256.rs | impl Block256::split | verus/tower/block256.rs::mul256_k | f52313a2bcf2f6a9
+src/towers/block256.rs | impl Mul for Block256::mul | verus/tower/block256.rs::mul256_k | 02d8eee8894ea883
+src/towers/block256.rs | impl TowerField for Block256::invert | verus/inverse.rs::inv256_twin | ac0ae51dd1c2b4e3
+src/towers/block256.rs | impl HardwareField for Block256::mul_hardware | verus/flat/convert.rs::mul_hardware_256_twin | a0dfeb7ca5828a89
+
+src/fft/additive.rs | impl AdditiveFft<F>::new | verus/fft.rs::FftTwin::new | 1021974fcfe9dd2b
+src/fft/additive.rs | impl AdditiveFft<F>::forward_scalar | verus/fft.rs::FftTwin::forward_coset | 7948bd9922722a30
+src/fft/additive.rs | impl AdditiveFft<F>::inverse_scalar | verus/fft.rs::FftTwin::inverse_coset | 8082cb49cf1065f6
+src/fft/additive.rs | impl AdditiveFft<F>::forward_coset_scalar | verus/fft.rs::FftTwin::forward_coset | c014b6c50e26930b
+src/fft/additive.rs | impl AdditiveFft<F>::inverse_coset_scalar | verus/fft.rs::FftTwin::inverse_coset | 0eb8d9ed82754844
+src/fft/additive.rs | impl AdditiveFft<F>::check_len | verus/fft.rs::FftTwin::forward_coset | 1ba279efb90da9d2
+src/fft/additive.rs | impl AdditiveFft<F>::fwd_levels | verus/fft.rs::fwd_levels_exec | e71660aec862a615
+src/fft/additive.rs | impl AdditiveFft<F>::inv_levels | verus/fft.rs::inv_levels_exec | 89a9f533ce421369
+src/fft/additive.rs | coset_chain | verus/fft.rs::fwd_levels_exec | bab3dd342d6151c8
+src/fft/additive.rs | pass | verus/fft.rs::pass_fwd_exec | 1ef36c1776fd8f66
+src/fft/additive.rs | fwd_parallel | verus/fft.rs::pass_fwd_exec | 5cf7a1aac1f1ef12
+src/fft/additive.rs | inv_parallel | verus/fft.rs::pass_inv_exec | 0999e666f9a7eab8
+src/fft/additive.rs | tile_pass | verus/fft.rs::pass_fwd_exec | 51396dc699bde1ea
+src/fft/additive.rs | wide_pass | verus/fft.rs::pass_fwd_exec | ba93276acb49a134
+src/fft/additive.rs | blocks_serial | verus/fft.rs::pass_fwd_exec | 9b6d9152122ed5fb
+src/fft/additive.rs | fwd_butterflies | verus/fft.rs::fwd_bfly_block | 7115bfc50bb48d2f
+src/fft/additive.rs | inv_butterflies | verus/fft.rs::inv_bfly_block | f0d5a6972e735229
+
+src/fft/cantor.rs | impl CantorBasis<F>::new | verus/TRUSTED_AXIOMS.md::CantorBasis::new | 7545fc6d104e6976
+src/fft/cantor.rs | impl CantorBasis<F>::point | verus/fft.rs::CantorTwin::point | a0ea26f810339a6d
+src/fft/cantor.rs | impl CantorBasis<F>::evaluate_at | verus/fft.rs::CantorTwin::evaluate_at | 7f23e0390231e4d3
+src/fft/cantor.rs | impl CantorBasis<F>::check_index | verus/fft.rs::CantorTwin::index_ok | 0f7d3d94fa7273d3
+src/fft/cantor.rs | impl CantorBasis<F>::beta_sum | verus/fft.rs::CantorTwin::beta_sum | f1c41b23324ab32d
+src/fft/cantor.rs | impl CantorBasis<F>::fold | verus/fft.rs::CantorTwin::fold | f605ade74f377f99
+
+src/algebra.rs | trait BinaryFieldExtras::frobenius | verus/algebra.rs::frobenius16_twin | 06ac3c592f3c5cd5
+src/algebra.rs | trait BinaryFieldExtras::trace | verus/algebra.rs::trace_iter16 | 614f08b66d9e36fb
+src/algebra.rs | macro_rules! impl_binary_field_extras | verus/algebra.rs::square16_twin | 09f6c84c25115270
+
+build/gf_oracle.rs | sb8 | verus/tower/block8.rs::schoolbook8 | 8038e757cb94ea6b
+build/gf_oracle.rs | clmul8 | verus/tower/block8.rs::clmul8 | d063f3f4e7d36944
+build/gf_oracle.rs | reduce8 | verus/tower/block8.rs::reduce8 | c03fb439978822cf
+build/gf_oracle.rs | schoolbook8 | verus/tower/block8.rs::schoolbook8 | 29e95d8233c2458f
+build/gf_oracle.rs | schoolbook16 | verus/tower/block16.rs::schoolbook16 | f2c0ee90046cbb5b
+build/gf_oracle.rs | schoolbook32 | verus/tower/block32.rs::schoolbook32 | ff98a56d21ed48e0
+build/gf_oracle.rs | schoolbook64 | verus/tower/block64.rs::schoolbook64 | d11747ce9c5599a3
+build/gf_oracle.rs | schoolbook128 | verus/tower/block128.rs::schoolbook128 | 52af96042da6e8cc
+build/gf_oracle.rs | schoolbook256 | verus/tower/block256.rs::schoolbook256 | dae878ef1bdbf79d
+
+build/main.rs | macro_rules! impl_gf_mul_flat | verus/gf_model.rs::gf_mul | 3bd8ef7117c4d2ce
+build/main.rs | impl_gf_mul_flat! | verus/gf_model.rs::modulus | 126e1a42ce409883
+build/main.rs | macro_rules! impl_verify_iso | verus/axioms_t.rs::phi_roundtrip::phi_mult_gen | 93d9b6e867e3a5d9
+build/main.rs | impl_verify_iso! | verus/axioms_t.rs::phi_roundtrip::phi_mult_gen | bd5c1c11860544e6
+build/main.rs | write_algebra_extras_16 | verus/TRUSTED_AXIOMS.md::write_algebra_extras | d48314c38799741c
+build/main.rs | macro_rules! impl_write_algebra_extras_wide | verus/TRUSTED_AXIOMS.md::write_algebra_extras | d2f9994c029d811f
+build/main.rs | impl_write_algebra_extras_wide! | verus/TRUSTED_AXIOMS.md::write_algebra_extras | 36c9bb80578518f2

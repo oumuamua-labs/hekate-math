@@ -32,6 +32,17 @@ zeroize = { version = "1.8", default-features = false, features = ["derive"] }
 rand = "0.10"
 proptest = "1.9"
 criterion = "0.8"
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "3.0", features = ["full"] }
+vstd = "=0.0.0-2026-08-30-0159"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(verus_keep_ghost)'] }
+
+[[test]]
+name = "verus_exec"
+path = "verus/exec/main.rs"
 
 [[bench]]
 name = "field_ops"
