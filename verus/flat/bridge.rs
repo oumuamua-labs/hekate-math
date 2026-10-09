@@ -26,7 +26,7 @@ use vstd::prelude::*;
 #[path = "../gf_model.rs"]
 pub mod gf_model;
 
-#[path = "model_t.rs"]
+#[path = "neon_t.rs"]
 pub mod neon_model;
 
 use gf_model::{

@@ -22,27 +22,35 @@
 
 use vstd::prelude::*;
 
-#[path = "neon/bridge.rs"]
+#[cfg(verus_keep_ghost)]
+#[path = "flat/bridge.rs"]
 pub mod bridge;
 
+#[cfg(verus_keep_ghost)]
 use bridge::gf_model;
+#[cfg(verus_keep_ghost)]
 use bridge::{fold_step, pmod_below, r_poly};
+#[cfg(verus_keep_ghost)]
 use gf_model::{
     clmul, clmul_distrib_r, clmul_one_l, clmul_one_r, clmul_pow2, clmul_zero_r, deg, deg_lt_conv,
     deg_modulus, deg_pow2, deg_xor_lt, gf_distrib, gf_mul, gf_mul_assoc, gf_mul_closed,
     gf_mul_comm, gf_sq_additive, in_field, lo_plus_hipart_is_xor, modulus, pmod, pmod_additive,
     pow2, pow2_mono, xor, xor_assoc, xor_comm, xor_lt_pow2, xor_rearrange4, xor_self, xor_zero,
 };
+#[cfg(verus_keep_ghost)]
 use vstd::arithmetic::div_mod::{
     lemma_div_denominator, lemma_div_is_ordered, lemma_div_is_ordered_by_denominator,
     lemma_fundamental_div_mod, lemma_fundamental_div_mod_converse_div,
     lemma_fundamental_div_mod_converse_mod,
 };
+#[cfg(verus_keep_ghost)]
 use vstd::arithmetic::mul::{
     lemma_mul_inequality, lemma_mul_is_associative, lemma_mul_is_commutative,
     lemma_mul_is_distributive_add, lemma_mul_strict_inequality,
 };
+#[cfg(verus_keep_ghost)]
 use vstd::bits::{lemma_u64_pow2_no_overflow, lemma_u64_shl_is_mul, lemma_u64_shr_is_div};
+#[cfg(verus_keep_ghost)]
 use vstd::std_specs::bits::axiom_u64_trailing_zeros;
 
 verus! {
@@ -936,7 +944,7 @@ fn mul_flat(a: u128, b: u128) -> (r: u128)
         }
 
         if bit == 1 {
-            acc = acc ^ x;
+            acc ^= x;
         }
 
         proof {
@@ -951,7 +959,7 @@ fn mul_flat(a: u128, b: u128) -> (r: u128)
                 pmod_below(2 * xi, 128);
             }
 
-            x = x * 2;
+            x *= 2;
         } else {
             let rr = (x - 0x8000_0000_0000_0000_0000_0000_0000_0000u128) * 2;
 
@@ -980,8 +988,8 @@ fn mul_flat(a: u128, b: u128) -> (r: u128)
             }
         }
 
-        bb = bb / 2;
-        i = i + 1;
+        bb /= 2;
+        i += 1;
     }
 
     proof {
@@ -2139,8 +2147,8 @@ impl FftTwin {
                 assert forall|j: int| base + 2 * s <= j < data@.len() implies data@[j] == old(data)@[j] by {}
             }
 
-            b = b + 1;
-            base = base + 2 * s;
+            b += 1;
+            base += 2 * s;
         }
     }
 
@@ -2188,7 +2196,7 @@ impl FftTwin {
             }
 
             c = add_flat(sq, c);
-            l = l + 1;
+            l += 1;
         }
 
         proof {
@@ -2599,8 +2607,8 @@ impl FftTwin {
                 assert forall|j: int| base + 2 * s <= j < data@.len() implies data@[j] == old(data)@[j] by {}
             }
 
-            b = b + 1;
-            base = base + 2 * s;
+            b += 1;
+            base += 2 * s;
         }
     }
 
@@ -2765,7 +2773,7 @@ impl FftTwin {
             }
 
             c = add_flat(mul_flat(c, c), c);
-            lev = lev + 1;
+            lev += 1;
         }
 
         proof {
@@ -3640,7 +3648,7 @@ impl CantorTwin {
             let ghost acc_old = acc as nat;
             let ghost rest_prev: u64 = rest;
 
-            acc = acc ^ l;
+            acc ^= l;
             rest = rest & (rest - 1);
 
             proof {

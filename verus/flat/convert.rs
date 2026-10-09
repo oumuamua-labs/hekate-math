@@ -25,9 +25,11 @@
 
 use vstd::prelude::*;
 
+#[cfg(verus_keep_ghost)]
 #[path = "bridge.rs"]
 pub mod bridge;
 
+#[cfg(verus_keep_ghost)]
 use bridge::gf_model::{
     bit_comb, bit_comb_additive, deg_lt_conv, deg_xor_lt, gf_mul, gf_mul_tower, gf_mul_tower_bound,
     gf_mul_tower_distrib_l, gf_mul_tower_distrib_r, in_field, phi, phi_additive, phi_columns,
@@ -35,11 +37,14 @@ use bridge::gf_model::{
     pow2_add, pow2_pos, tau_tower, thi, tlo, xor, xor_assoc, xor_bit_at, xor_bits, xor_comm,
     xor_rearrange4, xor_self, xor_zero,
 };
+#[cfg(verus_keep_ghost)]
 use bridge::{
     pow2_bridge, u128_pack, xor8_reflect, xor16_reflect, xor32_reflect, xor64_reflect,
     xor128_reflect,
 };
+#[cfg(verus_keep_ghost)]
 use vstd::arithmetic::div_mod::{lemma_div_denominator, lemma_fundamental_div_mod};
+#[cfg(verus_keep_ghost)]
 use vstd::bits::lemma_u64_shr_is_div;
 
 verus! {
@@ -103,7 +108,7 @@ proof fn bit_gate_u128(x: u128, i: u128)
 // (block8.rs, block16.rs, block32.rs, block64.rs, block128.rs)
 // ============================================================
 
-fn map_ct_8_twin(x: u8, basis: &[u8; 8]) -> (r: u8)
+pub fn map_ct_8_twin(x: u8, basis: &[u8; 8]) -> (r: u8)
     ensures r as nat == bit_comb(x as nat, basis@.map_values(|v: u8| v as nat), 8)
 {
     let ghost s = basis@.map_values(|v: u8| v as nat);
@@ -142,7 +147,7 @@ fn map_ct_8_twin(x: u8, basis: &[u8; 8]) -> (r: u8)
     acc
 }
 
-fn map_ct_16_twin(x: u16, basis: &[u16; 16]) -> (r: u16)
+pub fn map_ct_16_twin(x: u16, basis: &[u16; 16]) -> (r: u16)
     ensures r as nat == bit_comb(x as nat, basis@.map_values(|v: u16| v as nat), 16)
 {
     let ghost s = basis@.map_values(|v: u16| v as nat);
@@ -181,7 +186,7 @@ fn map_ct_16_twin(x: u16, basis: &[u16; 16]) -> (r: u16)
     acc
 }
 
-fn map_ct_32_twin(x: u32, basis: &[u32; 32]) -> (r: u32)
+pub fn map_ct_32_twin(x: u32, basis: &[u32; 32]) -> (r: u32)
     ensures r as nat == bit_comb(x as nat, basis@.map_values(|v: u32| v as nat), 32)
 {
     let ghost s = basis@.map_values(|v: u32| v as nat);
@@ -220,7 +225,7 @@ fn map_ct_32_twin(x: u32, basis: &[u32; 32]) -> (r: u32)
     acc
 }
 
-fn map_ct_64_twin(x: u64, basis: &[u64; 64]) -> (r: u64)
+pub fn map_ct_64_twin(x: u64, basis: &[u64; 64]) -> (r: u64)
     ensures r as nat == bit_comb(x as nat, basis@.map_values(|v: u64| v as nat), 64)
 {
     let ghost s = basis@.map_values(|v: u64| v as nat);
@@ -297,7 +302,7 @@ proof fn bit_comb_split64(x: nat, s: Seq<nat>, n: nat)
 
 // block128.rs: the accumulator is split into two
 // u64 halves; the packed view carries the invariant.
-fn map_ct_128_split_twin(x: u128, basis: &[u128; 128]) -> (r: u128)
+pub fn map_ct_128_split_twin(x: u128, basis: &[u128; 128]) -> (r: u128)
     ensures r as nat == bit_comb(x as nat, basis@.map_values(|v: u128| v as nat), 128)
 {
     let ghost s = basis@.map_values(|v: u128| v as nat);
@@ -418,7 +423,7 @@ fn map_ct_128_split_twin(x: u128, basis: &[u128; 128]) -> (r: u128)
 
 // lift_ct, block128.rs: the promote kernels' scalar
 // core, same masked accumulation over the lifting basis.
-fn lift_ct_twin(x: u64, basis: &[u128]) -> (r: u128)
+pub fn lift_ct_twin(x: u64, basis: &[u128]) -> (r: u128)
     requires basis@.len() <= 64,
     ensures r as nat == bit_comb(x as nat, basis@.map_values(|v: u128| v as nat), basis@.len())
 {
@@ -460,7 +465,7 @@ fn lift_ct_twin(x: u64, basis: &[u128]) -> (r: u128)
     acc
 }
 
-fn lift_ct_16_twin(x: u16, basis: &[u16]) -> (r: u16)
+pub fn lift_ct_16_twin(x: u16, basis: &[u16]) -> (r: u16)
     requires basis@.len() <= 16,
     ensures r as nat == bit_comb(x as nat, basis@.map_values(|v: u16| v as nat), basis@.len())
 {
@@ -502,7 +507,7 @@ fn lift_ct_16_twin(x: u16, basis: &[u16]) -> (r: u16)
     acc
 }
 
-fn lift_ct_32_twin(x: u32, basis: &[u32]) -> (r: u32)
+pub fn lift_ct_32_twin(x: u32, basis: &[u32]) -> (r: u32)
     requires basis@.len() <= 32,
     ensures r as nat == bit_comb(x as nat, basis@.map_values(|v: u32| v as nat), basis@.len())
 {
@@ -544,7 +549,7 @@ fn lift_ct_32_twin(x: u32, basis: &[u32]) -> (r: u32)
     acc
 }
 
-fn lift_ct_64_twin(x: u64, basis: &[u64]) -> (r: u64)
+pub fn lift_ct_64_twin(x: u64, basis: &[u64]) -> (r: u64)
     requires basis@.len() <= 64,
     ensures r as nat == bit_comb(x as nat, basis@.map_values(|v: u64| v as nat), basis@.len())
 {
@@ -862,7 +867,7 @@ proof fn stage128(w: u128, m: u128)
     bit_comb_additive(w as nat, (w >> m) as nat, ones(m as nat), m as nat);
 }
 
-fn tower_bit_8_twin(v: u8, mask: u8) -> (r: u8)
+pub fn tower_bit_8_twin(v: u8, mask: u8) -> (r: u8)
     ensures r as nat == par((v & mask) as nat, 8)
 {
     let w0 = v & mask;
@@ -889,7 +894,7 @@ fn tower_bit_8_twin(v: u8, mask: u8) -> (r: u8)
     w3 & 1
 }
 
-fn tower_bit_16_twin(v: u16, mask: u16) -> (r: u8)
+pub fn tower_bit_16_twin(v: u16, mask: u16) -> (r: u8)
     ensures r as nat == par((v & mask) as nat, 16)
 {
     let w0 = v & mask;
@@ -920,7 +925,7 @@ fn tower_bit_16_twin(v: u16, mask: u16) -> (r: u8)
     (w4 & 1) as u8
 }
 
-fn tower_bit_32_twin(v: u32, mask: u32) -> (r: u8)
+pub fn tower_bit_32_twin(v: u32, mask: u32) -> (r: u8)
     ensures r as nat == par((v & mask) as nat, 32)
 {
     let w0 = v & mask;
@@ -955,7 +960,7 @@ fn tower_bit_32_twin(v: u32, mask: u32) -> (r: u8)
     (w5 & 1) as u8
 }
 
-fn tower_bit_64_twin(v: u64, mask: u64) -> (r: u8)
+pub fn tower_bit_64_twin(v: u64, mask: u64) -> (r: u8)
     ensures r as nat == par((v & mask) as nat, 64)
 {
     let w0 = v & mask;
@@ -1035,7 +1040,7 @@ fn tower_bit_64_twin(v: u64, mask: u64) -> (r: u8)
     ((0x6996u16 >> idx) & 1) as u8
 }
 
-fn tower_bit_128_twin(v: u128, mask: u128) -> (r: u8)
+pub fn tower_bit_128_twin(v: u128, mask: u128) -> (r: u8)
     ensures r as nat == par((v & mask) as nat, 128)
 {
     let w0 = v & mask;
