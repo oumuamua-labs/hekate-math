@@ -16,7 +16,7 @@
 // limitations under the License.
 
 use hekate_math::{
-    BinaryFieldExtras, Bit, Block16, Block32, Block64, Block128, Block256, TowerField,
+    BinaryFieldExtras, Bit, Block8, Block16, Block32, Block64, Block128, Block256, TowerField,
 };
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
@@ -71,6 +71,52 @@ fn wide_field_laws<F: BinaryFieldExtras>(mut mk: impl FnMut() -> F) {
         seen_trace_one,
         "trace never 1 in 4096 samples: mask is broken"
     );
+}
+
+#[test]
+fn block8_field_laws() {
+    let mut trace_zero = 0;
+    for x in (0..=u8::MAX).map(Block8) {
+        assert_eq!(x.square(), x * x, "square != mul");
+        assert_eq!(x.square(), x.frobenius(1), "square != frobenius(1)");
+        assert_eq!(x.frobenius(4).frobenius(4), x, "frobenius(8) != id");
+        assert_eq!(
+            x.trace(),
+            trace_via_squaring(x),
+            "mask trace != squaring chain"
+        );
+        assert_eq!(
+            x.square().trace(),
+            x.trace(),
+            "trace not Frobenius-invariant"
+        );
+        assert_eq!((x.square() + x).trace(), Bit::ZERO, "Tr(x^2 + x) != 0");
+
+        match Block8::solve_quadratic(x) {
+            Some(r) => {
+                trace_zero += 1;
+
+                assert_eq!(x.trace(), Bit::ZERO, "solved c with Tr = 1");
+                assert_eq!(r.square() + r, x, "solve round-trip failed");
+                assert_eq!(r.0 & 1, 0, "root with bit 0 set");
+            }
+            None => assert_eq!(x.trace(), Bit::ONE, "Tr = 0 must be solvable"),
+        }
+    }
+
+    assert_eq!(trace_zero, 128);
+}
+
+#[test]
+fn block8_solve_quadratic_agrees_on_block16() {
+    for c in (0..=u8::MAX).map(Block8) {
+        let wide = Block16::solve_quadratic(Block16(u16::from(c.0)));
+
+        match Block8::solve_quadratic(c) {
+            Some(x) => assert_eq!(wide, Some(Block16(u16::from(x.0)))),
+            None => assert!(wide.is_some_and(|w| w.0 >> 8 != 0)),
+        }
+    }
 }
 
 #[test]

@@ -21,7 +21,7 @@ use common::cantor_oracle::CANTOR_TOWER;
 use common::{eval_point, horner_eval, reference_forward};
 use hekate_math::fft::vanish_eval;
 use hekate_math::{
-    AdditiveFft, BinaryFieldExtras, Bit, Block16, Block32, Block64, Block128, Block256,
+    AdditiveFft, BinaryFieldExtras, Bit, Block8, Block16, Block32, Block64, Block128, Block256,
     CantorBasis, CantorError, Flat, HardwareField, TowerField,
 };
 use rand::{RngExt, SeedableRng, rngs::StdRng};
@@ -95,7 +95,7 @@ fn evaluate_at_eq_forward<F: BinaryFieldExtras + HardwareField>(
 ) {
     let mut r = StdRng::seed_from_u64(seed);
     for log_k in [0u32, 1, 2, 5, 8] {
-        for m in log_k.max(1)..=log_k + 4 {
+        for m in log_k.max(1)..=(log_k + 4).min(F::BITS as u32 - 1) {
             let n = 1usize << m;
             let k = 1usize << log_k;
 
@@ -254,6 +254,7 @@ fn evaluate_at_eq_reference<F: BinaryFieldExtras + HardwareField>(
 
 #[test]
 fn cantor_basis_pinned() {
+    cantor_pinned::<Block8>();
     cantor_pinned::<Block16>();
     cantor_pinned::<Block32>();
     cantor_pinned::<Block64>();
@@ -263,6 +264,7 @@ fn cantor_basis_pinned() {
 
 #[test]
 fn cantor_basis_chain_laws() {
+    cantor_chain_laws::<Block8>();
     cantor_chain_laws::<Block16>();
     cantor_chain_laws::<Block32>();
     cantor_chain_laws::<Block64>();
@@ -272,6 +274,10 @@ fn cantor_basis_chain_laws() {
 
 #[test]
 fn cantor_basis_rejects_bad_dim() {
+    assert_eq!(
+        CantorBasis::<Block8>::new(9).err(),
+        Some(CantorError::BadDim { dim: 9, max: 8 })
+    );
     assert_eq!(
         CantorBasis::<Block16>::new(0).err(),
         Some(CantorError::BadDim { dim: 0, max: 16 })
@@ -289,6 +295,11 @@ fn cantor_basis_rejects_bad_dim() {
 #[test]
 fn cantor_point_is_forward_of_x_all_fields() {
     let mut r = StdRng::seed_from_u64(0x5eed_ca07_0001);
+    for log_n in [1u32, 8] {
+        cantor_point_is_forward_of_x::<Block8>(log_n, Flat::from_raw(Block8::ZERO));
+        cantor_point_is_forward_of_x::<Block8>(log_n, Block8(r.random()).to_hardware());
+    }
+
     for log_n in [1u32, 10] {
         cantor_point_is_forward_of_x::<Block16>(log_n, Flat::from_raw(Block16::ZERO));
         cantor_point_is_forward_of_x::<Block16>(log_n, Block16(r.random()).to_hardware());
@@ -326,6 +337,7 @@ fn cantor_point_rejects_out_of_range() {
 
 #[test]
 fn evaluate_at_eq_forward_all_fields() {
+    evaluate_at_eq_forward::<Block8>(0x5eed_ca07_0008, |r| Block8(r.random()));
     evaluate_at_eq_forward::<Block16>(0x5eed_ca07_0016, |r| Block16(r.random()));
     evaluate_at_eq_forward::<Block32>(0x5eed_ca07_0032, |r| Block32(r.random()));
     evaluate_at_eq_forward::<Block64>(0x5eed_ca07_0064, |r| Block64(r.random()));
@@ -338,6 +350,7 @@ fn evaluate_at_eq_horner_all_fields() {
     for log_k in [0u32, 1, 4, 8] {
         let s = u64::from(log_k);
 
+        evaluate_at_eq_horner::<Block8>(0x5eed_ca07_e008 + s, log_k, 16, |r| Block8(r.random()));
         evaluate_at_eq_horner::<Block16>(0x5eed_ca07_e016 + s, log_k, 16, |r| Block16(r.random()));
         evaluate_at_eq_horner::<Block32>(0x5eed_ca07_e032 + s, log_k, 16, |r| Block32(r.random()));
         evaluate_at_eq_horner::<Block64>(0x5eed_ca07_e064 + s, log_k, 16, |r| Block64(r.random()));
