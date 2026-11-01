@@ -70,15 +70,15 @@ of `axioms_t.rs`. The file count is pinned at 19.
 | Measure                                      | Value                                 |
 |----------------------------------------------|---------------------------------------|
 | Toolchain                                    | Verus 0.2026.08.30.b432e82, Z3 4.16.0 |
-| Function verifications, summed over 18 units | 3050                                  |
-| Distinct functions in the 18 root modules    | 839                                   |
+| Function verifications, summed over 18 units | 3067                                  |
+| Distinct functions in the 18 root modules    | 856                                   |
 | `external_body` items, all in `axioms_t.rs`  | 2                                     |
 | Wall time per seed, Apple M3 Max             | 103 s                                 |
 | Z3 seeds                                     | 0, 1, 2, 3, 4, 5, 6, 7                |
 
 A unit re-verifies every file it pulls through `#[path]`.
 
-`negative_controls.sh` applies forty-six one-line mutations to the
+`negative_controls.sh` applies forty-eight one-line mutations to the
 twins and the model rows and requires the unit each names to go red
 under `--verify-root`. Three outcomes fail, each named in the output:
 Verus accepts the mutant (vacuous proof), the mutation matches a line
