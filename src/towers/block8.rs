@@ -21,8 +21,8 @@
 use crate::constants::FLAT_TO_TOWER_BIT_MASKS_8;
 use crate::towers::bit::Bit;
 use crate::{
-    CanonicalDeserialize, CanonicalSerialize, Flat, HardwareField, PackableField, PackedFlat,
-    TowerField, constants,
+    BinaryFieldExtras, CanonicalDeserialize, CanonicalSerialize, Flat, HardwareField,
+    PackableField, PackedFlat, TowerField, constants,
 };
 use core::ops::{Add, AddAssign, BitXor, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
@@ -583,6 +583,31 @@ impl HardwareField for Block8 {
     }
 }
 
+// ===================================
+// Binary Field Extras
+// ===================================
+
+impl BinaryFieldExtras for Block8 {
+    #[inline(always)]
+    fn square(&self) -> Self {
+        Block8::square(*self)
+    }
+
+    #[inline(always)]
+    fn trace(&self) -> Bit {
+        Bit::new(((self.0 & constants::TRACE_MASK_8).count_ones() & 1) as u8)
+    }
+
+    #[inline(always)]
+    fn solve_quadratic(c: Self) -> Option<Self> {
+        if c.trace() != Bit::ZERO {
+            return None;
+        }
+
+        Some(Block8(map_ct_8(c.0, &constants::SOLVE_QUADRATIC_BASIS_8)))
+    }
+}
+
 // ===========================================
 // UTILS
 // ===========================================
@@ -607,7 +632,6 @@ fn apply_matrix_8(val: Block8, table: &[u8; 256]) -> Block8 {
     Block8(unsafe { *table.get_unchecked(idx) })
 }
 
-#[cfg(not(feature = "table-math"))]
 #[inline(always)]
 fn map_ct_8(x: u8, basis: &[u8; 8]) -> u8 {
     let mut acc = 0u8;
