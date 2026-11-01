@@ -179,11 +179,6 @@ fn rs_rejects_bad_params() {
         ReedSolomon::<Block128>::new(10, 64),
         Err(RsError::FieldTooSmall { .. })
     ));
-
-    assert_eq!(
-        ReedSolomon::<Block128>::new(1, 60).err(),
-        Some(RsError::TwiddleAlloc { log_size: 60 })
-    );
 }
 
 #[test]

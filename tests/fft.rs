@@ -17,11 +17,12 @@
 
 mod common;
 
-use common::{eval_point, horner_eval};
+use common::{eval_point, horner_eval, reference_forward, reference_twiddles};
+use core::ops::RangeInclusive;
 use hekate_math::fft::vanish_eval;
 use hekate_math::{
-    AdditiveFft, BinaryFieldExtras, Block16, Block32, Block64, Block128, CantorBasis, FftError,
-    Flat, HardwareField, PackableField, PackedFlat, TowerField,
+    AdditiveFft, BinaryFieldExtras, Block16, Block32, Block64, Block128, Block256, CantorBasis,
+    FftError, Flat, HardwareField, PackableField, PackedFlat, TowerField,
 };
 use rand::{RngExt, SeedableRng, rng, rngs::StdRng};
 
@@ -117,6 +118,222 @@ fn horner_check<F: BinaryFieldExtras + HardwareField>(
             slot.to_tower(),
             expected,
             "{}-bit FFT != Horner at log_n={log_n}, j={j}",
+            F::BITS
+        );
+    }
+}
+
+fn reference_inverse<F: HardwareField>(data: &mut [Flat<F>], offset: Flat<F>) {
+    let log_n = data.len().trailing_zeros() as usize;
+    let tw = reference_twiddles::<F>(log_n);
+
+    let mut c = offset;
+    for l in 0..log_n {
+        let s = 1usize << l;
+
+        for (b, blk) in data.chunks_exact_mut(2 * s).enumerate() {
+            let t = c + tw[b];
+            let (lo, hi) = blk.split_at_mut(s);
+
+            for (p, q) in lo.iter_mut().zip(hi.iter_mut()) {
+                let qv = *p + *q;
+                *p += qv * t;
+                *q = qv;
+            }
+        }
+
+        c = c * c + c;
+    }
+}
+
+fn reference_horner<F: BinaryFieldExtras + HardwareField>(
+    seed: u64,
+    mut mk: impl FnMut(&mut StdRng) -> F,
+) {
+    let mut r = StdRng::seed_from_u64(seed);
+    for log_n in 1..=8u32 {
+        let n = 1usize << log_n;
+        let coeffs: Vec<F> = (0..n).map(|_| mk(&mut r)).collect();
+        let offset = mk(&mut r);
+        let orig: Vec<Flat<F>> = coeffs.iter().map(|c| c.to_hardware()).collect();
+
+        let mut data = orig.clone();
+        reference_forward(&mut data, offset.to_hardware());
+
+        for (j, v) in data.iter().enumerate() {
+            let expected = horner_eval(&coeffs, offset + eval_point(j), log_n);
+            assert_eq!(
+                v.to_tower(),
+                expected,
+                "{}-bit reference != Horner at log_n={log_n}, j={j}",
+                F::BITS
+            );
+        }
+
+        reference_inverse(&mut data, offset.to_hardware());
+
+        assert_eq!(
+            data,
+            orig,
+            "{}-bit reference inverse∘forward != id at log_n={log_n}",
+            F::BITS
+        );
+    }
+}
+
+fn parallel_differential<F: BinaryFieldExtras + HardwareField>(
+    seed: u64,
+    sizes: RangeInclusive<u32>,
+    mut mk: impl FnMut(&mut StdRng) -> F,
+) {
+    let mut r = StdRng::seed_from_u64(seed);
+    for log_n in sizes {
+        let n = 1usize << log_n;
+        let fft = AdditiveFft::<F>::new(log_n).unwrap();
+
+        let data: Vec<Flat<F>> = (0..n).map(|_| Flat::from_raw(mk(&mut r))).collect();
+        let offsets = [Flat::from_raw(F::ZERO), Flat::from_raw(mk(&mut r))];
+
+        for offset in offsets {
+            let mut want = data.clone();
+            reference_forward(&mut want, offset);
+
+            let mut got = data.clone();
+            fft.forward_coset_scalar(&mut got, offset).unwrap();
+
+            assert_eq!(
+                got.iter().zip(&want).position(|(a, b)| a != b),
+                None,
+                "{}-bit forward != reference at log_n={log_n}",
+                F::BITS
+            );
+
+            want.copy_from_slice(&data);
+            reference_inverse(&mut want, offset);
+
+            got.copy_from_slice(&data);
+            fft.inverse_coset_scalar(&mut got, offset).unwrap();
+
+            assert_eq!(
+                got.iter().zip(&want).position(|(a, b)| a != b),
+                None,
+                "{}-bit inverse != reference at log_n={log_n}",
+                F::BITS
+            );
+        }
+    }
+}
+
+fn packed_differential<F: BinaryFieldExtras + HardwareField>(
+    seed: u64,
+    sizes: RangeInclusive<u32>,
+    mut mk: impl FnMut(&mut StdRng) -> F,
+) {
+    let width = <Flat<F> as PackableField>::WIDTH;
+
+    let mut r = StdRng::seed_from_u64(seed);
+    for log_n in sizes {
+        let n = 1usize << log_n;
+        let fft = AdditiveFft::<F>::new(log_n).unwrap();
+        let offset = Flat::from_raw(mk(&mut r));
+
+        let cols: Vec<Vec<Flat<F>>> = (0..width)
+            .map(|_| (0..n).map(|_| Flat::from_raw(mk(&mut r))).collect())
+            .collect();
+
+        let packed: Vec<PackedFlat<F>> = (0..n)
+            .map(|k| {
+                let lanes: Vec<Flat<F>> = cols.iter().map(|col| col[k]).collect();
+                <Flat<F> as PackableField>::pack(&lanes)
+            })
+            .collect();
+
+        let mut fwd = packed.clone();
+        fft.forward_coset(&mut fwd, offset).unwrap();
+
+        let mut inv = packed;
+        fft.inverse_coset(&mut inv, offset).unwrap();
+
+        for (l, col) in cols.iter().enumerate() {
+            let mut want = col.clone();
+            reference_forward(&mut want, offset);
+
+            assert_eq!(
+                lane(&fwd, l).iter().zip(&want).position(|(a, b)| a != b),
+                None,
+                "{}-bit packed forward != reference at log_n={log_n}, lane={l}",
+                F::BITS
+            );
+
+            want.copy_from_slice(col);
+            reference_inverse(&mut want, offset);
+
+            assert_eq!(
+                lane(&inv, l).iter().zip(&want).position(|(a, b)| a != b),
+                None,
+                "{}-bit packed inverse != reference at log_n={log_n}, lane={l}",
+                F::BITS
+            );
+        }
+    }
+}
+
+fn lane<F: HardwareField>(packed: &[PackedFlat<F>], l: usize) -> Vec<Flat<F>> {
+    let mut lanes = vec![Flat::from_raw(F::ZERO); <Flat<F> as PackableField>::WIDTH];
+
+    packed
+        .iter()
+        .map(|&p| {
+            <Flat<F> as PackableField>::unpack(p, &mut lanes);
+            lanes[l]
+        })
+        .collect()
+}
+
+#[cfg(feature = "parallel")]
+fn pool_differential<F: BinaryFieldExtras + HardwareField>(seed: u64, log_n: u32) {
+    let mut r = StdRng::seed_from_u64(seed);
+
+    let n = 1usize << log_n;
+    let fft = AdditiveFft::<F>::new(log_n).unwrap();
+
+    let data: Vec<Flat<F>> = (0..n)
+        .map(|_| Flat::from_raw(F::from(r.random::<u128>())))
+        .collect();
+
+    let offset = Flat::from_raw(F::from(r.random::<u128>()));
+
+    let mut want = data.clone();
+    reference_forward(&mut want, offset);
+
+    let mut want_inv = data.clone();
+    reference_inverse(&mut want_inv, offset);
+
+    for threads in [1, 3, 16] {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap();
+
+        let mut got = data.clone();
+        pool.install(|| fft.forward_coset_scalar(&mut got, offset))
+            .unwrap();
+
+        assert_eq!(
+            got.iter().zip(&want).position(|(a, b)| a != b),
+            None,
+            "{}-bit forward in a {threads}-thread pool != reference at log_n={log_n}",
+            F::BITS
+        );
+
+        got.copy_from_slice(&data);
+        pool.install(|| fft.inverse_coset_scalar(&mut got, offset))
+            .unwrap();
+
+        assert_eq!(
+            got.iter().zip(&want_inv).position(|(a, b)| a != b),
+            None,
+            "{}-bit inverse in a {threads}-thread pool != reference at log_n={log_n}",
             F::BITS
         );
     }
@@ -325,6 +542,11 @@ fn additive_fft_eq_horner_wide_fields() {
 
         let offset = Block128(r.random());
         horner_check(log_n, offset, || Block128(r.random()));
+
+        horner_check(log_n, Block256::ZERO, || Block256([r.random(), r.random()]));
+
+        let offset = Block256([r.random(), r.random()]);
+        horner_check(log_n, offset, || Block256([r.random(), r.random()]));
     }
 }
 
@@ -527,17 +749,9 @@ fn additive_fft_new_rejects_above_field_bits() {
 }
 
 #[test]
-fn additive_fft_new_reports_twiddle_alloc() {
-    // First sizes past isize::MAX bytes:
-    // no allocation is attempted.
-    assert_eq!(
-        AdditiveFft::<Block128>::new(60).err(),
-        Some(FftError::TwiddleAlloc { log_n: 60 })
-    );
-    assert_eq!(
-        AdditiveFft::<Block64>::new(61).err(),
-        Some(FftError::TwiddleAlloc { log_n: 61 })
-    );
+fn additive_fft_new_accepts_max_log_n() {
+    assert!(AdditiveFft::<Block64>::new(63).is_ok());
+    assert!(AdditiveFft::<Block128>::new(63).is_ok());
 }
 
 #[test]
@@ -630,6 +844,12 @@ fn additive_fft_roundtrip_block64() {
 fn additive_fft_roundtrip_block128() {
     let mut r = StdRng::seed_from_u64(0x5eed_ff70_0128);
     roundtrip_scalar(10, || Block128(r.random()));
+}
+
+#[test]
+fn additive_fft_roundtrip_block256() {
+    let mut r = StdRng::seed_from_u64(0x5eed_ff70_0256);
+    roundtrip_scalar(10, || Block256([r.random(), r.random()]));
 }
 
 #[test]
@@ -730,4 +950,66 @@ fn additive_fft_parallel_eq_evaluate_at_block128() {
 
         assert_eq!(inside, data, "in-pool forward != out-of-pool forward");
     }
+}
+
+#[test]
+fn reference_transform_eq_horner() {
+    reference_horner::<Block16>(0x5eed_16f0_0016, |r| Block16(r.random()));
+    reference_horner::<Block32>(0x5eed_16f0_0032, |r| Block32(r.random()));
+    reference_horner::<Block64>(0x5eed_16f0_0064, |r| Block64(r.random()));
+    reference_horner::<Block128>(0x5eed_16f0_0128, |r| Block128(r.random()));
+    reference_horner::<Block256>(0x5eed_16f0_0256, |r| Block256([r.random(), r.random()]));
+}
+
+#[test]
+#[cfg_attr(debug_assertions, ignore = "heavy; release only")]
+fn additive_fft_parallel_eq_reference() {
+    parallel_differential::<Block32>(0x5eed_16f1_0032, 18..=22, |r| Block32(r.random()));
+    parallel_differential::<Block64>(0x5eed_16f1_0064, 17..=21, |r| Block64(r.random()));
+    parallel_differential::<Block128>(0x5eed_16f1_0128, 16..=20, |r| Block128(r.random()));
+    parallel_differential::<Block256>(0x5eed_16f1_0256, 15..=17, |r| {
+        Block256([r.random(), r.random()])
+    });
+}
+
+#[test]
+#[cfg_attr(debug_assertions, ignore = "heavy; release only")]
+fn additive_fft_packed_parallel_eq_reference() {
+    packed_differential::<Block32>(0x5eed_16f2_0032, 16..=20, |r| Block32(r.random()));
+    packed_differential::<Block64>(0x5eed_16f2_0064, 16..=20, |r| Block64(r.random()));
+    packed_differential::<Block128>(0x5eed_16f2_0128, 14..=18, |r| Block128(r.random()));
+    packed_differential::<Block256>(0x5eed_16f2_0256, 14..=16, |r| {
+        Block256([r.random(), r.random()])
+    });
+}
+
+#[test]
+#[cfg(feature = "parallel")]
+#[cfg_attr(debug_assertions, ignore = "heavy; release only")]
+fn additive_fft_pool_size_invariant() {
+    pool_differential::<Block64>(0x5eed_16f3_0064, 18);
+    pool_differential::<Block128>(0x5eed_16f3_0128, 18);
+}
+
+#[test]
+#[cfg(feature = "parallel")]
+#[cfg_attr(debug_assertions, ignore = "heavy; release only")]
+fn additive_fft_packed_small_stack() {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .stack_size(256 << 10)
+        .build()
+        .unwrap();
+
+    pool.install(|| {
+        packed_differential::<Block128>(0x5eed_16f4_0128, 14..=15, |r| Block128(r.random()))
+    });
+}
+
+#[test]
+#[ignore = "release-scale: 2^27 elements, 13 GiB peak RSS"]
+fn additive_fft_parallel_eq_reference_2p27() {
+    parallel_differential::<Block32>(0x5eed_16f5_0032, 27..=27, |r| Block32(r.random()));
+    parallel_differential::<Block64>(0x5eed_16f5_0064, 27..=27, |r| Block64(r.random()));
+    parallel_differential::<Block128>(0x5eed_16f5_0128, 27..=27, |r| Block128(r.random()));
 }
