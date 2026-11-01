@@ -62,7 +62,7 @@ Efficiency of polynomial operations in 𝔽(2^128).
 | **Dense Eval (Hardware)** | 2²⁰ coeffs      | 8.37 ms  | 1.87 GiB/s   |
 | **Batch Eval (SIMD)**     | 256 × 16384     | 4.44 ms  | 945 Melem/s  |
 | **Additive FFT (scalar)** | 2¹⁶ · Block16   | 477.7 µs | 137 Melem/s  |
-| **Additive FFT (packed)** | 2¹⁶ · ×8 lanes  | 386.6 µs | 1.36 Gelem/s |
+| **Additive FFT (packed)** | 2¹⁶ · ×8 lanes  | 260.5 µs | 2.01 Gelem/s |
 | **Interpolate MSM**       | 65536 points    | 106.5 µs | 616 Melem/s  |
 | **MLE Evaluation**        | 20 variables    | 1.00 ms  | 1.04 Gelem/s |
 
@@ -155,7 +155,7 @@ fn example_simd() {
 ### Additive FFT (Gao–Mateer, Cantor Basis)
 
 In-place transforms over the 2^log_n-point subspace W_log_n,
-`F: BinaryFieldExtras + HardwareField` (Block16 through Block128): forward evaluates
+`F: BinaryFieldExtras + HardwareField` (Block16 through Block256): forward evaluates
 novel-basis coefficients, inverse interpolates. Scalar and packed (`F::WIDTH` lanes)
 variants, each with a coset form. Buffers of 1 MiB and up run on Rayon (`parallel`
 feature), bit-identical to serial.
@@ -231,7 +231,7 @@ Timing behaviour is a build-time choice. Pick per deployment.
 ## Formal Verification
 
 [`verus/`](verus/README.md) holds standalone [Verus](https://github.com/verus-lang/verus) proofs,
-outside the crate build: 3050 function verifications over 839 distinct functions in 18 units, 0 errors.
+outside the crate build: 3067 function verifications over 856 distinct functions in 18 units, 0 errors.
 Tower `mul` and `invert`, the NEON kernels, the constant-time conversions and batch promotes, and the
 additive FFT are proven against the GF(2^k) model, relative to two build-discharged axioms and the
 transcription seams registered in [`verus/TRUSTED_AXIOMS.md`](verus/TRUSTED_AXIOMS.md).
