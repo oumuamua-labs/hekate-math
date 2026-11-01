@@ -960,6 +960,11 @@ fn mul_flat(a: u128, b: u128) -> (r: u128)
             }
 
             x *= 2;
+
+            proof {
+                assert(clmul(xi, 2) == 2 * xi);
+                assert(x as nat == gf_mul(xi, 2, 128));
+            }
         } else {
             let rr = (x - 0x8000_0000_0000_0000_0000_0000_0000_0000u128) * 2;
 
@@ -977,6 +982,12 @@ fn mul_flat(a: u128, b: u128) -> (r: u128)
             }
 
             x = rr ^ 0x87;
+
+            proof {
+                assert(clmul(xi, 2) == 2 * xi);
+                assert(pmod(2 * xi, modulus(128)) == xor(rr as nat, 0x87));
+                assert(x as nat == gf_mul(xi, 2, 128));
+            }
         }
 
         proof {
@@ -985,6 +996,9 @@ fn mul_flat(a: u128, b: u128) -> (r: u128)
                 clmul_pow2(p, 1);
                 deg_pow2(n + 1);
                 pmod_below(pow2(n + 1), 128);
+
+                assert(gf_mul(p, 2, 128) == pow2(n + 1));
+                assert(x as nat == gf_mul(a as nat, pow2(n + 1), 128));
             }
         }
 
@@ -1148,6 +1162,105 @@ proof fn tw_sum_double(lift: Seq<nat>, j: nat, t: nat)
     assert((bits - pow2(j)) as nat == t);
 }
 
+proof fn tw_sum_split(lift: Seq<nat>, c: nat, u: nat, m: nat, base: nat)
+    requires u < pow2(m),
+    ensures
+        tw_sum(lift, c * pow2(m) + u, base)
+            == xor(tw_sum(lift, u, base), tw_sum(lift, c, base + m)),
+    decreases m
+{
+    if m == 0 {
+        assert(pow2(0) == 1);
+        assert(u == 0);
+        assert(c * pow2(m) + u == c) by (nonlinear_arith)
+            requires pow2(m) == 1, u == 0;
+        assert(tw_sum(lift, 0, base) == 0);
+
+        xor_zero(tw_sum(lift, c, base));
+    } else {
+        let h = pow2((m - 1) as nat);
+        let bits = c * pow2(m) + u;
+        let half = c * h + u / 2;
+
+        gf_model::pow2_pos((m - 1) as nat);
+        lemma_fundamental_div_mod(u as int, 2);
+
+        assert(pow2(m) == 2 * h);
+        assert(u / 2 < h);
+        assert(bits == 2 * half + u % 2) by (nonlinear_arith)
+            requires
+                bits == c * pow2(m) + u,
+                pow2(m) == 2 * h,
+                half == c * h + u / 2,
+                u == 2 * (u / 2) + u % 2;
+
+        lemma_fundamental_div_mod_converse_div(bits as int, 2, half as int, (u % 2) as int);
+        lemma_fundamental_div_mod_converse_mod(bits as int, 2, half as int, (u % 2) as int);
+
+        assert(bits / 2 == half && bits % 2 == u % 2);
+
+        tw_sum_split(lift, c, u / 2, (m - 1) as nat, base + 1);
+
+        assert(base + 1 + (m - 1) == base + m);
+
+        let sel: nat = if u % 2 == 1 { lift[base as int] } else { 0 };
+        let a = tw_sum(lift, u / 2, base + 1);
+        let hc = tw_sum(lift, c, base + m);
+
+        assert(tw_sum(lift, half, base + 1) == xor(a, hc));
+
+        if bits == 0 {
+            assert(u == 0);
+            assert(c == 0) by (nonlinear_arith)
+                requires c * pow2(m) + u == 0, pow2(m) >= 1;
+            assert(tw_sum(lift, 0, base + m) == 0);
+
+            xor_zero(0);
+        } else {
+            assert(tw_sum(lift, bits, base) == xor(sel, tw_sum(lift, half, base + 1)));
+
+            if u == 0 {
+                assert(a == 0 && sel == 0);
+                assert(tw_sum(lift, u, base) == 0);
+
+                xor_zero(0);
+            } else {
+                assert(tw_sum(lift, u, base) == xor(sel, a));
+            }
+
+            xor_assoc(sel, a, hc);
+        }
+    }
+}
+
+proof fn tw_sum_lt(lift: Seq<nat>, bits: nat, base: nat)
+    requires
+        base <= lift.len(),
+        bits < pow2((lift.len() - base) as nat),
+        forall|i: int| 0 <= i < lift.len() ==> #[trigger] lift[i] < pow2(128),
+    ensures tw_sum(lift, bits, base) < pow2(128),
+    decreases bits
+{
+    gf_model::pow2_pos(128);
+
+    if bits != 0 {
+        assert(base < lift.len()) by {
+            if base == lift.len() {
+                assert(pow2(0) == 1);
+            }
+        }
+
+        assert(pow2((lift.len() - base) as nat)
+            == 2 * pow2((lift.len() - base - 1) as nat));
+
+        tw_sum_lt(lift, bits / 2, base + 1);
+
+        let sel: nat = if bits % 2 == 1 { lift[base as int] } else { 0 };
+
+        xor_lt_pow2(sel, tw_sum(lift, bits / 2, base + 1), 128);
+    }
+}
+
 // The trailing_zeros characterization, arithmetic side:
 // all bits below j clear means divisible by 2^j.
 proof fn low_bits_zero_mod(x: u64, j: u64)
@@ -1257,16 +1370,34 @@ proof fn and_dec_is_sub(x: u64, j: u64)
 // The solve_quadratic loop producing `lift` is checked at build time.
 // ============================================================
 
+pub const LOW_LOG: u32 = 10;
+
 pub struct FftTwin {
     pub log_n: u32,
-    pub twiddles: Vec<u128>,
+    pub low: Vec<u128>,
+    pub lift: Vec<u128>,
+    pub twiddles: Ghost<Seq<u128>>,
 }
 
 impl FftTwin {
+    pub open spec fn low_log(self) -> nat {
+        if self.log_n - 1 < LOW_LOG {
+            (self.log_n - 1) as nat
+        } else {
+            LOW_LOG as nat
+        }
+    }
+
     pub open spec fn wf(self) -> bool {
         &&& 1 <= self.log_n < 64
         &&& self.log_n as nat <= 128
         &&& self.twiddles@.len() == pow2((self.log_n - 1) as nat)
+        &&& self.lift@.len() == self.log_n - 1
+        &&& self.low@.len() == pow2(self.low_log())
+        &&& forall|t: int| 0 <= t < self.twiddles@.len()
+            ==> #[trigger] self.twiddles@[t] as nat == tw_sum(nats(self.lift@), t as nat, 0)
+        &&& forall|u: int| 0 <= u < self.low@.len()
+            ==> #[trigger] self.low@[u] as nat == tw_sum(nats(self.lift@), u as nat, 0)
     }
 
     pub fn new(log_n: u32, lift: Vec<u128>) -> (r: FftTwin)
@@ -1280,18 +1411,24 @@ impl FftTwin {
             forall|t: int| 0 <= t < r.twiddles@.len()
                 ==> #[trigger] r.twiddles@[t] as nat == tw_sum(nats(lift@), t as nat, 0),
     {
+        let low_log: u32 = if log_n - 1 < LOW_LOG {
+            log_n - 1
+        } else {
+            LOW_LOG
+        };
+
         proof {
-            lemma_u64_pow2_no_overflow((log_n - 1) as nat);
-            lemma_u64_shl_is_mul(1u64, (log_n - 1) as u64);
-            pow2_bridge((log_n - 1) as nat);
+            lemma_u64_pow2_no_overflow(low_log as nat);
+            lemma_u64_shl_is_mul(1u64, low_log as u64);
+            pow2_bridge(low_log as nat);
         }
 
-        let half = (1u64 << (log_n - 1)) as usize;
+        let len = (1u64 << low_log) as usize;
 
-        assert(half as nat == pow2((log_n - 1) as nat));
+        assert(len as nat == pow2(low_log as nat));
 
-        let mut twiddles: Vec<u128> = Vec::with_capacity(half);
-        twiddles.push(0);
+        let mut low: Vec<u128> = Vec::with_capacity(len);
+        low.push(0);
 
         proof {
             assert(pow2(0) == 1);
@@ -1299,18 +1436,18 @@ impl FftTwin {
         }
 
         let mut j: usize = 0;
-        while j < lift.len()
+        while j < low_log as usize
             invariant
-                j <= lift@.len(),
+                j <= low_log,
+                low_log <= log_n - 1,
                 lift@.len() == log_n - 1,
                 1 <= log_n < 64,
-                half as nat == pow2((log_n - 1) as nat),
-                twiddles@.len() == pow2(j as nat),
-                forall|u: int| 0 <= u < twiddles@.len()
-                    ==> #[trigger] twiddles@[u] as nat == tw_sum(nats(lift@), u as nat, 0),
-            decreases lift@.len() - j,
+                low@.len() == pow2(j as nat),
+                forall|u: int| 0 <= u < low@.len()
+                    ==> #[trigger] low@[u] as nat == tw_sum(nats(lift@), u as nat, 0),
+            decreases low_log - j,
         {
-            let filled = twiddles.len();
+            let filled = low.len();
             let l = lift[j];
 
             let mut t: usize = 0;
@@ -1318,17 +1455,17 @@ impl FftTwin {
                 invariant
                     t <= filled,
                     filled as nat == pow2(j as nat),
-                    j < lift@.len(),
+                    j < low_log,
+                    low_log <= log_n - 1,
                     lift@.len() == log_n - 1,
                     1 <= log_n < 64,
-                    half as nat == pow2((log_n - 1) as nat),
                     l == lift@[j as int],
-                    twiddles@.len() == filled + t,
-                    forall|u: int| 0 <= u < twiddles@.len()
-                        ==> #[trigger] twiddles@[u] as nat == tw_sum(nats(lift@), u as nat, 0),
+                    low@.len() == filled + t,
+                    forall|u: int| 0 <= u < low@.len()
+                        ==> #[trigger] low@[u] as nat == tw_sum(nats(lift@), u as nat, 0),
                 decreases filled - t,
             {
-                let tw = twiddles[t];
+                let tw = low[t];
 
                 proof {
                     xor128_reflect(tw, l);
@@ -1338,7 +1475,7 @@ impl FftTwin {
                     assert(nats(lift@)[j as int] == l as nat);
                 }
 
-                twiddles.push(tw ^ l);
+                low.push(tw ^ l);
 
                 t += 1;
             }
@@ -1350,7 +1487,24 @@ impl FftTwin {
             j += 1;
         }
 
-        FftTwin { log_n, twiddles }
+        let ghost tws = Seq::new(
+            pow2((log_n - 1) as nat),
+            |t: int| tw_sum(nats(lift@), t as nat, 0) as u128,
+        );
+
+        proof {
+            assert(pow2(128) == 0x1_0000_0000_0000_0000_0000_0000_0000_0000) by (compute);
+
+            assert forall|i: int| 0 <= i < nats(lift@).len()
+                implies #[trigger] nats(lift@)[i] < pow2(128) by {}
+
+            assert forall|t: int| 0 <= t < tws.len()
+                implies #[trigger] tws[t] as nat == tw_sum(nats(lift@), t as nat, 0) by {
+                tw_sum_lt(nats(lift@), t as nat, 0);
+            }
+        }
+
+        FftTwin { log_n, low, lift, twiddles: Ghost(tws) }
     }
 }
 
@@ -2031,9 +2185,103 @@ impl FftTwin {
         }
     }
 
-    // blocks_serial, additive.rs:
-    // whole-array pass at stride s;
-    // block b (width 2s) twiddled by xor(coset, tws[b]).
+    // CantorBasis::beta_sum, cantor.rs, on lift = betas[1..].
+    fn sum_lift(&self, bits: u64, base: usize) -> (r: u128)
+        requires
+            self.wf(),
+            base <= self.lift@.len(),
+            (bits as nat) < pow2((self.lift@.len() - base) as nat),
+        ensures r as nat == tw_sum(nats(self.lift@), bits as nat, base as nat),
+    {
+        let ghost lift = nats(self.lift@);
+        let ghost n = self.lift@.len();
+
+        let mut acc: u128 = 0;
+        let mut rest: u64 = bits;
+
+        proof {
+            xor_zero(tw_sum(lift, bits as nat, base as nat));
+        }
+
+        while rest != 0
+            invariant
+                lift == nats(self.lift@),
+                n == self.lift@.len(),
+                n <= 64,
+                base <= n,
+                (bits as nat) < pow2((n - base) as nat),
+                rest as nat <= bits as nat,
+                xor(acc as nat, tw_sum(lift, rest as nat, base as nat))
+                    == tw_sum(lift, bits as nat, base as nat),
+            decreases rest,
+        {
+            let j32 = rest.trailing_zeros();
+            let j = j32 as usize;
+            let ghost jn = j as nat;
+            let ghost j64: u64 = j32 as u64;
+
+            proof {
+                axiom_u64_trailing_zeros(rest);
+
+                assert(j64 < 64);
+
+                lemma_u64_shr_is_div(rest, j64);
+                pow2_bridge(jn);
+
+                let q = rest >> j64;
+
+                assert(q as nat == rest as nat / pow2(jn));
+                assert((q & 1u64) == 1u64);
+                assert(q % 2 == 1) by (bit_vector) requires (q & 1u64) == 1u64;
+
+                low_bits_zero_mod(rest, j64);
+                tw_sum_clear_bit(lift, rest as nat, jn, base as nat);
+
+                if jn >= (n - base) as nat {
+                    pow2_mono((n - base) as nat, jn);
+
+                    assert(pow2(jn) <= rest as nat);
+                    assert(false);
+                }
+            }
+
+            let l = self.lift[base + j];
+
+            proof {
+                xor128_reflect(acc, l);
+
+                assert(lift[(base + j) as int] == l as nat);
+            }
+
+            let ghost acc_old = acc as nat;
+            let ghost rest_prev: u64 = rest;
+
+            acc ^= l;
+            rest = rest & (rest - 1);
+
+            proof {
+                and_dec_is_sub(rest_prev, j64);
+                gf_model::pow2_pos(jn);
+
+                assert(rest == (rest_prev & sub(rest_prev, 1u64)));
+                assert(rest as nat == rest_prev as nat - pow2(jn));
+                assert(rest < rest_prev);
+
+                xor_assoc(acc_old, lift[(base + j) as int], tw_sum(lift, rest as nat, base as nat));
+            }
+        }
+
+        proof {
+            assert(tw_sum(lift, 0, base as nat) == 0);
+
+            xor_zero(acc as nat);
+        }
+
+        acc
+    }
+
+    // Twiddles::blocks at b0 = 0, additive.rs: whole-array pass
+    // at stride s; block b (width 2s) twiddled by xor(coset, tws[b]).
     fn pass_fwd_exec(&self, data: &mut Vec<u128>, coset: u128, s: usize, nblocks: usize)
         requires
             self.wf(),
@@ -2053,6 +2301,22 @@ impl FftTwin {
                 coset as nat,
             ),
     {
+        let len = self.low.len();
+        let low_log: u32 = if self.log_n - 1 < LOW_LOG {
+            self.log_n - 1
+        } else {
+            LOW_LOG
+        };
+
+        let ghost lift = nats(self.lift@);
+
+        proof {
+            gf_model::pow2_pos(low_log as nat);
+
+            assert(low_log as nat == self.low_log());
+            assert(len as nat == pow2(low_log as nat));
+        }
+
         let mut b: usize = 0;
         let mut base: usize = 0;
 
@@ -2067,6 +2331,11 @@ impl FftTwin {
                 b <= nblocks,
                 base == b * (2 * s),
                 data@.len() <= usize::MAX,
+                lift == nats(self.lift@),
+                len == self.low@.len(),
+                len as nat == pow2(low_log as nat),
+                low_log as nat == self.low_log(),
+                b % len == 0 || b == nblocks,
                 forall|bb: int, r: int|
                     0 <= bb < b && 0 <= r < s ==> {
                         &&& #[trigger] data@[bb * (2 * s) + r] as nat == bfly_lo(
@@ -2083,72 +2352,195 @@ impl FftTwin {
                 forall|j: int| base <= j < data@.len() ==> data@[j] == old(data)@[j],
             decreases nblocks - b,
         {
-            proof {
-                lemma_mul_inequality((b + 1) as int, nblocks as int, (2 * s) as int);
+            let start = b;
+            let take = if len < nblocks - b {
+                len
+            } else {
+                nblocks - b
+            };
+            let end = b + take;
+            let c: u64 = (b as u64) >> (low_log as u64);
 
-                assert((b + 1) * (2 * s) == base + 2 * s) by (nonlinear_arith)
-                    requires base == b * (2 * s);
+            proof {
+                gf_model::pow2_pos(low_log as nat);
+                lemma_u64_shr_is_div(b as u64, low_log as u64);
+                pow2_bridge(low_log as nat);
+                lemma_fundamental_div_mod(b as int, len as int);
+
+                assert(c as nat == b as nat / pow2(low_log as nat));
+                assert(b % len == 0);
+                assert(b as nat == c as nat * pow2(low_log as nat)) by (nonlinear_arith)
+                    requires
+                        b == len * (b / len) + b % len,
+                        b % len == 0,
+                        c as nat == b as nat / pow2(low_log as nat),
+                        len as nat == pow2(low_log as nat);
+
+                gf_model::pow2_add(low_log as nat, (self.lift@.len() - low_log) as nat);
+
+                assert(b < pow2((self.log_n - 1) as nat));
+                assert(low_log + (self.lift@.len() - low_log) == self.log_n - 1);
+                assert((c as nat) < pow2((self.lift@.len() - low_log) as nat)) by (nonlinear_arith)
+                    requires
+                        b as nat == c as nat * pow2(low_log as nat),
+                        b < pow2((self.log_n - 1) as nat),
+                        pow2((self.log_n - 1) as nat) == pow2(low_log as nat) * pow2(
+                            (self.lift@.len() - low_log) as nat,
+                        ),
+                        pow2(low_log as nat) >= 1;
             }
 
-            let tw = add_flat(coset, self.twiddles[b]);
-            let ghost pre = data@;
+            let high = self.sum_lift(c, low_log as usize);
+            let ch = add_flat(coset, high);
 
-            self.fwd_bfly_block(data, base, s, tw);
+            while b < end
+                invariant
+                    self.wf(),
+                    s >= 1,
+                    s <= usize::MAX / 2,
+                    data@.len() == old(data)@.len(),
+                    nblocks * (2 * s) == data@.len(),
+                    nblocks <= self.twiddles@.len(),
+                    start <= b <= end,
+                    end == start + take,
+                    take <= len,
+                    end <= nblocks,
+                    base == b * (2 * s),
+                    data@.len() <= usize::MAX,
+                    lift == nats(self.lift@),
+                    len == self.low@.len(),
+                    len as nat == pow2(low_log as nat),
+                    low_log as nat == self.low_log(),
+                    start as nat == c as nat * pow2(low_log as nat),
+                    ch as nat == xor(coset as nat, tw_sum(lift, c as nat, low_log as nat)),
+                    forall|bb: int, r: int|
+                        0 <= bb < b && 0 <= r < s ==> {
+                            &&& #[trigger] data@[bb * (2 * s) + r] as nat == bfly_lo(
+                                old(data)@[bb * (2 * s) + r] as nat,
+                                old(data)@[bb * (2 * s) + s + r] as nat,
+                                xor(coset as nat, self.twiddles@[bb] as nat),
+                                128,
+                            )
+                            &&& data@[bb * (2 * s) + s + r] as nat == xor(
+                                data@[bb * (2 * s) + r] as nat,
+                                old(data)@[bb * (2 * s) + s + r] as nat,
+                            )
+                        },
+                    forall|j: int| base <= j < data@.len() ==> data@[j] == old(data)@[j],
+                decreases end - b,
+            {
+                proof {
+                    lemma_mul_inequality((b + 1) as int, nblocks as int, (2 * s) as int);
 
-            proof {
-                assert forall|bb: int, r: int| 0 <= bb < b + 1 && 0 <= r < s implies {
-                    &&& #[trigger] data@[bb * (2 * s) + r] as nat == bfly_lo(
-                        old(data)@[bb * (2 * s) + r] as nat,
-                        old(data)@[bb * (2 * s) + s + r] as nat,
-                        xor(coset as nat, self.twiddles@[bb] as nat),
-                        128,
-                    )
-                    &&& data@[bb * (2 * s) + s + r] as nat == xor(
-                        data@[bb * (2 * s) + r] as nat,
-                        old(data)@[bb * (2 * s) + s + r] as nat,
-                    )
-                } by {
-                    if bb < b {
-                        assert(0 <= bb * (2 * s)) by (nonlinear_arith)
-                            requires bb >= 0, s >= 1;
-                        assert(bb * (2 * s) + 2 * s == (bb + 1) * (2 * s)) by (nonlinear_arith);
-                        assert((bb + 1) * (2 * s) <= b * (2 * s)) by (nonlinear_arith)
-                            requires bb + 1 <= b, s >= 1;
-                        assert(bb * (2 * s) + r < base);
-                        assert(bb * (2 * s) + s + r < base);
-                        assert(data@[bb * (2 * s) + r] == pre[bb * (2 * s) + r]);
-                        assert(data@[bb * (2 * s) + s + r] == pre[bb * (2 * s) + s + r]);
-                    } else {
-                        assert(bb == b);
-                        assert(bb * (2 * s) == base) by (nonlinear_arith)
-                            requires bb == b, base == b * (2 * s);
-                        assert(bb * (2 * s) + r == base + r);
-                        assert(bb * (2 * s) + s + r == base + s + r);
-                        assert(base + 2 * s == (b + 1) * (2 * s)) by (nonlinear_arith)
-                            requires base == b * (2 * s);
-                        assert(base <= bb * (2 * s) + r < data@.len());
-                        assert(base <= bb * (2 * s) + s + r < data@.len());
-                        assert(pre[base + r] == old(data)@[base + r]);
-                        assert(pre[base + s + r] == old(data)@[base + s + r]);
-                        assert(tw as nat == xor(coset as nat, self.twiddles@[bb] as nat));
-                        assert(data@[base + r] as nat == bfly_lo(
-                            old(data)@[base + r] as nat,
-                            old(data)@[base + s + r] as nat,
-                            xor(coset as nat, self.twiddles@[bb] as nat),
-                            128,
-                        ));
-                        assert(data@[base + s + r] as nat == xor(
-                            data@[base + r] as nat,
-                            old(data)@[base + s + r] as nat,
-                        ));
-                    }
+                    assert((b + 1) * (2 * s) == base + 2 * s) by (nonlinear_arith)
+                        requires base == b * (2 * s);
                 }
 
-                assert forall|j: int| base + 2 * s <= j < data@.len() implies data@[j] == old(data)@[j] by {}
+                let tw = add_flat(ch, self.low[b - start]);
+
+                proof {
+                    let i = (b - start) as nat;
+                    let hc = tw_sum(lift, c as nat, low_log as nat);
+                    let li = tw_sum(lift, i, 0);
+
+                    tw_sum_split(lift, c as nat, i, low_log as nat, 0);
+
+                    assert(b as nat == c as nat * pow2(low_log as nat) + i);
+                    assert(self.twiddles@[b as int] as nat == xor(li, hc));
+                    assert(self.low@[i as int] as nat == li);
+
+                    xor_assoc(coset as nat, hc, li);
+                    xor_comm(hc, li);
+
+                    assert(tw as nat == xor(coset as nat, self.twiddles@[b as int] as nat));
+                }
+
+                let ghost pre = data@;
+
+                self.fwd_bfly_block(data, base, s, tw);
+
+                proof {
+                    assert forall|bb: int, r: int| 0 <= bb < b + 1 && 0 <= r < s implies {
+                        &&& #[trigger] data@[bb * (2 * s) + r] as nat == bfly_lo(
+                            old(data)@[bb * (2 * s) + r] as nat,
+                            old(data)@[bb * (2 * s) + s + r] as nat,
+                            xor(coset as nat, self.twiddles@[bb] as nat),
+                            128,
+                        )
+                        &&& data@[bb * (2 * s) + s + r] as nat == xor(
+                            data@[bb * (2 * s) + r] as nat,
+                            old(data)@[bb * (2 * s) + s + r] as nat,
+                        )
+                    } by {
+                        if bb < b {
+                            assert(0 <= bb * (2 * s)) by (nonlinear_arith)
+                                requires bb >= 0, s >= 1;
+                            assert(bb * (2 * s) + 2 * s == (bb + 1) * (2 * s)) by (nonlinear_arith);
+                            assert((bb + 1) * (2 * s) <= b * (2 * s)) by (nonlinear_arith)
+                                requires bb + 1 <= b, s >= 1;
+                            assert(bb * (2 * s) + r < base);
+                            assert(bb * (2 * s) + s + r < base);
+                            assert(data@[bb * (2 * s) + r] == pre[bb * (2 * s) + r]);
+                            assert(data@[bb * (2 * s) + s + r] == pre[bb * (2 * s) + s + r]);
+                        } else {
+                            assert(bb == b);
+                            assert(bb * (2 * s) == base) by (nonlinear_arith)
+                                requires bb == b, base == b * (2 * s);
+                            assert(bb * (2 * s) + r == base + r);
+                            assert(bb * (2 * s) + s + r == base + s + r);
+                            assert(base + 2 * s == (b + 1) * (2 * s)) by (nonlinear_arith)
+                                requires base == b * (2 * s);
+                            assert(base <= bb * (2 * s) + r < data@.len());
+                            assert(base <= bb * (2 * s) + s + r < data@.len());
+                            assert(pre[base + r] == old(data)@[base + r]);
+                            assert(pre[base + s + r] == old(data)@[base + s + r]);
+                            assert(tw as nat == xor(coset as nat, self.twiddles@[bb] as nat));
+                            assert(data@[base + r] as nat == bfly_lo(
+                                old(data)@[base + r] as nat,
+                                old(data)@[base + s + r] as nat,
+                                xor(coset as nat, self.twiddles@[bb] as nat),
+                                128,
+                            ));
+                            assert(data@[base + s + r] as nat == xor(
+                                data@[base + r] as nat,
+                                old(data)@[base + s + r] as nat,
+                            ));
+                        }
+                    }
+
+                    assert forall|j: int| base + 2 * s <= j < data@.len() implies data@[j] == old(data)@[j] by {}
+                }
+
+                b += 1;
+                base += 2 * s;
             }
 
-            b += 1;
-            base += 2 * s;
+            proof {
+                assert(b == start + take);
+
+                if take == len {
+                    vstd::arithmetic::div_mod::lemma_mod_multiples_basic(c as int + 1, len as int);
+
+                    assert(b as int == (c as int + 1) * len as int) by (nonlinear_arith)
+                        requires
+                            b == start + take,
+                            take == len,
+                            start as nat == c as nat * pow2(low_log as nat),
+                            len as nat == pow2(low_log as nat);
+                }
+            }
+        }
+
+        proof {
+            assert(b == nblocks);
+            assert(fwd_rows(
+                old(data)@,
+                data@,
+                self.twiddles@,
+                s as int,
+                nblocks as int,
+                coset as nat,
+            ));
         }
     }
 
@@ -2169,7 +2561,6 @@ impl FftTwin {
             ),
     {
         let n = self.log_n;
-        let dlen = data.len();
 
         let mut chain: Vec<u128> = Vec::new();
         let mut c = offset;
@@ -2200,7 +2591,9 @@ impl FftTwin {
         }
 
         proof {
-            assert(dlen == data@.len());
+            lemma_u64_pow2_no_overflow(n as nat);
+            pow2_bridge(n as nat);
+
             assert(data@.len() == pow2(n as nat));
             assert(data@.len() <= usize::MAX);
 
@@ -2486,7 +2879,7 @@ impl FftTwin {
         }
     }
 
-    // blocks_serial, additive.rs: inverse whole-array
+    // Twiddles::blocks at b0 = 0, additive.rs: inverse whole-array
     // pass at stride s; block b twiddled by xor(coset, tws[b]).
     fn pass_inv_exec(&self, data: &mut Vec<u128>, coset: u128, s: usize, nblocks: usize)
         requires
@@ -2507,6 +2900,22 @@ impl FftTwin {
                 coset as nat,
             ),
     {
+        let len = self.low.len();
+        let low_log: u32 = if self.log_n - 1 < LOW_LOG {
+            self.log_n - 1
+        } else {
+            LOW_LOG
+        };
+
+        let ghost lift = nats(self.lift@);
+
+        proof {
+            gf_model::pow2_pos(low_log as nat);
+
+            assert(low_log as nat == self.low_log());
+            assert(len as nat == pow2(low_log as nat));
+        }
+
         let mut b: usize = 0;
         let mut base: usize = 0;
 
@@ -2521,6 +2930,11 @@ impl FftTwin {
                 b <= nblocks,
                 base == b * (2 * s),
                 data@.len() <= usize::MAX,
+                lift == nats(self.lift@),
+                len == self.low@.len(),
+                len as nat == pow2(low_log as nat),
+                low_log as nat == self.low_log(),
+                b % len == 0 || b == nblocks,
                 forall|bb: int, r: int|
                     0 <= bb < b && 0 <= r < s ==> {
                         &&& #[trigger] data@[bb * (2 * s) + r] as nat == bfly_lo(
@@ -2540,75 +2954,201 @@ impl FftTwin {
                 forall|j: int| base <= j < data@.len() ==> data@[j] == old(data)@[j],
             decreases nblocks - b,
         {
-            proof {
-                lemma_mul_inequality((b + 1) as int, nblocks as int, (2 * s) as int);
+            let start = b;
+            let take = if len < nblocks - b {
+                len
+            } else {
+                nblocks - b
+            };
+            let end = b + take;
+            let c: u64 = (b as u64) >> (low_log as u64);
 
-                assert((b + 1) * (2 * s) == base + 2 * s) by (nonlinear_arith)
-                    requires base == b * (2 * s);
+            proof {
+                gf_model::pow2_pos(low_log as nat);
+                lemma_u64_shr_is_div(b as u64, low_log as u64);
+                pow2_bridge(low_log as nat);
+                lemma_fundamental_div_mod(b as int, len as int);
+
+                assert(c as nat == b as nat / pow2(low_log as nat));
+                assert(b % len == 0);
+                assert(b as nat == c as nat * pow2(low_log as nat)) by (nonlinear_arith)
+                    requires
+                        b == len * (b / len) + b % len,
+                        b % len == 0,
+                        c as nat == b as nat / pow2(low_log as nat),
+                        len as nat == pow2(low_log as nat);
+
+                gf_model::pow2_add(low_log as nat, (self.lift@.len() - low_log) as nat);
+
+                assert(b < pow2((self.log_n - 1) as nat));
+                assert(low_log + (self.lift@.len() - low_log) == self.log_n - 1);
+                assert((c as nat) < pow2((self.lift@.len() - low_log) as nat)) by (nonlinear_arith)
+                    requires
+                        b as nat == c as nat * pow2(low_log as nat),
+                        b < pow2((self.log_n - 1) as nat),
+                        pow2((self.log_n - 1) as nat) == pow2(low_log as nat) * pow2(
+                            (self.lift@.len() - low_log) as nat,
+                        ),
+                        pow2(low_log as nat) >= 1;
             }
 
-            let tw = add_flat(coset, self.twiddles[b]);
-            let ghost pre = data@;
+            let high = self.sum_lift(c, low_log as usize);
+            let ch = add_flat(coset, high);
 
-            self.inv_bfly_block(data, base, s, tw);
+            while b < end
+                invariant
+                    self.wf(),
+                    s >= 1,
+                    s <= usize::MAX / 2,
+                    data@.len() == old(data)@.len(),
+                    nblocks * (2 * s) == data@.len(),
+                    nblocks <= self.twiddles@.len(),
+                    start <= b <= end,
+                    end == start + take,
+                    take <= len,
+                    end <= nblocks,
+                    base == b * (2 * s),
+                    data@.len() <= usize::MAX,
+                    lift == nats(self.lift@),
+                    len == self.low@.len(),
+                    len as nat == pow2(low_log as nat),
+                    low_log as nat == self.low_log(),
+                    start as nat == c as nat * pow2(low_log as nat),
+                    ch as nat == xor(coset as nat, tw_sum(lift, c as nat, low_log as nat)),
+                    forall|bb: int, r: int|
+                        0 <= bb < b && 0 <= r < s ==> {
+                            &&& #[trigger] data@[bb * (2 * s) + r] as nat == bfly_lo(
+                                old(data)@[bb * (2 * s) + r] as nat,
+                                xor(
+                                    old(data)@[bb * (2 * s) + r] as nat,
+                                    old(data)@[bb * (2 * s) + s + r] as nat,
+                                ),
+                                xor(coset as nat, self.twiddles@[bb] as nat),
+                                128,
+                            )
+                            &&& data@[bb * (2 * s) + s + r] as nat == xor(
+                                old(data)@[bb * (2 * s) + r] as nat,
+                                old(data)@[bb * (2 * s) + s + r] as nat,
+                            )
+                        },
+                    forall|j: int| base <= j < data@.len() ==> data@[j] == old(data)@[j],
+                decreases end - b,
+            {
+                proof {
+                    lemma_mul_inequality((b + 1) as int, nblocks as int, (2 * s) as int);
 
-            proof {
-                assert forall|bb: int, r: int| 0 <= bb < b + 1 && 0 <= r < s implies {
-                    &&& #[trigger] data@[bb * (2 * s) + r] as nat == bfly_lo(
-                        old(data)@[bb * (2 * s) + r] as nat,
-                        xor(
-                            old(data)@[bb * (2 * s) + r] as nat,
-                            old(data)@[bb * (2 * s) + s + r] as nat,
-                        ),
-                        xor(coset as nat, self.twiddles@[bb] as nat),
-                        128,
-                    )
-                    &&& data@[bb * (2 * s) + s + r] as nat == xor(
-                        old(data)@[bb * (2 * s) + r] as nat,
-                        old(data)@[bb * (2 * s) + s + r] as nat,
-                    )
-                } by {
-                    if bb < b {
-                        assert(0 <= bb * (2 * s)) by (nonlinear_arith)
-                            requires bb >= 0, s >= 1;
-                        assert(bb * (2 * s) + 2 * s == (bb + 1) * (2 * s)) by (nonlinear_arith);
-                        assert((bb + 1) * (2 * s) <= b * (2 * s)) by (nonlinear_arith)
-                            requires bb + 1 <= b, s >= 1;
-                        assert(bb * (2 * s) + r < base);
-                        assert(bb * (2 * s) + s + r < base);
-                        assert(data@[bb * (2 * s) + r] == pre[bb * (2 * s) + r]);
-                        assert(data@[bb * (2 * s) + s + r] == pre[bb * (2 * s) + s + r]);
-                    } else {
-                        assert(bb == b);
-                        assert(bb * (2 * s) == base) by (nonlinear_arith)
-                            requires bb == b, base == b * (2 * s);
-                        assert(bb * (2 * s) + r == base + r);
-                        assert(bb * (2 * s) + s + r == base + s + r);
-                        assert(base + 2 * s == (b + 1) * (2 * s)) by (nonlinear_arith)
-                            requires base == b * (2 * s);
-                        assert(base <= bb * (2 * s) + r < data@.len());
-                        assert(base <= bb * (2 * s) + s + r < data@.len());
-                        assert(pre[base + r] == old(data)@[base + r]);
-                        assert(pre[base + s + r] == old(data)@[base + s + r]);
-                        assert(tw as nat == xor(coset as nat, self.twiddles@[bb] as nat));
-                        assert(data@[base + r] as nat == bfly_lo(
-                            old(data)@[base + r] as nat,
-                            xor(old(data)@[base + r] as nat, old(data)@[base + s + r] as nat),
-                            xor(coset as nat, self.twiddles@[bb] as nat),
-                            128,
-                        ));
-                        assert(data@[base + s + r] as nat == xor(
-                            old(data)@[base + r] as nat,
-                            old(data)@[base + s + r] as nat,
-                        ));
-                    }
+                    assert((b + 1) * (2 * s) == base + 2 * s) by (nonlinear_arith)
+                        requires base == b * (2 * s);
                 }
 
-                assert forall|j: int| base + 2 * s <= j < data@.len() implies data@[j] == old(data)@[j] by {}
+                let tw = add_flat(ch, self.low[b - start]);
+
+                proof {
+                    let i = (b - start) as nat;
+                    let hc = tw_sum(lift, c as nat, low_log as nat);
+                    let li = tw_sum(lift, i, 0);
+
+                    tw_sum_split(lift, c as nat, i, low_log as nat, 0);
+
+                    assert(b as nat == c as nat * pow2(low_log as nat) + i);
+                    assert(self.twiddles@[b as int] as nat == xor(li, hc));
+                    assert(self.low@[i as int] as nat == li);
+
+                    xor_assoc(coset as nat, hc, li);
+                    xor_comm(hc, li);
+
+                    assert(tw as nat == xor(coset as nat, self.twiddles@[b as int] as nat));
+                }
+
+                let ghost pre = data@;
+
+                self.inv_bfly_block(data, base, s, tw);
+
+                proof {
+                    assert forall|bb: int, r: int| 0 <= bb < b + 1 && 0 <= r < s implies {
+                        &&& #[trigger] data@[bb * (2 * s) + r] as nat == bfly_lo(
+                            old(data)@[bb * (2 * s) + r] as nat,
+                            xor(
+                                old(data)@[bb * (2 * s) + r] as nat,
+                                old(data)@[bb * (2 * s) + s + r] as nat,
+                            ),
+                            xor(coset as nat, self.twiddles@[bb] as nat),
+                            128,
+                        )
+                        &&& data@[bb * (2 * s) + s + r] as nat == xor(
+                            old(data)@[bb * (2 * s) + r] as nat,
+                            old(data)@[bb * (2 * s) + s + r] as nat,
+                        )
+                    } by {
+                        if bb < b {
+                            assert(0 <= bb * (2 * s)) by (nonlinear_arith)
+                                requires bb >= 0, s >= 1;
+                            assert(bb * (2 * s) + 2 * s == (bb + 1) * (2 * s)) by (nonlinear_arith);
+                            assert((bb + 1) * (2 * s) <= b * (2 * s)) by (nonlinear_arith)
+                                requires bb + 1 <= b, s >= 1;
+                            assert(bb * (2 * s) + r < base);
+                            assert(bb * (2 * s) + s + r < base);
+                            assert(data@[bb * (2 * s) + r] == pre[bb * (2 * s) + r]);
+                            assert(data@[bb * (2 * s) + s + r] == pre[bb * (2 * s) + s + r]);
+                        } else {
+                            assert(bb == b);
+                            assert(bb * (2 * s) == base) by (nonlinear_arith)
+                                requires bb == b, base == b * (2 * s);
+                            assert(bb * (2 * s) + r == base + r);
+                            assert(bb * (2 * s) + s + r == base + s + r);
+                            assert(base + 2 * s == (b + 1) * (2 * s)) by (nonlinear_arith)
+                                requires base == b * (2 * s);
+                            assert(base <= bb * (2 * s) + r < data@.len());
+                            assert(base <= bb * (2 * s) + s + r < data@.len());
+                            assert(pre[base + r] == old(data)@[base + r]);
+                            assert(pre[base + s + r] == old(data)@[base + s + r]);
+                            assert(tw as nat == xor(coset as nat, self.twiddles@[bb] as nat));
+                            assert(data@[base + r] as nat == bfly_lo(
+                                old(data)@[base + r] as nat,
+                                xor(old(data)@[base + r] as nat, old(data)@[base + s + r] as nat),
+                                xor(coset as nat, self.twiddles@[bb] as nat),
+                                128,
+                            ));
+                            assert(data@[base + s + r] as nat == xor(
+                                old(data)@[base + r] as nat,
+                                old(data)@[base + s + r] as nat,
+                            ));
+                        }
+                    }
+
+                    assert forall|j: int| base + 2 * s <= j < data@.len() implies data@[j] == old(data)@[j] by {}
+                }
+
+                b += 1;
+                base += 2 * s;
             }
 
-            b += 1;
-            base += 2 * s;
+            proof {
+                assert(b == start + take);
+
+                if take == len {
+                    vstd::arithmetic::div_mod::lemma_mod_multiples_basic(c as int + 1, len as int);
+
+                    assert(b as int == (c as int + 1) * len as int) by (nonlinear_arith)
+                        requires
+                            b == start + take,
+                            take == len,
+                            start as nat == c as nat * pow2(low_log as nat),
+                            len as nat == pow2(low_log as nat);
+                }
+            }
+        }
+
+        proof {
+            assert(b == nblocks);
+            assert(inv_rows(
+                old(data)@,
+                data@,
+                self.twiddles@,
+                s as int,
+                nblocks as int,
+                coset as nat,
+            ));
         }
     }
 
@@ -2630,7 +3170,6 @@ impl FftTwin {
             ),
     {
         let n = self.log_n;
-        let dlen = data.len();
 
         let ghost fin = inv_spec(
             nats(old(data)@),
@@ -2641,7 +3180,9 @@ impl FftTwin {
         );
 
         proof {
-            assert(dlen == data@.len());
+            lemma_u64_pow2_no_overflow(n as nat);
+            pow2_bridge(n as nat);
+
             assert(data@.len() == pow2(n as nat));
             assert(data@.len() <= usize::MAX);
             inv_spec_len(nats(old(data)@), nats(self.twiddles@), n as nat, offset as nat, 128);

@@ -109,30 +109,49 @@ src/towers/block256.rs | impl Mul for Block256::mul | verus/tower/block256.rs::m
 src/towers/block256.rs | impl TowerField for Block256::invert | verus/inverse.rs::inv256_twin | ac0ae51dd1c2b4e3
 src/towers/block256.rs | impl HardwareField for Block256::mul_hardware | verus/flat/convert.rs::mul_hardware_256_twin | a0dfeb7ca5828a89
 
-src/fft/additive.rs | impl AdditiveFft<F>::new | verus/fft.rs::FftTwin::new | 1021974fcfe9dd2b
+src/fft/additive.rs | impl AdditiveFft<F>::new | verus/fft.rs::FftTwin::new | a98adc702753861b
 src/fft/additive.rs | impl AdditiveFft<F>::forward_scalar | verus/fft.rs::FftTwin::forward_coset | 7948bd9922722a30
 src/fft/additive.rs | impl AdditiveFft<F>::inverse_scalar | verus/fft.rs::FftTwin::inverse_coset | 8082cb49cf1065f6
 src/fft/additive.rs | impl AdditiveFft<F>::forward_coset_scalar | verus/fft.rs::FftTwin::forward_coset | c014b6c50e26930b
 src/fft/additive.rs | impl AdditiveFft<F>::inverse_coset_scalar | verus/fft.rs::FftTwin::inverse_coset | 0eb8d9ed82754844
 src/fft/additive.rs | impl AdditiveFft<F>::check_len | verus/fft.rs::FftTwin::forward_coset | 1ba279efb90da9d2
-src/fft/additive.rs | impl AdditiveFft<F>::fwd_levels | verus/fft.rs::fwd_levels_exec | e71660aec862a615
-src/fft/additive.rs | impl AdditiveFft<F>::inv_levels | verus/fft.rs::inv_levels_exec | 89a9f533ce421369
+src/fft/additive.rs | impl AdditiveFft<F>::fwd_levels | verus/fft.rs::fwd_levels_exec | e25ca6b846a8a83d
+src/fft/additive.rs | impl AdditiveFft<F>::inv_levels | verus/fft.rs::inv_levels_exec | eca28695800fe4ed
 src/fft/additive.rs | coset_chain | verus/fft.rs::fwd_levels_exec | bab3dd342d6151c8
-src/fft/additive.rs | pass | verus/fft.rs::pass_fwd_exec | 1ef36c1776fd8f66
-src/fft/additive.rs | fwd_parallel | verus/fft.rs::pass_fwd_exec | 5cf7a1aac1f1ef12
-src/fft/additive.rs | inv_parallel | verus/fft.rs::pass_inv_exec | 0999e666f9a7eab8
-src/fft/additive.rs | tile_pass | verus/fft.rs::pass_fwd_exec | 51396dc699bde1ea
-src/fft/additive.rs | wide_pass | verus/fft.rs::pass_fwd_exec | ba93276acb49a134
+src/fft/additive.rs | impl Twiddles<F>::at | verus/TRUSTED_AXIOMS.md::additive.rs::fwd_parallel | 3b879487608f86d4
+src/fft/additive.rs | impl Twiddles<F>::blocks | verus/fft.rs::pass_fwd_exec | 14527abed9d843d8
+src/fft/additive.rs | impl Twiddles<F>::blocks | verus/fft.rs::pass_inv_exec | 14527abed9d843d8
+src/fft/additive.rs | parallel_eligible | verus/TRUSTED_AXIOMS.md::additive.rs::fwd_parallel | ae2a223e2d07b988
+src/fft/additive.rs | fwd_parallel | verus/fft.rs::pass_fwd_exec | a2651fb56345f9d3
+src/fft/additive.rs | inv_parallel | verus/fft.rs::pass_inv_exec | 1e204a926b5b03fc
+src/fft/additive.rs | tile_log | verus/TRUSTED_AXIOMS.md::additive.rs::fwd_parallel | 8e3381ec2f792ead
 src/fft/additive.rs | blocks_serial | verus/fft.rs::pass_fwd_exec | 9b6d9152122ed5fb
-src/fft/additive.rs | fwd_butterflies | verus/fft.rs::fwd_bfly_block | 7115bfc50bb48d2f
+src/fft/additive.rs | fwd_butterflies | verus/fft.rs::fwd_bfly_block | ef6f1268c6612ac2
 src/fft/additive.rs | inv_butterflies | verus/fft.rs::inv_bfly_block | f0d5a6972e735229
+
+src/fft/blocked.rs | impl Group<'_, K>::spans | verus/TRUSTED_AXIOMS.md::blocked.rs::Group | 25a6c424f88f9b1b
+src/fft/blocked.rs | impl Group<'_, K>::span | verus/TRUSTED_AXIOMS.md::blocked.rs::Group | fa933668876de313
+src/fft/blocked.rs | impl Group<'_, K>::columns | verus/TRUSTED_AXIOMS.md::blocked.rs::Group | 2e8fc3b622e46967
+src/fft/blocked.rs | impl Group<'_, K>::bands | verus/TRUSTED_AXIOMS.md::blocked.rs::Group | 46ed995918fa0786
+src/fft/blocked.rs | impl Group<'_, K>::levels | verus/TRUSTED_AXIOMS.md::blocked.rs::Group | 98dad14182ca736b
+src/fft/blocked.rs | gather_len | verus/TRUSTED_AXIOMS.md::blocked.rs::Group | 5c62aa697d3fbf1c
 
 src/fft/cantor.rs | impl CantorBasis<F>::new | verus/TRUSTED_AXIOMS.md::CantorBasis::new | 7545fc6d104e6976
 src/fft/cantor.rs | impl CantorBasis<F>::point | verus/fft.rs::CantorTwin::point | a0ea26f810339a6d
-src/fft/cantor.rs | impl CantorBasis<F>::evaluate_at | verus/fft.rs::CantorTwin::evaluate_at | 7f23e0390231e4d3
+src/fft/cantor.rs | impl CantorBasis<F>::evaluate_at | verus/fft.rs::CantorTwin::evaluate_at | 601835d3a2385281
 src/fft/cantor.rs | impl CantorBasis<F>::check_index | verus/fft.rs::CantorTwin::index_ok | 0f7d3d94fa7273d3
-src/fft/cantor.rs | impl CantorBasis<F>::beta_sum | verus/fft.rs::CantorTwin::beta_sum | f1c41b23324ab32d
+src/fft/cantor.rs | impl CantorBasis<F>::beta_sum | verus/fft.rs::CantorTwin::beta_sum | d472a59ddf7406ce
+src/fft/cantor.rs | impl CantorBasis<F>::beta_sum | verus/fft.rs::FftTwin::sum_lift | d472a59ddf7406ce
 src/fft/cantor.rs | impl CantorBasis<F>::fold | verus/fft.rs::CantorTwin::fold | f605ade74f377f99
+src/fft/cantor.rs | impl CantorBasis<F>::evaluate_parallel | verus/TRUSTED_AXIOMS.md::cantor.rs::evaluate_parallel | 6a90b61310cb75d3
+src/fft/cantor.rs | impl CantorBasis<F>::root | verus/TRUSTED_AXIOMS.md::cantor.rs::evaluate_parallel | b2ef75a4f8a300ea
+src/fft/cantor.rs | impl CantorBasis<F>::node | verus/TRUSTED_AXIOMS.md::cantor.rs::evaluate_parallel | c39ff1730416ef52
+src/fft/cantor.rs | impl CantorBasis<F>::descend | verus/TRUSTED_AXIOMS.md::cantor.rs::evaluate_parallel | 753bac4e4db5cf13
+src/fft/cantor.rs | dense | verus/TRUSTED_AXIOMS.md::cantor.rs::evaluate_parallel | dee7e2c646c49ae7
+src/fft/cantor.rs | halve | verus/TRUSTED_AXIOMS.md::cantor.rs::evaluate_parallel | 556c634a7c913125
+src/fft/cantor.rs | absorb | verus/TRUSTED_AXIOMS.md::cantor.rs::evaluate_parallel | 32ec720b73e3c9d0
+src/fft/cantor.rs | butterflies | verus/TRUSTED_AXIOMS.md::cantor.rs::evaluate_parallel | b1fc452ce8806b4c
+src/fft/cantor.rs | chunk_len | verus/TRUSTED_AXIOMS.md::cantor.rs::evaluate_parallel | bb73c17b2e1c2956
 
 src/algebra.rs | trait BinaryFieldExtras::frobenius | verus/algebra.rs::frobenius16_twin | 06ac3c592f3c5cd5
 src/algebra.rs | trait BinaryFieldExtras::trace | verus/algebra.rs::trace_iter16 | 614f08b66d9e36fb

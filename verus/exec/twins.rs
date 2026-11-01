@@ -30,8 +30,8 @@ use hekate_math::{
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 const RANDOM: usize = 4096;
-
 const MAX_LOG_N: u32 = 10;
+const FFT_MAX_LOG_N: u32 = 12;
 
 macro_rules! conversion_case {
     (
@@ -245,7 +245,7 @@ fn lift_twins_match_promote_flat() {
 #[test]
 fn fft_twin_matches_scalar_transforms() {
     let mut rng = StdRng::seed_from_u64(0x6666_7474);
-    for log_n in 1..=MAX_LOG_N {
+    for log_n in 1..=FFT_MAX_LOG_N {
         let basis = CantorBasis::<Block128>::new(log_n as usize).expect("Cantor basis");
         let lift: Vec<u128> = basis.betas()[1..].iter().map(|b| b.into_raw().0).collect();
         let twin = FftTwin::new(log_n, lift);

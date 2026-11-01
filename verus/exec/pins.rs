@@ -22,7 +22,7 @@ use std::path::Path;
 use syn::{ImplItem, Item, ItemImpl, ItemMacro, ItemTrait, TraitItem};
 
 const PINS: &str = include_str!("pins.txt");
-const EXPECTED_PINS: usize = 147;
+const EXPECTED_PINS: usize = 165;
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
