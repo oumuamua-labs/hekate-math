@@ -9,9 +9,12 @@ src/towers/block8.rs | impl HardwareField for Block8::mul_hardware | verus/flat/
 src/towers/block8.rs | impl HardwareField for Block8::mul_hardware_packed | verus/flat/packed.rs::mul_flat_packed_8_twin | 5243a74070b7f4fe
 src/towers/block8.rs | impl HardwareField for Block8::tower_bit_from_hardware | verus/flat/convert.rs::tower_bit_8_twin | 8f308015ba47e406
 src/towers/block8.rs | mul_iso_8 | verus/flat/convert.rs::mul_iso_correct | 87fb95f0f2b36874
-src/towers/block8.rs | map_ct_8 | verus/flat/convert.rs::map_ct_8_twin | f9ff0fd3c8bec6f5
+src/towers/block8.rs | map_ct_8 | verus/flat/convert.rs::map_ct_8_twin | 130a8170e7ef53c1
 src/towers/block8.rs | neon::mul_8 | verus/flat/mul.rs::mul_8_twin | b00460a779178aab
 src/towers/block8.rs | neon::mul_flat_packed_8 | verus/flat/packed.rs::mul_flat_packed_8_twin | 7f24d5b30642cbe8
+src/towers/block8.rs | impl BinaryFieldExtras for Block8::square | verus/algebra.rs::square8_spread | bdcec14fce1bae82
+src/towers/block8.rs | impl BinaryFieldExtras for Block8::trace | verus/TRUSTED_AXIOMS.md::write_algebra_extras | 03e25574fde57646
+src/towers/block8.rs | impl BinaryFieldExtras for Block8::solve_quadratic | verus/TRUSTED_AXIOMS.md::write_algebra_extras | f5c3e2c50bb95d55
 
 src/towers/block16.rs | impl Block16::new | verus/tower/block16.rs::pack | e84dfa55f6ca3a1b
 src/towers/block16.rs | impl Block16::split | verus/tower/block16.rs::lo::hi | 67ade409221a3637
@@ -114,13 +117,17 @@ src/fft/additive.rs | impl AdditiveFft<F>::forward_scalar | verus/fft.rs::FftTwi
 src/fft/additive.rs | impl AdditiveFft<F>::inverse_scalar | verus/fft.rs::FftTwin::inverse_coset | 8082cb49cf1065f6
 src/fft/additive.rs | impl AdditiveFft<F>::forward_coset_scalar | verus/fft.rs::FftTwin::forward_coset | c014b6c50e26930b
 src/fft/additive.rs | impl AdditiveFft<F>::inverse_coset_scalar | verus/fft.rs::FftTwin::inverse_coset | 0eb8d9ed82754844
+src/fft/additive.rs | impl AdditiveFft<F>::lde_plan | verus/fft.rs::FftTwin::lde_plan | 5e588e9d0b2a333b
 src/fft/additive.rs | impl AdditiveFft<F>::check_len | verus/fft.rs::FftTwin::forward_coset | 1ba279efb90da9d2
+src/fft/additive.rs | impl LdePlan<F>::run | verus/fft.rs::LdeTwin::run | d2f722c5fcc0b08c
 src/fft/additive.rs | impl AdditiveFft<F>::fwd_levels | verus/fft.rs::fwd_levels_exec | e25ca6b846a8a83d
 src/fft/additive.rs | impl AdditiveFft<F>::inv_levels | verus/fft.rs::inv_levels_exec | eca28695800fe4ed
 src/fft/additive.rs | coset_chain | verus/fft.rs::fwd_levels_exec | bab3dd342d6151c8
 src/fft/additive.rs | impl Twiddles<F>::at | verus/TRUSTED_AXIOMS.md::additive.rs::fwd_parallel | 3b879487608f86d4
 src/fft/additive.rs | impl Twiddles<F>::blocks | verus/fft.rs::pass_fwd_exec | 14527abed9d843d8
 src/fft/additive.rs | impl Twiddles<F>::blocks | verus/fft.rs::pass_inv_exec | 14527abed9d843d8
+src/fft/additive.rs | impl Twiddles<F>::for_each_block | verus/fft.rs::FftTwin::inv_bottom_into_exec | 9c673ff32cc961ea
+src/fft/additive.rs | impl Twiddles<F>::for_each_block | verus/fft.rs::FftTwin::fwd_bottom_into_exec | 9c673ff32cc961ea
 src/fft/additive.rs | parallel_eligible | verus/TRUSTED_AXIOMS.md::additive.rs::fwd_parallel | ae2a223e2d07b988
 src/fft/additive.rs | fwd_parallel | verus/fft.rs::pass_fwd_exec | a2651fb56345f9d3
 src/fft/additive.rs | inv_parallel | verus/fft.rs::pass_inv_exec | 1e204a926b5b03fc
@@ -128,6 +135,9 @@ src/fft/additive.rs | tile_log | verus/TRUSTED_AXIOMS.md::additive.rs::fwd_paral
 src/fft/additive.rs | blocks_serial | verus/fft.rs::pass_fwd_exec | 9b6d9152122ed5fb
 src/fft/additive.rs | fwd_butterflies | verus/fft.rs::fwd_bfly_block | ef6f1268c6612ac2
 src/fft/additive.rs | inv_butterflies | verus/fft.rs::inv_bfly_block | f0d5a6972e735229
+src/fft/additive.rs | inv_bottom_into | verus/fft.rs::FftTwin::inv_bottom_into_exec | ac1d62138f30bd64
+src/fft/additive.rs | fwd_top_into | verus/fft.rs::FftTwin::fwd_top_into_exec | e7b4e4242b143dd4
+src/fft/additive.rs | fwd_bottom_into | verus/fft.rs::FftTwin::fwd_bottom_into_exec | df7c0836f2f2eb4b
 
 src/fft/blocked.rs | impl Group<'_, K>::spans | verus/TRUSTED_AXIOMS.md::blocked.rs::Group | 25a6c424f88f9b1b
 src/fft/blocked.rs | impl Group<'_, K>::span | verus/TRUSTED_AXIOMS.md::blocked.rs::Group | fa933668876de313
@@ -171,6 +181,7 @@ build/main.rs | macro_rules! impl_gf_mul_flat | verus/gf_model.rs::gf_mul | 3bd8
 build/main.rs | impl_gf_mul_flat! | verus/gf_model.rs::modulus | 126e1a42ce409883
 build/main.rs | macro_rules! impl_verify_iso | verus/axioms_t.rs::phi_roundtrip::phi_mult_gen | 93d9b6e867e3a5d9
 build/main.rs | impl_verify_iso! | verus/axioms_t.rs::phi_roundtrip::phi_mult_gen | bd5c1c11860544e6
+build/main.rs | write_algebra_extras_8 | verus/TRUSTED_AXIOMS.md::write_algebra_extras | d5c35c21c020159c
 build/main.rs | write_algebra_extras_16 | verus/TRUSTED_AXIOMS.md::write_algebra_extras | d48314c38799741c
 build/main.rs | macro_rules! impl_write_algebra_extras_wide | verus/TRUSTED_AXIOMS.md::write_algebra_extras | d2f9994c029d811f
 build/main.rs | impl_write_algebra_extras_wide! | verus/TRUSTED_AXIOMS.md::write_algebra_extras | 36c9bb80578518f2
