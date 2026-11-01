@@ -306,7 +306,7 @@ where
 // 6. Additive FFT (Gao–Mateer, Block128)
 fn bench_fft_block128(group: &mut BenchmarkGroup<WallTime>, log_n: u32) {
     for log in [log_n, log_n + 1] {
-        group.throughput(Throughput::Elements(1 << (log - 1)));
+        group.throughput(Throughput::Elements(1));
         group.bench_function(format!("Block128/fft_new_{}", 1usize << log), |bencher| {
             bencher.iter(|| black_box(AdditiveFft::<Block128>::new(black_box(log)).unwrap()))
         });

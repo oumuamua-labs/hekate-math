@@ -51,7 +51,7 @@ pub enum RsError {
         got: usize,
     },
 
-    /// Allocating a 2^log_size-point twiddle table failed.
+    /// Allocating a transform's twiddle table failed.
     TwiddleAlloc {
         /// The `log_k` or `log_n` of the failing transform.
         log_size: u32,
@@ -80,7 +80,7 @@ impl core::fmt::Display for RsError {
             RsError::TwiddleAlloc { log_size } => {
                 write!(
                     f,
-                    "ReedSolomon 2^{log_size}-point twiddle table allocation failed"
+                    "ReedSolomon log_size {log_size}: twiddle table allocation failed"
                 )
             }
         }

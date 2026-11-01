@@ -26,6 +26,8 @@
 //! Coefficients, points and evaluations are in the flat basis.
 
 mod additive;
+#[cfg(feature = "parallel")]
+mod blocked;
 mod cantor;
 mod reed_solomon;
 

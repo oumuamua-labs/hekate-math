@@ -67,7 +67,7 @@
 //! | Feature      | Default | Effect                                |
 //! |:-------------|:--------|:--------------------------------------|
 //! | `std`        | yes     | without it: `no_std` with `alloc`     |
-//! | `parallel`   | yes     | Rayon for FFT buffers of 1 MiB and up |
+//! | `parallel`   | yes     | Rayon from 1 MiB: FFT, `evaluate_at`  |
 //! | `table-math` | no      | variable-time lookup tables, above    |
 //!
 //! # Contents
