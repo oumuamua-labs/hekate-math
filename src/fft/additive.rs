@@ -20,7 +20,7 @@
 #[cfg(feature = "parallel")]
 use super::blocked::{GROUP_LEVELS, Group, LEAVES_PER_THREAD, PARALLEL_THRESHOLD_BYTES};
 use super::{CantorBasis, CantorError};
-use crate::{BinaryFieldExtras, Flat, HardwareField, PackedFlat};
+use crate::{BinaryFieldExtras, Flat, HardwareField, PackableField, PackedFlat};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::ops::{Add, AddAssign, Mul};
@@ -60,6 +60,37 @@ pub enum FftError {
         /// The `log_n` passed to `new`.
         log_n: u32,
     },
+
+    /// The `stride` passed to [`LdePlan::run`] is `got`,
+    /// under the `width` lanes one point occupies.
+    BadStride {
+        /// `F::WIDTH`.
+        width: usize,
+
+        /// The `stride` passed in.
+        got: usize,
+    },
+
+    /// The `scratch` passed to [`LdePlan::run`] has length
+    /// `got`, under the 2 * 2^log_n it needs.
+    ShortScratch {
+        /// 2 * 2^log_n.
+        need: usize,
+
+        /// The length of the `scratch` passed in.
+        got: usize,
+    },
+
+    /// The `out` passed to [`LdePlan::run`] has length `got`,
+    /// under the end of the last lane the plan writes.
+    ShortOut {
+        /// `(cosets * 2^log_n - 1) * stride + F::WIDTH`,
+        /// `usize::MAX` when that overflows.
+        need: usize,
+
+        /// The length of the `out` passed in.
+        got: usize,
+    },
 }
 
 impl core::fmt::Display for FftError {
@@ -77,16 +108,29 @@ impl core::fmt::Display for FftError {
                     "AdditiveFft log_n {log_n}: twiddle table allocation failed"
                 )
             }
+            FftError::BadStride { width, got } => {
+                write!(f, "LdePlan stride {got}, needs at least {width}")
+            }
+            FftError::ShortScratch { need, got } => {
+                write!(f, "LdePlan scratch length {got}, needs {need}")
+            }
+            FftError::ShortOut { need, got } => {
+                write!(f, "LdePlan out length {got}, needs {need}")
+            }
         }
     }
 }
 
 impl core::error::Error for FftError {}
 
-struct Twiddles<F> {
-    // low[t] = Σ_{bit i of t} β_{i+1}, flat basis
-    low: Box<[Flat<F>]>,
-    basis: CantorBasis<F>,
+/// One block LDE: the inverse transform of 2^log_n packed
+/// points and the forward transforms on fixed cosets, built
+/// by [`AdditiveFft::lde_plan`], run by [`LdePlan::run`].
+pub struct LdePlan<F> {
+    log_n: u32,
+    cosets: usize,
+    tw: Twiddles<F>,
+    chains: Box<[Flat<F>]>,
 }
 
 /// In-place additive FFT over a 2^log_n
@@ -260,6 +304,49 @@ impl<F: BinaryFieldExtras + HardwareField> AdditiveFft<F> {
         Ok(())
     }
 
+    /// Builds the plan that runs [`Self::inverse`] and then
+    /// [`Self::forward_coset`] at each of `offsets` on one
+    /// block of packed points; see [`LdePlan::run`].
+    ///
+    /// # Errors
+    /// `TwiddleAlloc` if the plan's tables cannot be allocated.
+    pub fn lde_plan(&self, offsets: &[Flat<F>]) -> Result<LdePlan<F>, FftError> {
+        let levels = self.log_n as usize;
+
+        let alloc = |_| FftError::TwiddleAlloc { log_n: self.log_n };
+
+        let mut low = Vec::new();
+        low.try_reserve_exact(self.tw.low.len()).map_err(alloc)?;
+        low.extend_from_slice(&self.tw.low);
+
+        let len = offsets
+            .len()
+            .checked_mul(levels)
+            .ok_or(FftError::TwiddleAlloc { log_n: self.log_n })?;
+
+        let mut chains = Vec::new();
+        chains.try_reserve_exact(len).map_err(alloc)?;
+
+        for &offset in offsets {
+            let mut c = offset;
+            for _ in 0..levels {
+                chains.push(c);
+
+                c = c * c + c;
+            }
+        }
+
+        Ok(LdePlan {
+            log_n: self.log_n,
+            cosets: offsets.len(),
+            tw: Twiddles {
+                low: low.into_boxed_slice(),
+                basis: self.tw.basis.clone(),
+            },
+            chains: chains.into_boxed_slice(),
+        })
+    }
+
     fn check_len(&self, got: usize) -> Result<(), FftError> {
         let expected = 1usize << self.log_n;
         if got != expected {
@@ -322,6 +409,98 @@ impl<F: BinaryFieldExtras + HardwareField> AdditiveFft<F> {
     }
 }
 
+impl<F: BinaryFieldExtras + HardwareField> LdePlan<F> {
+    /// Runs the plan on one block: the inverse of `data` into the
+    /// first half of `scratch` (any content on entry), then point u
+    /// of coset j unpacked to `out[(j * n + u) * stride..][..F::WIDTH]`.
+    ///
+    /// # Errors
+    /// `BadLength` unless `data.len() == n`, `ShortScratch` under `2n`,
+    /// `BadStride` if `stride < F::WIDTH`, `ShortOut` unless `out`
+    /// reaches the end of the last lane written.
+    pub fn run(
+        &self,
+        data: &[PackedFlat<F>],
+        scratch: &mut [PackedFlat<F>],
+        out: &mut [Flat<F>],
+        stride: usize,
+    ) -> Result<(), FftError> {
+        let n = 1usize << self.log_n;
+        let levels = self.log_n as usize;
+        let width = <Flat<F> as PackableField>::WIDTH;
+
+        if data.len() != n {
+            return Err(FftError::BadLength {
+                expected: n,
+                got: data.len(),
+            });
+        }
+
+        if scratch.len() < 2 * n {
+            return Err(FftError::ShortScratch {
+                need: 2 * n,
+                got: scratch.len(),
+            });
+        }
+
+        if stride < width {
+            return Err(FftError::BadStride { width, got: stride });
+        }
+
+        let need = match self.cosets {
+            0 => 0,
+            c => c
+                .checked_mul(n)
+                .and_then(|points| (points - 1).checked_mul(stride))
+                .and_then(|last| last.checked_add(width))
+                .unwrap_or(usize::MAX),
+        };
+
+        if out.len() < need {
+            return Err(FftError::ShortOut {
+                need,
+                got: out.len(),
+            });
+        }
+
+        let zero = Flat::from_raw(F::ZERO);
+        let (a, b) = scratch.split_at_mut(n);
+        let b = &mut b[..n];
+
+        inv_bottom_into(&self.tw, data, a);
+
+        for l in 1..levels {
+            self.tw.blocks(a, 0, zero, 1usize << l, &inv_butterflies);
+        }
+
+        for (j, chain) in self.chains.chunks_exact(levels).enumerate() {
+            let rows = &mut out[j * n * stride..];
+
+            if levels == 1 {
+                fwd_bottom_into(&self.tw, a, chain[0], rows, stride);
+                continue;
+            }
+
+            fwd_top_into(a, b, chain[levels - 1]);
+
+            for l in (1..levels - 1).rev() {
+                self.tw
+                    .blocks(b, 0, chain[l], 1usize << l, &fwd_butterflies);
+            }
+
+            fwd_bottom_into(&self.tw, b, chain[0], rows, stride);
+        }
+
+        Ok(())
+    }
+}
+
+struct Twiddles<F> {
+    // low[t] = Σ_{bit i of t} β_{i+1}, flat basis
+    low: Box<[Flat<F>]>,
+    basis: CantorBasis<F>,
+}
+
 impl<F: BinaryFieldExtras + HardwareField> Twiddles<F> {
     #[cfg(feature = "parallel")]
     fn at(&self, b: usize) -> Flat<F> {
@@ -351,6 +530,23 @@ impl<F: BinaryFieldExtras + HardwareField> Twiddles<F> {
             let blk = &mut data[2 * s * done..2 * s * (done + take)];
 
             blocks_serial(blk, &self.low[u..u + take], coset + high, s, kernel);
+
+            done += take;
+        }
+    }
+
+    fn for_each_block(&self, coset: Flat<F>, nb: usize, mut f: impl FnMut(usize, Flat<F>)) {
+        let len = self.low.len();
+        let low_log = len.trailing_zeros() as usize;
+
+        let mut done = 0;
+        while done < nb {
+            let take = len.min(nb - done);
+            let high = coset + self.basis.beta_sum(done >> low_log, low_log + 1);
+
+            for (i, &t) in self.low[..take].iter().enumerate() {
+                f(done + i, high + t);
+            }
 
             done += take;
         }
@@ -488,4 +684,54 @@ where
         *p += qv * tw;
         *q = qv;
     }
+}
+
+fn inv_bottom_into<F>(tw: &Twiddles<F>, src: &[PackedFlat<F>], dst: &mut [PackedFlat<F>])
+where
+    F: BinaryFieldExtras + HardwareField,
+{
+    let (pairs, _) = src.as_chunks::<2>();
+    let (slots, _) = dst.as_chunks_mut::<2>();
+
+    tw.for_each_block(Flat::from_raw(F::ZERO), pairs.len(), |b, t| {
+        let qv = pairs[b][0] + pairs[b][1];
+
+        slots[b][0] = pairs[b][0] + qv * t;
+        slots[b][1] = qv;
+    });
+}
+
+fn fwd_top_into<F: HardwareField>(src: &[PackedFlat<F>], dst: &mut [PackedFlat<F>], tw: Flat<F>) {
+    let s = src.len() / 2;
+    let (lo, hi) = src.split_at(s);
+    let (dlo, dhi) = dst.split_at_mut(s);
+
+    for (((&p, &q), dl), dh) in lo.iter().zip(hi).zip(dlo).zip(dhi) {
+        let v = p + q * tw;
+
+        *dl = v;
+        *dh = v + q;
+    }
+}
+
+fn fwd_bottom_into<F>(
+    tw: &Twiddles<F>,
+    src: &[PackedFlat<F>],
+    coset: Flat<F>,
+    out: &mut [Flat<F>],
+    stride: usize,
+) where
+    F: BinaryFieldExtras + HardwareField,
+{
+    let width = <Flat<F> as PackableField>::WIDTH;
+    let (pairs, _) = src.as_chunks::<2>();
+
+    tw.for_each_block(coset, pairs.len(), |b, t| {
+        let q = pairs[b][1];
+        let v = pairs[b][0] + q * t;
+        let at = 2 * b * stride;
+
+        <Flat<F> as PackableField>::unpack(v, &mut out[at..at + width]);
+        <Flat<F> as PackableField>::unpack(v + q, &mut out[at + stride..at + stride + width]);
+    });
 }

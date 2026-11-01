@@ -98,6 +98,16 @@ impl From<FftError> for RsError {
                 max_log_n: max,
             },
             FftError::TwiddleAlloc { log_n } => RsError::TwiddleAlloc { log_size: log_n },
+            FftError::BadStride { width, got } => RsError::BadLength {
+                expected: width,
+                got,
+            },
+            FftError::ShortScratch { need, got } | FftError::ShortOut { need, got } => {
+                RsError::BadLength {
+                    expected: need,
+                    got,
+                }
+            }
         }
     }
 }

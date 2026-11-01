@@ -31,7 +31,7 @@ mod blocked;
 mod cantor;
 mod reed_solomon;
 
-pub use additive::{AdditiveFft, FftError};
+pub use additive::{AdditiveFft, FftError, LdePlan};
 pub use cantor::{CantorBasis, CantorError};
 pub use reed_solomon::{ReedSolomon, RsError};
 

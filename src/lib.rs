@@ -73,9 +73,9 @@
 //! # Contents
 //!
 //! [`fft`] holds the additive FFT over the Cantor basis
-//! ([`AdditiveFft`], [`CantorBasis`]) and a systematic Reed-Solomon
-//! encoder ([`ReedSolomon`]). [`BinaryFieldExtras`] adds square,
-//! Frobenius, trace and a root of x^2 + x = c, for Block16 through
+//! ([`AdditiveFft`], [`CantorBasis`], [`LdePlan`]) and a systematic
+//! Reed-Solomon encoder ([`ReedSolomon`]). [`BinaryFieldExtras`] adds square,
+//! Frobenius, trace and a root of x^2 + x = c, for Block8 through
 //! Block256.
 //!
 //! # Examples
@@ -157,7 +157,7 @@ mod packable;
 pub mod fft;
 
 pub use algebra::BinaryFieldExtras;
-pub use fft::{AdditiveFft, CantorBasis, CantorError, FftError, ReedSolomon, RsError};
+pub use fft::{AdditiveFft, CantorBasis, CantorError, FftError, LdePlan, ReedSolomon, RsError};
 pub use field::*;
 pub use hardware::{Flat, FlatPromote, HardwareField};
 pub use packable::{PackableField, PackedFlat};
