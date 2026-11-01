@@ -180,8 +180,16 @@ control fft_fold_0x86 fft.rs 'fn mul_flat(a: u128, b: u128)' \
   'x = rr ^ 0x86;'
 
 control double_noxor fft.rs '    pub fn new(log_n: u32, lift: Vec<u128>)' \
-  'twiddles.push(tw ^ l);' \
-  'twiddles.push(tw);'
+  'low.push(tw ^ l);' \
+  'low.push(tw);'
+
+control chunk_base fft.rs '    fn sum_lift(' \
+  'let l = self.lift[base + j];' \
+  'let l = self.lift[j];'
+
+control chunk_sum fft.rs '    fn pass_inv_exec(' \
+  'let ch = add_flat(coset, high);' \
+  'let ch = coset;'
 
 control halve_swapped fft.rs 'fn halve(' \
   'add_flat(p, mul_flat(q, tw))' \
