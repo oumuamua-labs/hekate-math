@@ -41,7 +41,7 @@ fi
 
 # Silent-shrink guard: bump with TRUSTED_AXIOMS.md.
 EXPECTED_EXTERNAL_BODY=2
-EXPECTED_VERIFIED=3067
+EXPECTED_VERIFIED=3116
 
 # The whole verifier::external* family is trusted;
 # only external_body, only in axioms_t.rs, only on its own line.

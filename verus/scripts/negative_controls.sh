@@ -191,6 +191,22 @@ control chunk_sum fft.rs '    fn pass_inv_exec(' \
   'let ch = add_flat(coset, high);' \
   'let ch = coset;'
 
+control lde_top_noxor fft.rs '    fn fwd_top_into_exec(' \
+  'dst.set(s + r, add_flat(v, q));' \
+  'dst.set(s + r, v);'
+
+control lde_inv_pair fft.rs '    fn inv_bottom_into_exec(' \
+  'let v = add_flat(p, mul_flat(qv, tw));' \
+  'let v = add_flat(p, mul_flat(q, tw));'
+
+control lde_bottom_hi fft.rs '    fn fwd_bottom_into_exec(' \
+  'out.set(at + stride, add_flat(v, q));' \
+  'out.set(at + stride, v);'
+
+control lde_run_chain fft.rs '    pub fn run(' \
+  'self.chains[base + levels - 1]);' \
+  'self.chains[base]);'
+
 control halve_swapped fft.rs 'fn halve(' \
   'add_flat(p, mul_flat(q, tw))' \
   'add_flat(q, mul_flat(p, tw))'
