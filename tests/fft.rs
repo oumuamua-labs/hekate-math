@@ -21,8 +21,8 @@ use common::{eval_point, horner_eval, reference_forward, reference_twiddles};
 use core::ops::RangeInclusive;
 use hekate_math::fft::vanish_eval;
 use hekate_math::{
-    AdditiveFft, BinaryFieldExtras, Block16, Block32, Block64, Block128, Block256, CantorBasis,
-    FftError, Flat, HardwareField, PackableField, PackedFlat, TowerField,
+    AdditiveFft, BinaryFieldExtras, Block8, Block16, Block32, Block64, Block128, Block256,
+    CantorBasis, FftError, Flat, HardwareField, LdePlan, PackableField, PackedFlat, TowerField,
 };
 use rand::{RngExt, SeedableRng, rng, rngs::StdRng};
 
@@ -339,6 +339,100 @@ fn pool_differential<F: BinaryFieldExtras + HardwareField>(seed: u64, log_n: u32
     }
 }
 
+fn fill<F: HardwareField>(
+    r: &mut StdRng,
+    mk: &mut impl FnMut(&mut StdRng) -> F,
+    dst: &mut [Flat<F>],
+) {
+    for x in dst.iter_mut() {
+        *x = Flat::from_raw(mk(r));
+    }
+}
+
+fn lde_plan_eq_separate<F: BinaryFieldExtras + HardwareField>(
+    seed: u64,
+    max_log_n: u32,
+    mut mk: impl FnMut(&mut StdRng) -> F,
+) {
+    let width = <Flat<F> as PackableField>::WIDTH;
+    let zero = Flat::from_raw(F::ZERO);
+
+    let mut r = StdRng::seed_from_u64(seed);
+    let mut lanes = vec![zero; width];
+
+    for log_n in 1..=max_log_n {
+        let n = 1usize << log_n;
+        let fft = AdditiveFft::<F>::new(log_n).unwrap();
+
+        let data: Vec<PackedFlat<F>> = (0..n)
+            .map(|_| {
+                fill(&mut r, &mut mk, &mut lanes);
+
+                <Flat<F> as PackableField>::pack(&lanes)
+            })
+            .collect();
+
+        let mut buf = data.clone();
+        fft.inverse(&mut buf).unwrap();
+
+        for cosets in [0usize, 1, 2, 5] {
+            let offsets: Vec<Flat<F>> = (0..cosets).map(|_| Flat::from_raw(mk(&mut r))).collect();
+            let plan: LdePlan<F> = fft.lde_plan(&offsets).unwrap();
+
+            for stride in [width, width + 3] {
+                let need = match cosets {
+                    0 => 0,
+                    c => (c * n - 1) * stride + width,
+                };
+
+                let mut out = vec![zero; need + 2];
+                fill(&mut r, &mut mk, &mut out);
+
+                let mut scratch: Vec<PackedFlat<F>> = (0..2 * n + 1)
+                    .map(|_| {
+                        fill(&mut r, &mut mk, &mut lanes);
+
+                        <Flat<F> as PackableField>::pack(&lanes)
+                    })
+                    .collect();
+
+                let mut want = out.clone();
+                plan.run(&data, &mut scratch, &mut out, stride).unwrap();
+
+                for (j, &offset) in offsets.iter().enumerate() {
+                    let mut tmp = buf.clone();
+                    fft.forward_coset(&mut tmp, offset).unwrap();
+
+                    for (u, &p) in tmp.iter().enumerate() {
+                        let at = (j * n + u) * stride;
+                        <Flat<F> as PackableField>::unpack(p, &mut want[at..at + width]);
+                    }
+                }
+
+                assert_eq!(
+                    out,
+                    want,
+                    "{}-bit log_n={log_n} cosets={cosets} stride={stride}",
+                    F::BITS
+                );
+
+                let mut got = vec![zero; width];
+                for (u, (&p, &q)) in scratch[..n].iter().zip(&buf).enumerate() {
+                    <Flat<F> as PackableField>::unpack(p, &mut got);
+                    <Flat<F> as PackableField>::unpack(q, &mut lanes);
+
+                    assert_eq!(
+                        got,
+                        lanes,
+                        "{}-bit log_n={log_n} cosets={cosets} stride={stride}: scratch[{u}] != inverse",
+                        F::BITS
+                    );
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn vanish_eval_linearity_and_recurrence() {
     let mut r = rng();
@@ -528,6 +622,11 @@ fn additive_fft_coset_eq_horner() {
 fn additive_fft_eq_horner_wide_fields() {
     let mut r = StdRng::seed_from_u64(0x5eed_ff70_4e00);
     for log_n in [1u32, 3, 7] {
+        horner_check(log_n, Block8::ZERO, || Block8(r.random()));
+
+        let offset = Block8(r.random());
+        horner_check(log_n, offset, || Block8(r.random()));
+
         horner_check(log_n, Block32::ZERO, || Block32(r.random()));
 
         let offset = Block32(r.random());
@@ -739,6 +838,10 @@ fn additive_fft_new_rejects_zero() {
 #[test]
 fn additive_fft_new_rejects_above_field_bits() {
     assert_eq!(
+        AdditiveFft::<Block8>::new(9).err(),
+        Some(FftError::BadLogN { log_n: 9, max: 8 })
+    );
+    assert_eq!(
         AdditiveFft::<Block16>::new(Block16::BITS as u32 + 1).err(),
         Some(FftError::BadLogN { log_n: 17, max: 16 })
     );
@@ -826,6 +929,12 @@ fn fft_error_display_carries_lengths() {
 
     let msg = format!("{}", FftError::TwiddleAlloc { log_n: 61 });
     assert!(msg.contains("61"), "uninformative: {msg}");
+}
+
+#[test]
+fn additive_fft_roundtrip_block8() {
+    let mut r = StdRng::seed_from_u64(0x5eed_ff70_0008);
+    roundtrip_scalar(8, || Block8(r.random()));
 }
 
 #[test]
@@ -954,6 +1063,7 @@ fn additive_fft_parallel_eq_evaluate_at_block128() {
 
 #[test]
 fn reference_transform_eq_horner() {
+    reference_horner::<Block8>(0x5eed_16f0_0008, |r| Block8(r.random()));
     reference_horner::<Block16>(0x5eed_16f0_0016, |r| Block16(r.random()));
     reference_horner::<Block32>(0x5eed_16f0_0032, |r| Block32(r.random()));
     reference_horner::<Block64>(0x5eed_16f0_0064, |r| Block64(r.random()));
@@ -981,6 +1091,11 @@ fn additive_fft_packed_parallel_eq_reference() {
     packed_differential::<Block256>(0x5eed_16f2_0256, 14..=16, |r| {
         Block256([r.random(), r.random()])
     });
+}
+
+#[test]
+fn additive_fft_packed_block8() {
+    packed_differential::<Block8>(0x5eed_16f2_0008, 1..=8, |r| Block8(r.random()));
 }
 
 #[test]
@@ -1012,4 +1127,63 @@ fn additive_fft_parallel_eq_reference_2p27() {
     parallel_differential::<Block32>(0x5eed_16f5_0032, 27..=27, |r| Block32(r.random()));
     parallel_differential::<Block64>(0x5eed_16f5_0064, 27..=27, |r| Block64(r.random()));
     parallel_differential::<Block128>(0x5eed_16f5_0128, 27..=27, |r| Block128(r.random()));
+}
+
+#[test]
+fn lde_plan_eq_inverse_then_forward_cosets() {
+    lde_plan_eq_separate::<Block8>(0x5eed_1de0_0008, 8, |r| Block8(r.random()));
+    lde_plan_eq_separate::<Block16>(0x5eed_1de0_0016, 12, |r| Block16(r.random()));
+    lde_plan_eq_separate::<Block32>(0x5eed_1de0_0032, 11, |r| Block32(r.random()));
+    lde_plan_eq_separate::<Block64>(0x5eed_1de0_0064, 11, |r| Block64(r.random()));
+    lde_plan_eq_separate::<Block128>(0x5eed_1de0_0128, 9, |r| Block128(r.random()));
+    lde_plan_eq_separate::<Block256>(0x5eed_1de0_0256, 8, |r| Block256([r.random(), r.random()]));
+}
+
+#[test]
+fn lde_plan_run_rejects_bad_slices() {
+    let fft = AdditiveFft::<Block16>::new(3).unwrap();
+    let offsets = [Flat::from_raw(Block16(5)), Flat::from_raw(Block16(9))];
+    let plan = fft.lde_plan(&offsets).unwrap();
+
+    let data = vec![PackedFlat::<Block16>::default(); 8];
+
+    let mut scratch = vec![PackedFlat::<Block16>::default(); 16];
+    let mut out = vec![Flat::from_raw(Block16::ZERO); 15 * 8 + 8];
+
+    assert_eq!(
+        plan.run(&data[..7], &mut scratch, &mut out, 8).err(),
+        Some(FftError::BadLength {
+            expected: 8,
+            got: 7
+        })
+    );
+    assert_eq!(
+        plan.run(&data, &mut scratch[..15], &mut out, 8).err(),
+        Some(FftError::ShortScratch { need: 16, got: 15 })
+    );
+    assert_eq!(
+        plan.run(&data, &mut scratch, &mut out, 7).err(),
+        Some(FftError::BadStride { width: 8, got: 7 })
+    );
+    assert_eq!(
+        plan.run(&data, &mut scratch, &mut out[..127], 8).err(),
+        Some(FftError::ShortOut {
+            need: 128,
+            got: 127
+        })
+    );
+
+    let wrap = usize::MAX / 15 + 1;
+    assert_eq!(
+        plan.run(&data, &mut scratch, &mut out, wrap).err(),
+        Some(FftError::ShortOut {
+            need: usize::MAX,
+            got: 128
+        }),
+        "15 * stride wraps to 14"
+    );
+    assert!(plan.run(&data, &mut scratch, &mut out, 8).is_ok());
+
+    let empty = fft.lde_plan(&[]).unwrap();
+    assert!(empty.run(&data, &mut scratch, &mut [], 8).is_ok());
 }
