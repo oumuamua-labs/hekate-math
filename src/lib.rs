@@ -146,6 +146,8 @@
 
 extern crate alloc;
 
+#[cfg(target_arch = "aarch64")]
+mod aarch64;
 mod algebra;
 mod field;
 mod towers;

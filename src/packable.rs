@@ -53,6 +53,24 @@ pub trait PackableField: Sized + Copy + Clone + Default {
     /// # Panics
     /// If `output.len() < WIDTH`.
     fn unpack(packed: Self::Packed, output: &mut [Self]);
+
+    /// Writes lane c of `packed[u]` to `output[c * lane_stride + u]`.
+    ///
+    /// # Panics
+    /// If `lane_stride < packed.len()`, if `output` ends
+    /// before the last lane written, or if `WIDTH > 64`.
+    fn unpack_transposed(packed: &[Self::Packed], output: &mut [Self], lane_stride: usize) {
+        assert!(
+            lane_stride >= packed.len(),
+            "PackableField::unpack_transposed: lanes overlap"
+        );
+
+        if Self::WIDTH <= 16 {
+            scatter_lanes::<Self, 16>(packed, output, lane_stride);
+        } else {
+            scatter_lanes::<Self, 64>(packed, output, lane_stride);
+        }
+    }
 }
 
 impl<F: HardwareField> PackableField for Flat<F> {
@@ -68,6 +86,15 @@ impl<F: HardwareField> PackableField for Flat<F> {
     #[inline(always)]
     fn unpack(packed: Self::Packed, output: &mut [Self]) {
         F::unpack(packed.into_raw(), flat_slice_as_raw_mut(output));
+    }
+
+    #[inline(always)]
+    fn unpack_transposed(packed: &[Self::Packed], output: &mut [Self], lane_stride: usize) {
+        F::unpack_transposed(
+            packed_slice_as_raw(packed),
+            flat_slice_as_raw_mut(output),
+            lane_stride,
+        );
     }
 }
 
@@ -232,6 +259,32 @@ impl<F: HardwareField> Mul<Flat<F>> for PackedFlat<F> {
     fn mul(self, rhs: Flat<F>) -> Self::Output {
         F::mul_hardware_scalar_packed(self, rhs)
     }
+}
+
+#[inline(always)]
+pub(crate) fn scatter_lanes<F: PackableField, const N: usize>(
+    packed: &[F::Packed],
+    output: &mut [F],
+    lane_stride: usize,
+) {
+    let width = F::WIDTH;
+
+    let mut lanes = [F::default(); N];
+    for (u, &point) in packed.iter().enumerate() {
+        F::unpack(point, &mut lanes[..width]);
+
+        for (c, &lane) in lanes[..width].iter().enumerate() {
+            output[c * lane_stride + u] = lane;
+        }
+    }
+}
+
+#[inline(always)]
+fn packed_slice_as_raw<F: PackableField>(slice: &[PackedFlat<F>]) -> &[F::Packed] {
+    // SAFETY:
+    // PackedFlat<F> is #[repr(transparent)] over F::Packed: same size and alignment;
+    // the result borrows `slice` for its lifetime.
+    unsafe { core::slice::from_raw_parts(slice.as_ptr().cast::<F::Packed>(), slice.len()) }
 }
 
 #[inline(always)]

@@ -19,6 +19,8 @@
 //! in both bases, and the aarch64 NEON kernels.
 
 use crate::constants::FLAT_TO_TOWER_BIT_MASKS_8;
+#[cfg(target_arch = "aarch64")]
+use crate::packable::scatter_lanes;
 use crate::towers::bit::Bit;
 use crate::{
     BinaryFieldExtras, CanonicalDeserialize, CanonicalSerialize, Flat, HardwareField,
@@ -377,6 +379,27 @@ impl PackableField for Block8 {
 
         output[..PACKED_WIDTH_8].copy_from_slice(&packed.0);
     }
+
+    #[cfg(target_arch = "aarch64")]
+    #[inline(always)]
+    fn unpack_transposed(packed: &[Self::Packed], output: &mut [Self], lane_stride: usize) {
+        assert!(
+            lane_stride >= packed.len(),
+            "PackableField::unpack_transposed: lanes overlap"
+        );
+
+        let (tiles, rest) = packed.as_chunks::<PACKED_WIDTH_8>();
+
+        for (k, tile) in tiles.iter().enumerate() {
+            neon::store_transposed_8(tile, &mut output[k * PACKED_WIDTH_8..], lane_stride);
+        }
+
+        scatter_lanes::<Self, PACKED_WIDTH_8>(
+            rest,
+            &mut output[tiles.len() * PACKED_WIDTH_8..],
+            lane_stride,
+        );
+    }
 }
 
 impl Add for PackedBlock8 {
@@ -565,8 +588,7 @@ impl HardwareField for Block8 {
 
     #[inline(always)]
     fn mul_hardware_scalar_packed(lhs: PackedFlat<Self>, rhs: Flat<Self>) -> PackedFlat<Self> {
-        let broadcasted = PackedBlock8([rhs.into_raw(); PACKED_WIDTH_8]);
-        Self::mul_hardware_packed(lhs, PackedFlat::from_raw(broadcasted))
+        Self::mul_hardware_packed(lhs, PackedFlat::splat(rhs))
     }
 
     #[inline(always)]
@@ -580,6 +602,25 @@ impl HardwareField for Block8 {
         v ^= v >> 1;
 
         v & 1
+    }
+}
+
+impl PackedFlat<Block8> {
+    /// Spreads bit i of `bits` into lane i as zero or one.
+    #[inline(always)]
+    pub fn from_bits(bits: u16) -> Self {
+        let mut lanes = [Block8::ZERO; PACKED_WIDTH_8];
+        for (i, lane) in lanes.iter_mut().enumerate() {
+            *lane = Block8(((bits >> i) & 1) as u8);
+        }
+
+        Self::from_raw(PackedBlock8(lanes))
+    }
+
+    /// Fills every lane with `x`.
+    #[inline(always)]
+    pub fn splat(x: Flat<Block8>) -> Self {
+        Self::from_raw(PackedBlock8([x.into_raw(); PACKED_WIDTH_8]))
     }
 }
 
@@ -808,6 +849,7 @@ const _: () = {
 #[cfg(target_arch = "aarch64")]
 mod neon {
     use super::*;
+    use crate::aarch64::transpose::transpose_16x16;
     use core::arch::aarch64::*;
     use core::mem::transmute;
 
@@ -815,6 +857,27 @@ mod neon {
         constants::POLY_8 == 0x1b,
         "reduction tables and verus twins hardcode R = 0x1b"
     );
+
+    #[inline(always)]
+    pub fn store_transposed_8(
+        tile: &[PackedBlock8; PACKED_WIDTH_8],
+        output: &mut [Block8],
+        lane_stride: usize,
+    ) {
+        // SAFETY:
+        // PackedBlock8 is repr(C) over [Block8; 16] and Block8 repr(transparent)
+        // over u8: both transmutes reinterpret 16-byte values, every pattern valid.
+        unsafe {
+            let rows: [uint8x16_t; PACKED_WIDTH_8] = transmute(*tile);
+            let lanes = transpose_16x16(&rows);
+
+            for (c, lane) in lanes.iter().enumerate() {
+                let at = c * lane_stride;
+                output[at..at + PACKED_WIDTH_8]
+                    .copy_from_slice(&transmute::<uint8x16_t, [Block8; PACKED_WIDTH_8]>(*lane));
+            }
+        }
+    }
 
     #[inline(always)]
     pub fn add_packed_8(lhs: PackedBlock8, rhs: PackedBlock8) -> PackedBlock8 {
