@@ -349,6 +349,77 @@ fn fill<F: HardwareField>(
     }
 }
 
+fn lde_plan_lanes_eq_run<F: BinaryFieldExtras + HardwareField>(
+    seed: u64,
+    max_log_n: u32,
+    mut mk: impl FnMut(&mut StdRng) -> F,
+) {
+    let width = <Flat<F> as PackableField>::WIDTH;
+    let zero = Flat::from_raw(F::ZERO);
+
+    let mut r = StdRng::seed_from_u64(seed);
+    let mut lanes = vec![zero; width];
+
+    for log_n in 1..=max_log_n {
+        let n = 1usize << log_n;
+        let fft = AdditiveFft::<F>::new(log_n).unwrap();
+
+        let data: Vec<PackedFlat<F>> = (0..n)
+            .map(|_| {
+                fill(&mut r, &mut mk, &mut lanes);
+
+                <Flat<F> as PackableField>::pack(&lanes)
+            })
+            .collect();
+
+        let mut buf = data.clone();
+        fft.inverse(&mut buf).unwrap();
+
+        let mut scratch = vec![PackedFlat::<F>::default(); 2 * n];
+        for cosets in [0usize, 1, 2, 5] {
+            let offsets: Vec<Flat<F>> = (0..cosets).map(|_| Flat::from_raw(mk(&mut r))).collect();
+            let plan: LdePlan<F> = fft.lde_plan(&offsets).unwrap();
+            let points = cosets * n;
+
+            let mut rows = vec![zero; points * width];
+            plan.run(&data, &mut scratch, &mut rows, width).unwrap();
+
+            let mut out = vec![zero; points * width + 2];
+            fill(&mut r, &mut mk, &mut out);
+
+            let mut want = out.clone();
+            for (p, row) in rows.chunks_exact(width).enumerate() {
+                for (c, &lane) in row.iter().enumerate() {
+                    want[c * points + p] = lane;
+                }
+            }
+
+            for slot in scratch.iter_mut() {
+                fill(&mut r, &mut mk, &mut lanes);
+
+                *slot = <Flat<F> as PackableField>::pack(&lanes);
+            }
+
+            plan.run_lanes(&data, &mut scratch, &mut out).unwrap();
+
+            assert_eq!(out, want, "{}-bit log_n={log_n} cosets={cosets}", F::BITS);
+
+            let mut got = vec![zero; width];
+            for (u, (&p, &q)) in scratch[..n].iter().zip(&buf).enumerate() {
+                <Flat<F> as PackableField>::unpack(p, &mut got);
+                <Flat<F> as PackableField>::unpack(q, &mut lanes);
+
+                assert_eq!(
+                    got,
+                    lanes,
+                    "{}-bit log_n={log_n} cosets={cosets} point {u}: inverse in scratch",
+                    F::BITS
+                );
+            }
+        }
+    }
+}
+
 fn lde_plan_eq_separate<F: BinaryFieldExtras + HardwareField>(
     seed: u64,
     max_log_n: u32,
@@ -1137,6 +1208,51 @@ fn lde_plan_eq_inverse_then_forward_cosets() {
     lde_plan_eq_separate::<Block64>(0x5eed_1de0_0064, 11, |r| Block64(r.random()));
     lde_plan_eq_separate::<Block128>(0x5eed_1de0_0128, 9, |r| Block128(r.random()));
     lde_plan_eq_separate::<Block256>(0x5eed_1de0_0256, 8, |r| Block256([r.random(), r.random()]));
+}
+
+#[test]
+fn lde_plan_run_lanes_eq_run() {
+    lde_plan_lanes_eq_run::<Block8>(0x5eed_1a7e_0008, 8, |r| Block8(r.random()));
+    lde_plan_lanes_eq_run::<Block16>(0x5eed_1a7e_0016, 12, |r| Block16(r.random()));
+    lde_plan_lanes_eq_run::<Block32>(0x5eed_1a7e_0032, 11, |r| Block32(r.random()));
+    lde_plan_lanes_eq_run::<Block64>(0x5eed_1a7e_0064, 11, |r| Block64(r.random()));
+    lde_plan_lanes_eq_run::<Block128>(0x5eed_1a7e_0128, 9, |r| Block128(r.random()));
+    lde_plan_lanes_eq_run::<Block256>(0x5eed_1a7e_0256, 8, |r| Block256([r.random(), r.random()]));
+}
+
+#[test]
+fn lde_plan_run_lanes_rejects_bad_slices() {
+    let fft = AdditiveFft::<Block16>::new(3).unwrap();
+    let offsets = [Flat::from_raw(Block16(5)), Flat::from_raw(Block16(9))];
+    let plan = fft.lde_plan(&offsets).unwrap();
+
+    let data = vec![PackedFlat::<Block16>::default(); 8];
+
+    let mut scratch = vec![PackedFlat::<Block16>::default(); 16];
+    let mut out = vec![Flat::from_raw(Block16::ZERO); 8 * 2 * 8];
+
+    assert_eq!(
+        plan.run_lanes(&data[..7], &mut scratch, &mut out).err(),
+        Some(FftError::BadLength {
+            expected: 8,
+            got: 7
+        })
+    );
+    assert_eq!(
+        plan.run_lanes(&data, &mut scratch[..15], &mut out).err(),
+        Some(FftError::ShortScratch { need: 16, got: 15 })
+    );
+    assert_eq!(
+        plan.run_lanes(&data, &mut scratch, &mut out[..127]).err(),
+        Some(FftError::ShortOut {
+            need: 128,
+            got: 127
+        })
+    );
+    assert!(plan.run_lanes(&data, &mut scratch, &mut out).is_ok());
+
+    let empty = fft.lde_plan(&[]).unwrap();
+    assert!(empty.run_lanes(&data, &mut scratch, &mut []).is_ok());
 }
 
 #[test]
