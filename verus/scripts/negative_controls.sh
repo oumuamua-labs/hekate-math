@@ -207,6 +207,14 @@ control lde_run_chain fft.rs '    pub fn run(' \
   'self.chains[base + levels - 1]);' \
   'self.chains[base]);'
 
+control lde_run_lane0 fft.rs '    pub fn run(' \
+  'let row0 = lane0 + j * n * stride;' \
+  'let row0 = j * n * stride;'
+
+control lde_tile_flush fft.rs '    fn fwd_bottom_lanes_into_exec(' \
+  'flush_tile_exec(&points, LANE_TILE, out, row0 + u0);' \
+  'flush_tile_exec(&points, LANE_TILE, out, row0);'
+
 control halve_swapped fft.rs 'fn halve(' \
   'add_flat(p, mul_flat(q, tw))' \
   'add_flat(q, mul_flat(p, tw))'
