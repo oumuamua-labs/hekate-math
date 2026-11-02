@@ -20,7 +20,7 @@
 #[cfg(feature = "parallel")]
 use super::blocked::{GROUP_LEVELS, Group, LEAVES_PER_THREAD, PARALLEL_THRESHOLD_BYTES};
 use super::{CantorBasis, CantorError};
-use crate::{BinaryFieldExtras, Flat, HardwareField, PackableField, PackedFlat};
+use crate::{BinaryFieldExtras, Flat, HardwareField, PACKED_WIDTH_8, PackableField, PackedFlat};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::ops::{Add, AddAssign, Mul};
@@ -29,6 +29,7 @@ use rayon::prelude::*;
 
 const MAX_LEVELS: usize = 64;
 const LOW_LOG: usize = 10;
+const LANE_TILE: usize = PACKED_WIDTH_8;
 
 #[cfg(feature = "parallel")]
 const TILE_BYTES: usize = 1 << 16;
@@ -71,8 +72,8 @@ pub enum FftError {
         got: usize,
     },
 
-    /// The `scratch` passed to [`LdePlan::run`] has length
-    /// `got`, under the 2 * 2^log_n it needs.
+    /// The `scratch` passed to [`LdePlan::run`] or [`LdePlan::run_lanes`]
+    /// has length `got`, under the 2 * 2^log_n it needs.
     ShortScratch {
         /// 2 * 2^log_n.
         need: usize,
@@ -81,10 +82,11 @@ pub enum FftError {
         got: usize,
     },
 
-    /// The `out` passed to [`LdePlan::run`] has length `got`,
-    /// under the end of the last lane the plan writes.
+    /// The `out` passed to [`LdePlan::run`] or [`LdePlan::run_lanes`]
+    /// has length `got`, under the end of the last lane the plan writes.
     ShortOut {
-        /// `(cosets * 2^log_n - 1) * stride + F::WIDTH`,
+        /// `(cosets * 2^log_n - 1) * stride + F::WIDTH` for `run`,
+        /// `F::WIDTH * cosets * 2^log_n` for `run_lanes`,
         /// `usize::MAX` when that overflows.
         need: usize,
 
@@ -125,7 +127,8 @@ impl core::error::Error for FftError {}
 
 /// One block LDE: the inverse transform of 2^log_n packed
 /// points and the forward transforms on fixed cosets, built
-/// by [`AdditiveFft::lde_plan`], run by [`LdePlan::run`].
+/// by [`AdditiveFft::lde_plan`], run point-major by
+/// [`LdePlan::run`] or lane-major by [`LdePlan::run_lanes`].
 pub struct LdePlan<F> {
     log_n: u32,
     cosets: usize,
@@ -426,22 +429,9 @@ impl<F: BinaryFieldExtras + HardwareField> LdePlan<F> {
         stride: usize,
     ) -> Result<(), FftError> {
         let n = 1usize << self.log_n;
-        let levels = self.log_n as usize;
         let width = <Flat<F> as PackableField>::WIDTH;
 
-        if data.len() != n {
-            return Err(FftError::BadLength {
-                expected: n,
-                got: data.len(),
-            });
-        }
-
-        if scratch.len() < 2 * n {
-            return Err(FftError::ShortScratch {
-                need: 2 * n,
-                got: scratch.len(),
-            });
-        }
+        self.check_block(data, scratch)?;
 
         if stride < width {
             return Err(FftError::BadStride { width, got: stride });
@@ -463,6 +453,85 @@ impl<F: BinaryFieldExtras + HardwareField> LdePlan<F> {
             });
         }
 
+        self.transforms(data, scratch, |j, src, coset| {
+            fwd_bottom_into(&self.tw, src, coset, &mut out[j * n * stride..], stride);
+        });
+
+        Ok(())
+    }
+
+    /// Runs the plan on one block, lane-major: lane c of point u
+    /// in coset j lands at `out[(c * cosets + j) * n + u]`; the
+    /// inverse lands in the first half of `scratch` as in [`LdePlan::run`].
+    ///
+    /// # Errors
+    /// `BadLength` unless `data.len() == n`, `ShortScratch` under `2n`,
+    /// `ShortOut` unless `out` holds `F::WIDTH * cosets * n` elements.
+    pub fn run_lanes(
+        &self,
+        data: &[PackedFlat<F>],
+        scratch: &mut [PackedFlat<F>],
+        out: &mut [Flat<F>],
+    ) -> Result<(), FftError> {
+        let n = 1usize << self.log_n;
+        let width = <Flat<F> as PackableField>::WIDTH;
+
+        self.check_block(data, scratch)?;
+
+        let need = self
+            .cosets
+            .checked_mul(n)
+            .and_then(|points| points.checked_mul(width))
+            .unwrap_or(usize::MAX);
+
+        if out.len() < need {
+            return Err(FftError::ShortOut {
+                need,
+                got: out.len(),
+            });
+        }
+
+        let lane_stride = self.cosets * n;
+
+        self.transforms(data, scratch, |j, src, coset| {
+            fwd_bottom_lanes_into(&self.tw, src, coset, &mut out[j * n..], lane_stride);
+        });
+
+        Ok(())
+    }
+
+    fn check_block(
+        &self,
+        data: &[PackedFlat<F>],
+        scratch: &[PackedFlat<F>],
+    ) -> Result<(), FftError> {
+        let n = 1usize << self.log_n;
+
+        if data.len() != n {
+            return Err(FftError::BadLength {
+                expected: n,
+                got: data.len(),
+            });
+        }
+
+        if scratch.len() < 2 * n {
+            return Err(FftError::ShortScratch {
+                need: 2 * n,
+                got: scratch.len(),
+            });
+        }
+
+        Ok(())
+    }
+
+    fn transforms(
+        &self,
+        data: &[PackedFlat<F>],
+        scratch: &mut [PackedFlat<F>],
+        mut bottom: impl FnMut(usize, &[PackedFlat<F>], Flat<F>),
+    ) {
+        let n = 1usize << self.log_n;
+        let levels = self.log_n as usize;
         let zero = Flat::from_raw(F::ZERO);
         let (a, b) = scratch.split_at_mut(n);
         let b = &mut b[..n];
@@ -474,10 +543,8 @@ impl<F: BinaryFieldExtras + HardwareField> LdePlan<F> {
         }
 
         for (j, chain) in self.chains.chunks_exact(levels).enumerate() {
-            let rows = &mut out[j * n * stride..];
-
             if levels == 1 {
-                fwd_bottom_into(&self.tw, a, chain[0], rows, stride);
+                bottom(j, a, chain[0]);
                 continue;
             }
 
@@ -488,10 +555,8 @@ impl<F: BinaryFieldExtras + HardwareField> LdePlan<F> {
                     .blocks(b, 0, chain[l], 1usize << l, &fwd_butterflies);
             }
 
-            fwd_bottom_into(&self.tw, b, chain[0], rows, stride);
+            bottom(j, b, chain[0]);
         }
-
-        Ok(())
     }
 }
 
@@ -734,4 +799,49 @@ fn fwd_bottom_into<F>(
         <Flat<F> as PackableField>::unpack(v, &mut out[at..at + width]);
         <Flat<F> as PackableField>::unpack(v + q, &mut out[at + stride..at + stride + width]);
     });
+}
+
+fn fwd_bottom_lanes_into<F>(
+    tw: &Twiddles<F>,
+    src: &[PackedFlat<F>],
+    coset: Flat<F>,
+    out: &mut [Flat<F>],
+    lane_stride: usize,
+) where
+    F: BinaryFieldExtras + HardwareField,
+{
+    let (pairs, _) = src.as_chunks::<2>();
+
+    let mut points = [PackedFlat::<F>::default(); LANE_TILE];
+    let mut filled = 0usize;
+    let mut u0 = 0usize;
+
+    tw.for_each_block(coset, pairs.len(), |b, t| {
+        let q = pairs[b][1];
+        let v = pairs[b][0] + q * t;
+
+        points[filled] = v;
+        points[filled + 1] = v + q;
+
+        filled += 2;
+
+        if filled == LANE_TILE {
+            <Flat<F> as PackableField>::unpack_transposed(
+                &points[..LANE_TILE],
+                &mut out[u0..],
+                lane_stride,
+            );
+
+            u0 += LANE_TILE;
+            filled = 0;
+        }
+    });
+
+    if filled > 0 {
+        <Flat<F> as PackableField>::unpack_transposed(
+            &points[..filled],
+            &mut out[u0..],
+            lane_stride,
+        );
+    }
 }
