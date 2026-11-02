@@ -1728,6 +1728,55 @@ pub open spec fn fwd_rows_nat(
         }
 }
 
+proof fn rows_to_inv_rows(
+    src: Seq<u128>,
+    dst: Seq<u128>,
+    tws: Seq<u128>,
+    s: int,
+    nblocks: int,
+    coset: nat,
+)
+    requires
+        s == 1,
+        forall|bb: int| 0 <= bb < nblocks ==> {
+            &&& #[trigger] dst[2 * bb] as nat == bfly_lo(
+                src[2 * bb] as nat,
+                xor(src[2 * bb] as nat, src[2 * bb + 1] as nat),
+                xor(coset, tws[bb] as nat),
+                128,
+            )
+            &&& dst[2 * bb + 1] as nat == xor(src[2 * bb] as nat, src[2 * bb + 1] as nat)
+        },
+    ensures
+        inv_rows(src, dst, tws, s, nblocks, coset),
+{
+    assert forall|b: int, r: int| 0 <= b < nblocks && 0 <= r < s implies {
+        &&& #[trigger] dst[b * (2 * s) + r] as nat == bfly_lo(
+            src[b * (2 * s) + r] as nat,
+            xor(src[b * (2 * s) + r] as nat, src[b * (2 * s) + s + r] as nat),
+            xor(coset, tws[b] as nat),
+            128,
+        )
+        &&& dst[b * (2 * s) + s + r] as nat == xor(
+            src[b * (2 * s) + r] as nat,
+            src[b * (2 * s) + s + r] as nat,
+        )
+    } by {
+        assert(r == 0);
+        assert(b * (2 * s) + r == 2 * b) by (nonlinear_arith)
+            requires r == 0, s == 1;
+        assert(b * (2 * s) + s + r == 2 * b + 1) by (nonlinear_arith)
+            requires r == 0, s == 1;
+        assert(dst[2 * b] as nat == bfly_lo(
+            src[2 * b] as nat,
+            xor(src[2 * b] as nat, src[2 * b + 1] as nat),
+            xor(coset, tws[b] as nat),
+            128,
+        ));
+        assert(dst[2 * b + 1] as nat == xor(src[2 * b] as nat, src[2 * b + 1] as nat));
+    }
+}
+
 pub open spec fn inv_rows_nat(
     pre: Seq<nat>,
     post: Seq<nat>,
@@ -3406,8 +3455,207 @@ impl FftTwin {
 // LdePlan twin (src/fft/additive.rs)
 // ============================================================
 
+pub const LANE_TILE: usize = 16;
+
 pub open spec fn slot(i: int, row0: int, stride: int, count: int) -> bool {
     row0 <= i && (i - row0) % stride == 0 && (i - row0) / stride < count
+}
+
+pub open spec fn flushed_rows(
+    src: Seq<u128>,
+    out: Seq<u128>,
+    tws: Seq<u128>,
+    coset: nat,
+    row0: int,
+    u0: int,
+) -> bool {
+    forall|bb: int| 0 <= 2 * bb < u0 ==> {
+        &&& #[trigger] out[row0 + 2 * bb] as nat == bfly_lo(
+            src[bb * 2] as nat,
+            src[bb * 2 + 1] as nat,
+            xor(coset, tws[bb] as nat),
+            128,
+        )
+        &&& out[row0 + 2 * bb + 1] as nat == xor(out[row0 + 2 * bb] as nat, src[bb * 2 + 1] as nat)
+    }
+}
+
+pub open spec fn tile_rows(
+    src: Seq<u128>,
+    points: Seq<u128>,
+    tws: Seq<u128>,
+    coset: nat,
+    u0: int,
+    filled: int,
+) -> bool {
+    forall|bb: int| u0 <= 2 * bb < u0 + filled ==> {
+        &&& #[trigger] points[2 * bb - u0] as nat == bfly_lo(
+            src[bb * 2] as nat,
+            src[bb * 2 + 1] as nat,
+            xor(coset, tws[bb] as nat),
+            128,
+        )
+        &&& points[2 * bb - u0 + 1] as nat == xor(
+            points[2 * bb - u0] as nat,
+            src[bb * 2 + 1] as nat,
+        )
+    }
+}
+
+proof fn flush_extends(
+    src: Seq<u128>,
+    pre: Seq<u128>,
+    out: Seq<u128>,
+    points: Seq<u128>,
+    tws: Seq<u128>,
+    coset: nat,
+    row0: int,
+    u0: int,
+    filled: int,
+)
+    requires
+        row0 >= 0,
+        u0 >= 0,
+        u0 % 2 == 0,
+        filled >= 0,
+        filled % 2 == 0,
+        points.len() >= filled,
+        out.len() == pre.len(),
+        row0 + u0 + filled <= out.len(),
+        flushed_rows(src, pre, tws, coset, row0, u0),
+        tile_rows(src, points, tws, coset, u0, filled),
+        forall|t: int| 0 <= t < filled ==> #[trigger] out[row0 + u0 + t] == points[t],
+        forall|i: int|
+            0 <= i < out.len() && !(row0 + u0 <= i < row0 + u0 + filled) ==> out[i] == pre[i],
+    ensures
+        flushed_rows(src, out, tws, coset, row0, u0 + filled),
+{
+    assert forall|bb: int| 0 <= 2 * bb < u0 + filled implies {
+        &&& #[trigger] out[row0 + 2 * bb] as nat == bfly_lo(
+            src[bb * 2] as nat,
+            src[bb * 2 + 1] as nat,
+            xor(coset, tws[bb] as nat),
+            128,
+        )
+        &&& out[row0 + 2 * bb + 1] as nat == xor(out[row0 + 2 * bb] as nat, src[bb * 2 + 1] as nat)
+    } by {
+        if 2 * bb < u0 {
+            assert(2 * bb + 2 <= u0);
+            assert(out[row0 + 2 * bb] == pre[row0 + 2 * bb]);
+            assert(out[row0 + 2 * bb + 1] == pre[row0 + 2 * bb + 1]);
+        } else {
+            let t = 2 * bb - u0;
+
+            assert(t + 2 <= filled);
+            assert(out[row0 + u0 + t] == points[t]);
+            assert(out[row0 + u0 + (t + 1)] == points[t + 1]);
+            assert(row0 + u0 + t == row0 + 2 * bb);
+            assert(row0 + u0 + (t + 1) == row0 + 2 * bb + 1);
+        }
+    }
+}
+
+proof fn flush_untouched(
+    orig: Seq<u128>,
+    pre: Seq<u128>,
+    out: Seq<u128>,
+    row0: int,
+    u0: int,
+    filled: int,
+)
+    requires
+        row0 >= 0,
+        u0 >= 0,
+        filled >= 0,
+        out.len() == pre.len(),
+        pre.len() == orig.len(),
+        forall|i: int| 0 <= i < pre.len() && !slot(i, row0, 1, u0) ==> pre[i] == orig[i],
+        forall|i: int|
+            0 <= i < out.len() && !(row0 + u0 <= i < row0 + u0 + filled) ==> out[i] == pre[i],
+    ensures
+        forall|i: int| 0 <= i < out.len() && !slot(i, row0, 1, u0 + filled) ==> out[i] == orig[i],
+{
+    assert forall|i: int| 0 <= i < out.len() && !slot(i, row0, 1, u0 + filled) implies out[i]
+        == orig[i] by {
+        assert((i - row0) % 1 == 0);
+        assert((i - row0) / 1 == i - row0);
+        assert(!slot(i, row0, 1, u0));
+        assert(!(row0 + u0 <= i < row0 + u0 + filled));
+    }
+}
+
+proof fn rows_stride_one(
+    src: Seq<u128>,
+    out: Seq<u128>,
+    tws: Seq<u128>,
+    coset: nat,
+    row0: int,
+    stride: int,
+    nblocks: int,
+)
+    requires
+        stride == 1,
+        flushed_rows(src, out, tws, coset, row0, 2 * nblocks),
+    ensures
+        forall|bb: int| 0 <= bb < nblocks ==> {
+            &&& #[trigger] out[row0 + 2 * bb * stride] as nat == bfly_lo(
+                src[bb * 2] as nat,
+                src[bb * 2 + 1] as nat,
+                xor(coset, tws[bb] as nat),
+                128,
+            )
+            &&& out[row0 + 2 * bb * stride + stride] as nat == xor(
+                out[row0 + 2 * bb * stride] as nat,
+                src[bb * 2 + 1] as nat,
+            )
+        },
+{
+    assert forall|bb: int| 0 <= bb < nblocks implies {
+        &&& #[trigger] out[row0 + 2 * bb * stride] as nat == bfly_lo(
+            src[bb * 2] as nat,
+            src[bb * 2 + 1] as nat,
+            xor(coset, tws[bb] as nat),
+            128,
+        )
+        &&& out[row0 + 2 * bb * stride + stride] as nat == xor(
+            out[row0 + 2 * bb * stride] as nat,
+            src[bb * 2 + 1] as nat,
+        )
+    } by {
+        assert(2 * bb * stride == 2 * bb) by (nonlinear_arith)
+            requires stride == 1;
+        assert(0 <= 2 * bb < 2 * nblocks);
+    }
+}
+
+fn flush_tile_exec(points: &Vec<u128>, filled: usize, out: &mut Vec<u128>, at: usize)
+    requires
+        filled <= points@.len(),
+        at + filled <= old(out)@.len(),
+        old(out)@.len() <= usize::MAX,
+    ensures
+        final(out)@.len() == old(out)@.len(),
+        forall|t: int| 0 <= t < filled ==> #[trigger] final(out)@[at + t] == points@[t],
+        forall|i: int|
+            0 <= i < final(out)@.len() && !(at <= i < at + filled) ==> final(out)@[i] == old(out)@[i],
+{
+    let mut t: usize = 0;
+
+    while t < filled
+        invariant
+            filled <= points@.len(),
+            at + filled <= out@.len(),
+            out@.len() == old(out)@.len(),
+            out@.len() <= usize::MAX,
+            t <= filled,
+            forall|tt: int| 0 <= tt < t ==> #[trigger] out@[at + tt] == points@[tt],
+            forall|i: int|
+                0 <= i < out@.len() && !(at <= i < at + t) ==> out@[i] == old(out)@[i],
+        decreases filled - t,
+    {
+        out.set(at + t, points[t]);
+        t += 1;
+    }
 }
 
 impl FftTwin {
@@ -3515,17 +3763,14 @@ impl FftTwin {
                 len as nat == pow2(low_log as nat),
                 low_log as nat == self.low_log(),
                 b % len == 0 || b == nblocks,
-                forall|bb: int, r: int| 0 <= bb < b && 0 <= r < 1 ==> {
-                    &&& #[trigger] dst@[bb * (2 * 1) + r] as nat == bfly_lo(
-                        src@[bb * (2 * 1) + r] as nat,
-                        xor(src@[bb * (2 * 1) + r] as nat, src@[bb * (2 * 1) + 1 + r] as nat),
+                forall|bb: int| 0 <= bb < b ==> {
+                    &&& #[trigger] dst@[2 * bb] as nat == bfly_lo(
+                        src@[2 * bb] as nat,
+                        xor(src@[2 * bb] as nat, src@[2 * bb + 1] as nat),
                         xor(coset as nat, self.twiddles@[bb] as nat),
                         128,
                     )
-                    &&& dst@[bb * (2 * 1) + 1 + r] as nat == xor(
-                        src@[bb * (2 * 1) + r] as nat,
-                        src@[bb * (2 * 1) + 1 + r] as nat,
-                    )
+                    &&& dst@[2 * bb + 1] as nat == xor(src@[2 * bb] as nat, src@[2 * bb + 1] as nat)
                 },
             decreases nblocks - b,
         {
@@ -3587,17 +3832,14 @@ impl FftTwin {
                     low_log as nat == self.low_log(),
                     start as nat == c as nat * pow2(low_log as nat),
                     ch as nat == xor(coset as nat, tw_sum(lift, c as nat, low_log as nat)),
-                    forall|bb: int, r: int| 0 <= bb < b && 0 <= r < 1 ==> {
-                        &&& #[trigger] dst@[bb * (2 * 1) + r] as nat == bfly_lo(
-                            src@[bb * (2 * 1) + r] as nat,
-                            xor(src@[bb * (2 * 1) + r] as nat, src@[bb * (2 * 1) + 1 + r] as nat),
+                    forall|bb: int| 0 <= bb < b ==> {
+                        &&& #[trigger] dst@[2 * bb] as nat == bfly_lo(
+                            src@[2 * bb] as nat,
+                            xor(src@[2 * bb] as nat, src@[2 * bb + 1] as nat),
                             xor(coset as nat, self.twiddles@[bb] as nat),
                             128,
                         )
-                        &&& dst@[bb * (2 * 1) + 1 + r] as nat == xor(
-                            src@[bb * (2 * 1) + r] as nat,
-                            src@[bb * (2 * 1) + 1 + r] as nat,
-                        )
+                        &&& dst@[2 * bb + 1] as nat == xor(src@[2 * bb] as nat, src@[2 * bb + 1] as nat)
                     },
                 decreases end - b,
             {
@@ -3635,24 +3877,15 @@ impl FftTwin {
                 dst.set(2 * b + 1, qv);
 
                 proof {
-                    assert forall|bb: int, r: int| 0 <= bb < b + 1 && 0 <= r < 1 implies {
-                        &&& #[trigger] dst@[bb * (2 * 1) + r] as nat == bfly_lo(
-                            src@[bb * (2 * 1) + r] as nat,
-                            xor(src@[bb * (2 * 1) + r] as nat, src@[bb * (2 * 1) + 1 + r] as nat),
+                    assert forall|bb: int| 0 <= bb < b + 1 implies {
+                        &&& #[trigger] dst@[2 * bb] as nat == bfly_lo(
+                            src@[2 * bb] as nat,
+                            xor(src@[2 * bb] as nat, src@[2 * bb + 1] as nat),
                             xor(coset as nat, self.twiddles@[bb] as nat),
                             128,
                         )
-                        &&& dst@[bb * (2 * 1) + 1 + r] as nat == xor(
-                            src@[bb * (2 * 1) + r] as nat,
-                            src@[bb * (2 * 1) + 1 + r] as nat,
-                        )
+                        &&& dst@[2 * bb + 1] as nat == xor(src@[2 * bb] as nat, src@[2 * bb + 1] as nat)
                     } by {
-                        assert(r == 0);
-                        assert(bb * (2 * 1) + r == 2 * bb) by (nonlinear_arith)
-                            requires r == 0;
-                        assert(bb * (2 * 1) + 1 + r == 2 * bb + 1) by (nonlinear_arith)
-                            requires r == 0;
-
                         if bb < b {
                             assert(2 * bb + 1 < 2 * b);
                             assert(dst@[2 * bb] == pre[2 * bb]);
@@ -3683,7 +3916,7 @@ impl FftTwin {
         }
 
         proof {
-            assert(inv_rows(src@, dst@, self.twiddles@, 1, nblocks as int, coset as nat));
+            rows_to_inv_rows(src@, dst@, self.twiddles@, 1, nblocks as int, coset as nat);
         }
     }
 
@@ -3962,6 +4195,333 @@ impl FftTwin {
                             start as nat == c as nat * pow2(low_log as nat),
                             len as nat == pow2(low_log as nat);
                 }
+            }
+        }
+    }
+
+    // fwd_bottom_lanes_into, additive.rs: level 0 of a forward coset
+    // through a 16-point tile, flushed to out[row0 + u0..] per full
+    // tile and once more for the tail; one lane, point step 1.
+    fn fwd_bottom_lanes_into_exec(
+        &self,
+        src: &Vec<u128>,
+        coset: u128,
+        out: &mut Vec<u128>,
+        row0: usize,
+        nblocks: usize,
+    )
+        requires
+            self.wf(),
+            nblocks >= 1,
+            nblocks * 2 == src@.len(),
+            nblocks <= self.twiddles@.len(),
+            row0 + 2 * nblocks - 1 < old(out)@.len(),
+            old(out)@.len() <= usize::MAX,
+            src@.len() <= usize::MAX,
+        ensures
+            final(out)@.len() == old(out)@.len(),
+            flushed_rows(src@, final(out)@, self.twiddles@, coset as nat, row0 as int, 2 * nblocks),
+            forall|i: int|
+                0 <= i < final(out)@.len() && !slot(i, row0 as int, 1, 2 * nblocks)
+                    ==> final(out)@[i] == old(out)@[i],
+    {
+        let len = self.low.len();
+        let low_log: u32 = if self.log_n - 1 < LOW_LOG {
+            self.log_n - 1
+        } else {
+            LOW_LOG
+        };
+
+        let ghost lift = nats(self.lift@);
+
+        proof {
+            gf_model::pow2_pos(low_log as nat);
+
+            assert(low_log as nat == self.low_log());
+            assert(len as nat == pow2(low_log as nat));
+        }
+
+        let mut points: Vec<u128> = Vec::new();
+        let mut k: usize = 0;
+
+        while k < LANE_TILE
+            invariant
+                points@.len() == k,
+                k <= LANE_TILE,
+            decreases LANE_TILE - k,
+        {
+            points.push(0);
+            k += 1;
+        }
+
+        let mut filled: usize = 0;
+        let mut u0: usize = 0;
+        let mut b: usize = 0;
+
+        while b < nblocks
+            invariant
+                self.wf(),
+                nblocks >= 1,
+                nblocks * 2 == src@.len(),
+                nblocks <= self.twiddles@.len(),
+                row0 + 2 * nblocks - 1 < out@.len(),
+                out@.len() == old(out)@.len(),
+                out@.len() <= usize::MAX,
+                src@.len() <= usize::MAX,
+                b <= nblocks,
+                lift == nats(self.lift@),
+                len == self.low@.len(),
+                len as nat == pow2(low_log as nat),
+                low_log as nat == self.low_log(),
+                b % len == 0 || b == nblocks,
+                points@.len() == LANE_TILE,
+                filled + 2 <= LANE_TILE,
+                filled % 2 == 0,
+                u0 % 2 == 0,
+                u0 + filled == 2 * b,
+                flushed_rows(src@, out@, self.twiddles@, coset as nat, row0 as int, u0 as int),
+                tile_rows(src@, points@, self.twiddles@, coset as nat, u0 as int, filled as int),
+                forall|i: int|
+                    0 <= i < out@.len() && !slot(i, row0 as int, 1, u0 as int)
+                        ==> out@[i] == old(out)@[i],
+            decreases nblocks - b,
+        {
+            let start = b;
+            let take = if len < nblocks - b {
+                len
+            } else {
+                nblocks - b
+            };
+            let end = b + take;
+            let c: u64 = (b as u64) >> (low_log as u64);
+
+            proof {
+                gf_model::pow2_pos(low_log as nat);
+                lemma_u64_shr_is_div(b as u64, low_log as u64);
+                pow2_bridge(low_log as nat);
+                lemma_fundamental_div_mod(b as int, len as int);
+
+                assert(c as nat == b as nat / pow2(low_log as nat));
+                assert(b % len == 0);
+                assert(b as nat == c as nat * pow2(low_log as nat)) by (nonlinear_arith)
+                    requires
+                        b == len * (b / len) + b % len,
+                        b % len == 0,
+                        c as nat == b as nat / pow2(low_log as nat),
+                        len as nat == pow2(low_log as nat);
+
+                gf_model::pow2_add(low_log as nat, (self.lift@.len() - low_log) as nat);
+
+                assert(b < pow2((self.log_n - 1) as nat));
+                assert(low_log + (self.lift@.len() - low_log) == self.log_n - 1);
+                assert((c as nat) < pow2((self.lift@.len() - low_log) as nat)) by (nonlinear_arith)
+                    requires
+                        b as nat == c as nat * pow2(low_log as nat),
+                        b < pow2((self.log_n - 1) as nat),
+                        pow2((self.log_n - 1) as nat) == pow2(low_log as nat) * pow2(
+                            (self.lift@.len() - low_log) as nat,
+                        ),
+                        pow2(low_log as nat) >= 1;
+            }
+
+            let high = self.sum_lift(c, low_log as usize);
+            let ch = add_flat(coset, high);
+
+            while b < end
+                invariant
+                    self.wf(),
+                    nblocks >= 1,
+                    nblocks * 2 == src@.len(),
+                    nblocks <= self.twiddles@.len(),
+                    row0 + 2 * nblocks - 1 < out@.len(),
+                    out@.len() == old(out)@.len(),
+                    out@.len() <= usize::MAX,
+                    src@.len() <= usize::MAX,
+                    start <= b <= end,
+                    end == start + take,
+                    take <= len,
+                    end <= nblocks,
+                    lift == nats(self.lift@),
+                    len == self.low@.len(),
+                    len as nat == pow2(low_log as nat),
+                    low_log as nat == self.low_log(),
+                    start as nat == c as nat * pow2(low_log as nat),
+                    ch as nat == xor(coset as nat, tw_sum(lift, c as nat, low_log as nat)),
+                    points@.len() == LANE_TILE,
+                    filled + 2 <= LANE_TILE,
+                    filled % 2 == 0,
+                    u0 % 2 == 0,
+                    u0 + filled == 2 * b,
+                    flushed_rows(src@, out@, self.twiddles@, coset as nat, row0 as int, u0 as int),
+                    tile_rows(src@, points@, self.twiddles@, coset as nat, u0 as int, filled as int),
+                    forall|i: int|
+                        0 <= i < out@.len() && !slot(i, row0 as int, 1, u0 as int)
+                            ==> out@[i] == old(out)@[i],
+                decreases end - b,
+            {
+                let tw = add_flat(ch, self.low[b - start]);
+
+                proof {
+                    let i = (b - start) as nat;
+                    let hc = tw_sum(lift, c as nat, low_log as nat);
+                    let li = tw_sum(lift, i, 0);
+
+                    tw_sum_split(lift, c as nat, i, low_log as nat, 0);
+
+                    assert(b as nat == c as nat * pow2(low_log as nat) + i);
+                    assert(self.twiddles@[b as int] as nat == xor(li, hc));
+                    assert(self.low@[i as int] as nat == li);
+
+                    xor_assoc(coset as nat, hc, li);
+                    xor_comm(hc, li);
+
+                    assert(tw as nat == xor(coset as nat, self.twiddles@[b as int] as nat));
+                }
+
+                let p = src[2 * b];
+                let q = src[2 * b + 1];
+                let v = add_flat(p, mul_flat(q, tw));
+
+                proof {
+                    gf_mul_comm(tw as nat, q as nat, 128);
+                }
+
+                let ghost pre_points = points@;
+
+                points.set(filled, v);
+                points.set(filled + 1, add_flat(v, q));
+
+                proof {
+                    assert forall|bb: int| u0 <= 2 * bb < u0 + (filled + 2) implies {
+                        &&& #[trigger] points@[2 * bb - u0] as nat == bfly_lo(
+                            src@[bb * 2] as nat,
+                            src@[bb * 2 + 1] as nat,
+                            xor(coset as nat, self.twiddles@[bb] as nat),
+                            128,
+                        )
+                        &&& points@[2 * bb - u0 + 1] as nat == xor(
+                            points@[2 * bb - u0] as nat,
+                            src@[bb * 2 + 1] as nat,
+                        )
+                    } by {
+                        if 2 * bb < u0 + filled {
+                            assert(2 * bb - u0 + 1 < filled);
+                            assert(points@[2 * bb - u0] == pre_points[2 * bb - u0]);
+                            assert(points@[2 * bb - u0 + 1] == pre_points[2 * bb - u0 + 1]);
+                        } else {
+                            assert(bb == b);
+                            assert(2 * bb - u0 == filled);
+                        }
+                    }
+
+                    assert(tile_rows(
+                        src@,
+                        points@,
+                        self.twiddles@,
+                        coset as nat,
+                        u0 as int,
+                        (filled + 2) as int,
+                    ));
+                }
+
+                filled += 2;
+
+                if filled == LANE_TILE {
+                    let ghost pre_out = out@;
+
+                    proof {
+                        assert(u0 + LANE_TILE == 2 * (b + 1));
+                        assert(row0 + u0 + LANE_TILE <= out@.len());
+                    }
+
+                    flush_tile_exec(&points, LANE_TILE, out, row0 + u0);
+
+                    proof {
+                        flush_extends(
+                            src@,
+                            pre_out,
+                            out@,
+                            points@,
+                            self.twiddles@,
+                            coset as nat,
+                            row0 as int,
+                            u0 as int,
+                            LANE_TILE as int,
+                        );
+                        flush_untouched(
+                            old(out)@,
+                            pre_out,
+                            out@,
+                            row0 as int,
+                            u0 as int,
+                            LANE_TILE as int,
+                        );
+                    }
+
+                    u0 += LANE_TILE;
+                    filled = 0;
+
+                    proof {
+                        assert(tile_rows(
+                            src@,
+                            points@,
+                            self.twiddles@,
+                            coset as nat,
+                            u0 as int,
+                            0,
+                        ));
+                    }
+                }
+
+                b += 1;
+            }
+
+            proof {
+                assert(b == start + take);
+
+                if take == len {
+                    vstd::arithmetic::div_mod::lemma_mod_multiples_basic(c as int + 1, len as int);
+
+                    assert(b as int == (c as int + 1) * len as int) by (nonlinear_arith)
+                        requires
+                            b == start + take,
+                            take == len,
+                            start as nat == c as nat * pow2(low_log as nat),
+                            len as nat == pow2(low_log as nat);
+                }
+            }
+        }
+
+        if filled > 0 {
+            let ghost pre_out = out@;
+
+            proof {
+                assert(row0 + u0 + filled <= out@.len());
+            }
+
+            flush_tile_exec(&points, filled, out, row0 + u0);
+
+            proof {
+                flush_extends(
+                    src@,
+                    pre_out,
+                    out@,
+                    points@,
+                    self.twiddles@,
+                    coset as nat,
+                    row0 as int,
+                    u0 as int,
+                    filled as int,
+                );
+                flush_untouched(old(out)@, pre_out, out@, row0 as int, u0 as int, filled as int);
+            }
+
+            proof {
+                assert(u0 + filled == 2 * nblocks);
+            }
+        } else {
+            proof {
+                assert(u0 == 2 * nblocks);
             }
         }
     }
@@ -4407,19 +4967,21 @@ impl LdeTwin {
                 == sigma_pow(self.offsets@[j] as nat, l as nat, 128)
     }
 
-    // LdePlan::run, additive.rs: the two scratch
-    // halves are the twin's own vectors a and b.
-    pub fn run(&self, data: &Vec<u128>, out: &mut Vec<u128>, stride: usize)
+    // LdePlan::run and run_lanes, additive.rs, one lane:
+    // lane0 is the lane's first slot, stride its point step;
+    // the two scratch halves are the twin's own vectors a and b.
+    pub fn run(&self, data: &Vec<u128>, out: &mut Vec<u128>, lane0: usize, stride: usize)
         requires
             self.wf(),
             data@.len() == pow2(self.fft.log_n as nat),
             stride >= 1,
-            self.cosets == 0 || (self.cosets * data@.len() - 1) * stride < old(out)@.len(),
+            self.cosets == 0
+                || lane0 + (self.cosets * data@.len() - 1) * stride < old(out)@.len(),
             old(out)@.len() <= usize::MAX,
         ensures
             final(out)@.len() == old(out)@.len(),
             forall|j: int, u: int| 0 <= j < self.cosets && 0 <= u < data@.len() ==>
-                #[trigger] final(out)@[(j * data@.len() + u) * stride] as nat == fwd_spec(
+                #[trigger] final(out)@[lane0 + (j * data@.len() + u) * stride] as nat == fwd_spec(
                     inv_spec(nats(data@), nats(self.fft.twiddles@), self.fft.log_n as nat, 0, 128),
                     nats(self.fft.twiddles@),
                     self.fft.log_n as nat,
@@ -4428,7 +4990,7 @@ impl LdeTwin {
                 )[u],
             forall|i: int|
                 0 <= i < final(out)@.len()
-                    && !slot(i, 0, stride as int, self.cosets * data@.len())
+                    && !slot(i, lane0 as int, stride as int, self.cosets * data@.len())
                     ==> final(out)@[i] == old(out)@[i],
     {
         let n_log = self.fft.log_n;
@@ -4506,17 +5068,17 @@ impl LdeTwin {
                 out@.len() == old(out)@.len(),
                 out@.len() <= usize::MAX,
                 stride >= 1,
-                self.cosets == 0 || (self.cosets * n - 1) * stride < out@.len(),
+                self.cosets == 0 || lane0 + (self.cosets * n - 1) * stride < out@.len(),
                 nats(a@) == inv,
                 inv == inv_spec(nats(data@), tws, n_log as nat, 0, 128),
                 inv.len() == pow2(n_log as nat),
                 tws == nats(self.fft.twiddles@),
                 j <= self.cosets,
                 forall|jj: int, u: int| 0 <= jj < j && 0 <= u < n ==>
-                    #[trigger] out@[(jj * n + u) * stride] as nat
+                    #[trigger] out@[lane0 + (jj * n + u) * stride] as nat
                         == fwd_spec(inv, tws, n_log as nat, self.offsets@[jj] as nat, 128)[u],
                 forall|i: int|
-                    0 <= i < out@.len() && !slot(i, 0, stride as int, j * n)
+                    0 <= i < out@.len() && !slot(i, lane0 as int, stride as int, j * n)
                         ==> out@[i] == old(out)@[i],
             decreases self.cosets - j,
         {
@@ -4536,10 +5098,10 @@ impl LdeTwin {
                 assert(j * n <= j * n * stride) by (nonlinear_arith) requires stride >= 1, n >= 0;
                 assert(j * n * stride <= ((j + 1) * n - 1) * stride) by (nonlinear_arith)
                     requires n >= 1, stride >= 1;
-                assert(((j + 1) * n - 1) * stride < out@.len());
+                assert(lane0 + ((j + 1) * n - 1) * stride < out@.len());
             }
 
-            let row0 = j * n * stride;
+            let row0 = lane0 + j * n * stride;
             let base = j * levels;
 
             let ghost off_j = self.offsets@[j as int] as nat;
@@ -4569,7 +5131,28 @@ impl LdeTwin {
                     }
                 }
 
-                self.fft.fwd_bottom_into_exec(&a, self.chains[base], out, row0, stride, nb);
+                if stride == 1 {
+                    proof {
+                        assert((2 * nb - 1) * stride == 2 * nb - 1) by (nonlinear_arith)
+                            requires stride == 1;
+                    }
+
+                    self.fft.fwd_bottom_lanes_into_exec(&a, self.chains[base], out, row0, nb);
+
+                    proof {
+                        rows_stride_one(
+                            a@,
+                            out@,
+                            self.fft.twiddles@,
+                            self.chains@[base as int] as nat,
+                            row0 as int,
+                            stride as int,
+                            nb as int,
+                        );
+                    }
+                } else {
+                    self.fft.fwd_bottom_into_exec(&a, self.chains[base], out, row0, stride, nb);
+                }
 
                 proof {
                     bottom_rows_to_spec(
@@ -4787,7 +5370,28 @@ impl LdeTwin {
                     }
                 }
 
-                self.fft.fwd_bottom_into_exec(&b, self.chains[base], out, row0, stride, nb);
+                if stride == 1 {
+                    proof {
+                        assert((2 * nb - 1) * stride == 2 * nb - 1) by (nonlinear_arith)
+                            requires stride == 1;
+                    }
+
+                    self.fft.fwd_bottom_lanes_into_exec(&b, self.chains[base], out, row0, nb);
+
+                    proof {
+                        rows_stride_one(
+                            b@,
+                            out@,
+                            self.fft.twiddles@,
+                            self.chains@[base as int] as nat,
+                            row0 as int,
+                            stride as int,
+                            nb as int,
+                        );
+                    }
+                } else {
+                    self.fft.fwd_bottom_into_exec(&b, self.chains[base], out, row0, stride, nb);
+                }
 
                 proof {
                     bottom_rows_to_spec(
@@ -4805,24 +5409,24 @@ impl LdeTwin {
 
             proof {
                 assert forall|jj: int, u: int| 0 <= jj < j + 1 && 0 <= u < n implies
-                    #[trigger] out@[(jj * n + u) * stride] as nat
+                    #[trigger] out@[lane0 + (jj * n + u) * stride] as nat
                         == fwd_spec(inv, tws, n_log as nat, self.offsets@[jj] as nat, 128)[u] by {
                     if jj == j {
-                        assert((jj * n + u) * stride == row0 + u * stride) by (nonlinear_arith)
-                            requires row0 == j * n * stride, jj == j;
+                        assert(lane0 + (jj * n + u) * stride == row0 + u * stride) by (nonlinear_arith)
+                            requires row0 == lane0 + j * n * stride, jj == j;
                     } else {
-                        assert((jj * n + u) * stride < row0) by (nonlinear_arith)
-                            requires 0 <= jj < j, 0 <= u < n, row0 == j * n * stride, stride >= 1, n >= 1;
-                        assert(!slot((jj * n + u) * stride, row0 as int, stride as int, 2 * nb));
-                        assert(out@[(jj * n + u) * stride] == pre_out[(jj * n + u) * stride]);
+                        assert(lane0 + (jj * n + u) * stride < row0) by (nonlinear_arith)
+                            requires 0 <= jj < j, 0 <= u < n, row0 == lane0 + j * n * stride, stride >= 1, n >= 1;
+                        assert(!slot(lane0 + (jj * n + u) * stride, row0 as int, stride as int, 2 * nb));
+                        assert(out@[lane0 + (jj * n + u) * stride] == pre_out[lane0 + (jj * n + u) * stride]);
                     }
                 }
 
                 assert forall|i: int|
-                    0 <= i < out@.len() && !slot(i, 0, stride as int, (j + 1) * n)
+                    0 <= i < out@.len() && !slot(i, lane0 as int, stride as int, (j + 1) * n)
                         implies out@[i] == old(out)@[i] by {
                     assert(j * n <= (j + 1) * n) by (nonlinear_arith) requires n >= 0;
-                    assert(!slot(i, 0, stride as int, j * n));
+                    assert(!slot(i, lane0 as int, stride as int, j * n));
 
                     if slot(i, row0 as int, stride as int, 2 * nb) {
                         let q = (i - row0) / (stride as int);
@@ -4830,15 +5434,15 @@ impl LdeTwin {
                         lemma_fundamental_div_mod(i - row0, stride as int);
 
                         assert(i - row0 == (stride as int) * q);
-                        assert(i == (j * n + q) * stride) by (nonlinear_arith)
-                            requires i - row0 == (stride as int) * q, row0 == j * n * stride;
+                        assert(i - lane0 == (j * n + q) * stride) by (nonlinear_arith)
+                            requires i - row0 == (stride as int) * q, row0 == lane0 + j * n * stride;
 
-                        lemma_fundamental_div_mod_converse_div(i, stride as int, j * n + q, 0);
-                        lemma_fundamental_div_mod_converse_mod(i, stride as int, j * n + q, 0);
+                        lemma_fundamental_div_mod_converse_div(i - lane0, stride as int, j * n + q, 0);
+                        lemma_fundamental_div_mod_converse_mod(i - lane0, stride as int, j * n + q, 0);
 
                         assert(j * n + q < (j + 1) * n) by (nonlinear_arith)
                             requires q < 2 * nb, 2 * nb == n;
-                        assert(slot(i, 0, stride as int, (j + 1) * n));
+                        assert(slot(i, lane0 as int, stride as int, (j + 1) * n));
                         assert(false);
                     }
 

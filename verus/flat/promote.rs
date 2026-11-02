@@ -17,7 +17,8 @@
 
 //! Twins of the batch promotes `promote_batch_{8,16,32,64}_to_128`
 //! (block128.rs): UZP byte deinterleave, per-nibble TBL planes,
-//! and the four-phase TRN transpose, over the instruction model.
+//! and the four-phase TRN transpose (`src/aarch64/transpose.rs`),
+//! over the instruction model.
 //! Each output lane is proven to be the bytes of `bit_comb`.
 
 use vstd::prelude::*;
