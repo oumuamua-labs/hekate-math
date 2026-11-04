@@ -27,7 +27,7 @@ src/towers/block16.rs | impl HardwareField for Block16::to_hardware | verus/flat
 src/towers/block16.rs | impl HardwareField for Block16::from_hardware | verus/flat/convert.rs::map_ct_16_twin | 057fbcefa76d9107
 src/towers/block16.rs | impl HardwareField for Block16::mul_hardware | verus/flat/convert.rs::fallback_mul_correct | dcf3d2cfe1f5a9df
 src/towers/block16.rs | impl HardwareField for Block16::mul_hardware_packed | verus/flat/packed.rs::mul_flat_packed_16_twin | 948a64c040308929
-src/towers/block16.rs | impl HardwareField for Block16::mul_hardware_scalar_packed | verus/flat/packed.rs::mul_flat_scalar_packed_16_twin | b554e361059ee108
+src/towers/block16.rs | impl HardwareField for Block16::mul_hardware_scalar_packed | verus/flat/packed.rs::mul_flat_scalar_packed_16_twin | 521efd9066fffcc7
 src/towers/block16.rs | impl HardwareField for Block16::tower_bit_from_hardware | verus/flat/convert.rs::tower_bit_16_twin | e96363cbdd500197
 src/towers/block16.rs | impl FlatPromote<Block8> for Block16::promote_flat | verus/flat/convert.rs::lift_ct_16_twin | d35db91ece918996
 src/towers/block16.rs | mul_iso_16 | verus/flat/convert.rs::mul_iso_correct | a87f4323c6bdb96a

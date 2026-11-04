@@ -155,7 +155,7 @@ fn bench_eval_batch_block128(
                 // Outer loop:
                 // Coefficients
                 for &c in coeffs.iter().rev() {
-                    let c_vec = PackedFlat::from_raw(PackedBlock128::broadcast(c.into_raw()));
+                    let c_vec = Block128::splat(c);
 
                     // Inner loop:
                     // Points (Stream through L1/L2)

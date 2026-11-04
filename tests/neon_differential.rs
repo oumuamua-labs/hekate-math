@@ -24,7 +24,7 @@
 
 use hekate_math::{
     Bit, Block8, Block16, Block32, Block64, Block128, Block256, Flat, FlatPromote, HardwareField,
-    PackableField, PackedFlat, TowerField,
+    PackableField, PackedFlat,
 };
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
@@ -141,6 +141,42 @@ fn par_differential(total: usize, seed: u64, body: impl Fn(&mut StdRng) + Sync) 
         for _ in 0..total {
             body(&mut r);
         }
+    }
+}
+
+fn from_bits_lanes<F: HardwareField>(seed: u64, label: &str) {
+    let width = <Flat<F> as PackableField>::WIDTH;
+    let one = F::ONE.to_hardware();
+    let zero = Flat::from_raw(F::ZERO);
+
+    let mut r = StdRng::seed_from_u64(seed);
+    let mut lanes = vec![zero; width];
+
+    let random: Vec<u64> = (0..1024).map(|_| r.random()).collect();
+    let single = (0..64).map(|i| 1u64 << i);
+
+    for bits in (0..=u16::MAX).map(u64::from).chain(single).chain(random) {
+        <Flat<F> as PackableField>::unpack(F::from_bits(bits), &mut lanes);
+
+        for (i, &lane) in lanes.iter().enumerate() {
+            let want = if (bits >> i) & 1 == 1 { one } else { zero };
+
+            assert_eq!(lane, want, "{label}: from_bits {bits:#018x} lane {i}");
+        }
+    }
+}
+
+fn splat_lanes<F: HardwareField>(seed: u64, mut mk: impl FnMut(&mut StdRng) -> F, label: &str) {
+    let width = <Flat<F> as PackableField>::WIDTH;
+
+    let mut r = StdRng::seed_from_u64(seed);
+    let mut lanes = vec![Flat::from_raw(F::ZERO); width];
+
+    for _ in 0..256 {
+        let x = Flat::from_raw(mk(&mut r));
+        <Flat<F> as PackableField>::unpack(F::splat(x), &mut lanes);
+
+        assert!(lanes.iter().all(|&lane| lane == x), "{label}: splat {x:?}");
     }
 }
 
@@ -681,7 +717,7 @@ fn promote_to_256_batch_vs_scalar() {
 }
 
 // ============================================================
-// Lane-major unpack vs unpack, and the Block8 constructors
+// Lane-major unpack vs unpack, from_bits and splat
 // ============================================================
 
 fn unpack_transposed_vs_unpack<F: HardwareField>(
@@ -781,29 +817,23 @@ fn unpack_transposed_overlap_panics_16() {
 }
 
 #[test]
-fn block8_from_bits_exhaustive() {
-    let one = Block8::ONE.to_hardware();
-    let zero = Flat::from_raw(Block8::ZERO);
-
-    let mut lanes = [Flat::<Block8>::default(); 16];
-    for bits in 0..=u16::MAX {
-        <Flat<Block8> as PackableField>::unpack(PackedFlat::<Block8>::from_bits(bits), &mut lanes);
-
-        for (i, &lane) in lanes.iter().enumerate() {
-            let want = if (bits >> i) & 1 == 1 { one } else { zero };
-
-            assert_eq!(lane, want, "from_bits {bits:#06x} lane {i}");
-        }
-    }
+fn from_bits_all_widths() {
+    from_bits_lanes::<Bit>(0x7b01, "Bit");
+    from_bits_lanes::<Block8>(0x7b08, "Block8");
+    from_bits_lanes::<Block16>(0x7b16, "Block16");
+    from_bits_lanes::<Block32>(0x7b32, "Block32");
+    from_bits_lanes::<Block64>(0x7b64, "Block64");
+    from_bits_lanes::<Block128>(0x7b12, "Block128");
+    from_bits_lanes::<Block256>(0x7b25, "Block256");
 }
 
 #[test]
-fn block8_splat_all_lanes() {
-    let mut lanes = [Flat::<Block8>::default(); 16];
-    for x in 0..=u8::MAX {
-        let v = Flat::from_raw(Block8(x));
-        <Flat<Block8> as PackableField>::unpack(PackedFlat::<Block8>::splat(v), &mut lanes);
-
-        assert!(lanes.iter().all(|&lane| lane == v), "splat {x:#04x}");
-    }
+fn splat_all_widths() {
+    splat_lanes::<Bit>(0x7c01, |r| Bit::new(r.random::<u8>() & 1), "Bit");
+    splat_lanes::<Block8>(0x7c08, |r| Block8(r.random()), "Block8");
+    splat_lanes::<Block16>(0x7c16, |r| Block16(r.random()), "Block16");
+    splat_lanes::<Block32>(0x7c32, |r| Block32(r.random()), "Block32");
+    splat_lanes::<Block64>(0x7c64, |r| Block64(r.random()), "Block64");
+    splat_lanes::<Block128>(0x7c12, |r| Block128(r.random()), "Block128");
+    splat_lanes::<Block256>(0x7c25, |r| Block256([r.random(), r.random()]), "Block256");
 }

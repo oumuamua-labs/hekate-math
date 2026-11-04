@@ -19,6 +19,7 @@
 //! in both bases, and the aarch64 NEON kernels.
 
 use crate::constants::FLAT_TO_TOWER_BIT_MASKS_8;
+use crate::hardware::lanes_from_bits;
 #[cfg(target_arch = "aarch64")]
 use crate::packable::scatter_lanes;
 use crate::towers::bit::Bit;
@@ -522,6 +523,16 @@ impl HardwareField for Block8 {
     }
 
     #[inline(always)]
+    fn from_bits(bits: u64) -> PackedFlat<Self> {
+        PackedFlat::from_raw(PackedBlock8(lanes_from_bits(bits)))
+    }
+
+    #[inline(always)]
+    fn splat(x: Flat<Self>) -> PackedFlat<Self> {
+        PackedFlat::from_raw(PackedBlock8([x.into_raw(); PACKED_WIDTH_8]))
+    }
+
+    #[inline(always)]
     fn add_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self> {
         Flat::from_raw(lhs.into_raw() + rhs.into_raw())
     }
@@ -588,7 +599,7 @@ impl HardwareField for Block8 {
 
     #[inline(always)]
     fn mul_hardware_scalar_packed(lhs: PackedFlat<Self>, rhs: Flat<Self>) -> PackedFlat<Self> {
-        Self::mul_hardware_packed(lhs, PackedFlat::splat(rhs))
+        Self::mul_hardware_packed(lhs, Self::splat(rhs))
     }
 
     #[inline(always)]
@@ -602,25 +613,6 @@ impl HardwareField for Block8 {
         v ^= v >> 1;
 
         v & 1
-    }
-}
-
-impl PackedFlat<Block8> {
-    /// Spreads bit i of `bits` into lane i as zero or one.
-    #[inline(always)]
-    pub fn from_bits(bits: u16) -> Self {
-        let mut lanes = [Block8::ZERO; PACKED_WIDTH_8];
-        for (i, lane) in lanes.iter_mut().enumerate() {
-            *lane = Block8(((bits >> i) & 1) as u8);
-        }
-
-        Self::from_raw(PackedBlock8(lanes))
-    }
-
-    /// Fills every lane with `x`.
-    #[inline(always)]
-    pub fn splat(x: Flat<Block8>) -> Self {
-        Self::from_raw(PackedBlock8([x.into_raw(); PACKED_WIDTH_8]))
     }
 }
 

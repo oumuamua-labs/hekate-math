@@ -19,6 +19,7 @@
 //! modulo x^16 + x^5 + x^3 + x + 1, and the aarch64 NEON kernels.
 
 use crate::algebra::impl_binary_field_extras;
+use crate::hardware::lanes_from_bits;
 use crate::towers::bit::Bit;
 use crate::towers::block8::Block8;
 use crate::{
@@ -398,6 +399,16 @@ impl HardwareField for Block16 {
     }
 
     #[inline(always)]
+    fn from_bits(bits: u64) -> PackedFlat<Self> {
+        PackedFlat::from_raw(PackedBlock16(lanes_from_bits(bits)))
+    }
+
+    #[inline(always)]
+    fn splat(x: Flat<Self>) -> PackedFlat<Self> {
+        PackedFlat::from_raw(PackedBlock16([x.into_raw(); PACKED_WIDTH_16]))
+    }
+
+    #[inline(always)]
     fn add_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self> {
         Flat::from_raw(lhs.into_raw() + rhs.into_raw())
     }
@@ -476,8 +487,7 @@ impl HardwareField for Block16 {
 
         #[cfg(not(target_arch = "aarch64"))]
         {
-            let broadcasted = PackedBlock16([rhs.into_raw(); PACKED_WIDTH_16]);
-            Self::mul_hardware_packed(lhs, PackedFlat::from_raw(broadcasted))
+            Self::mul_hardware_packed(lhs, Self::splat(rhs))
         }
     }
 

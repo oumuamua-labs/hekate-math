@@ -18,6 +18,7 @@
 //! GF(2) at one byte per element and per packed lane, its flat
 //! basis equal to the tower basis, and the aarch64 NEON kernels.
 
+use crate::hardware::lanes_from_bits;
 use crate::{
     CanonicalDeserialize, CanonicalSerialize, Flat, HardwareField, PackableField, PackedFlat,
     TowerField,
@@ -395,6 +396,16 @@ impl HardwareField for Bit {
     }
 
     #[inline(always)]
+    fn from_bits(bits: u64) -> PackedFlat<Self> {
+        PackedFlat::from_raw(PackedBit(lanes_from_bits(bits)))
+    }
+
+    #[inline(always)]
+    fn splat(x: Flat<Self>) -> PackedFlat<Self> {
+        PackedFlat::from_raw(PackedBit([x.into_raw(); PACKED_WIDTH_BIT]))
+    }
+
+    #[inline(always)]
     fn add_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self> {
         let lhs = lhs.into_raw();
         let rhs = rhs.into_raw();
@@ -424,8 +435,7 @@ impl HardwareField for Bit {
 
     #[inline(always)]
     fn mul_hardware_scalar_packed(lhs: PackedFlat<Self>, rhs: Flat<Self>) -> PackedFlat<Self> {
-        let broadcasted = PackedBit([rhs.into_raw(); PACKED_WIDTH_BIT]);
-        Self::mul_hardware_packed(lhs, PackedFlat::from_raw(broadcasted))
+        Self::mul_hardware_packed(lhs, Self::splat(rhs))
     }
 
     #[inline(always)]

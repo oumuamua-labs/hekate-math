@@ -18,6 +18,7 @@
 //! GF(2^256) as `Block128[X] / (X^2 + X + τ)`, its flat form as a pair
 //! of GF(2^128) flat elements, and scalar packed lanes (no SIMD kernel).
 
+use crate::hardware::lanes_from_bits;
 use crate::{BinaryFieldExtras, Bit, Block8, Block16, Block32, Block64, Block128};
 use crate::{
     CanonicalDeserialize, CanonicalSerialize, Flat, FlatPromote, HardwareField, PackableField,
@@ -257,12 +258,6 @@ impl PackedBlock256 {
     pub fn zero() -> Self {
         Self([Block256::ZERO; PACKED_WIDTH_256])
     }
-
-    /// Returns `val` in every lane.
-    #[inline(always)]
-    pub fn broadcast(val: Block256) -> Self {
-        Self([val; PACKED_WIDTH_256])
-    }
 }
 
 impl PackableField for Block256 {
@@ -399,6 +394,16 @@ impl HardwareField for Block256 {
     }
 
     #[inline(always)]
+    fn from_bits(bits: u64) -> PackedFlat<Self> {
+        PackedFlat::from_raw(PackedBlock256(lanes_from_bits(bits)))
+    }
+
+    #[inline(always)]
+    fn splat(x: Flat<Self>) -> PackedFlat<Self> {
+        PackedFlat::from_raw(PackedBlock256([x.into_raw(); PACKED_WIDTH_256]))
+    }
+
+    #[inline(always)]
     fn add_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self> {
         let l = lhs.into_raw();
         let r = rhs.into_raw();
@@ -467,8 +472,7 @@ impl HardwareField for Block256 {
 
     #[inline(always)]
     fn mul_hardware_scalar_packed(lhs: PackedFlat<Self>, rhs: Flat<Self>) -> PackedFlat<Self> {
-        let broadcasted = PackedBlock256::broadcast(rhs.into_raw());
-        Self::mul_hardware_packed(lhs, PackedFlat::from_raw(broadcasted))
+        Self::mul_hardware_packed(lhs, Self::splat(rhs))
     }
 
     #[inline(always)]

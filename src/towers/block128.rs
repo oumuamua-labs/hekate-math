@@ -19,6 +19,7 @@
 //! modulo x^128 + x^7 + x^2 + x + 1, and the aarch64 NEON kernels.
 
 use crate::algebra::impl_binary_field_extras;
+use crate::hardware::lanes_from_bits;
 use crate::towers::bit::Bit;
 use crate::towers::block8::Block8;
 use crate::towers::block16::Block16;
@@ -273,12 +274,6 @@ impl PackedBlock128 {
     pub fn zero() -> Self {
         Self([Block128::ZERO; PACKED_WIDTH_128])
     }
-
-    /// Returns `val` in every lane.
-    #[inline(always)]
-    pub fn broadcast(val: Block128) -> Self {
-        Self([val; PACKED_WIDTH_128])
-    }
 }
 
 impl PackableField for Block128 {
@@ -443,6 +438,16 @@ impl HardwareField for Block128 {
     }
 
     #[inline(always)]
+    fn from_bits(bits: u64) -> PackedFlat<Self> {
+        PackedFlat::from_raw(PackedBlock128(lanes_from_bits(bits)))
+    }
+
+    #[inline(always)]
+    fn splat(x: Flat<Self>) -> PackedFlat<Self> {
+        PackedFlat::from_raw(PackedBlock128([x.into_raw(); PACKED_WIDTH_128]))
+    }
+
+    #[inline(always)]
     fn add_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self> {
         let lhs = lhs.into_raw();
         let rhs = rhs.into_raw();
@@ -527,8 +532,7 @@ impl HardwareField for Block128 {
 
     #[inline(always)]
     fn mul_hardware_scalar_packed(lhs: PackedFlat<Self>, rhs: Flat<Self>) -> PackedFlat<Self> {
-        let broadcasted = PackedBlock128::broadcast(rhs.into_raw());
-        Self::mul_hardware_packed(lhs, PackedFlat::from_raw(broadcasted))
+        Self::mul_hardware_packed(lhs, Self::splat(rhs))
     }
 
     #[inline(always)]

@@ -33,6 +33,13 @@ pub trait HardwareField: TowerField + PackableField {
     /// Maps `value` back to the tower basis: φ⁻¹(value).
     fn from_hardware(value: Flat<Self>) -> Self;
 
+    /// Puts bit i of `bits` in lane i as zero or one, constant
+    /// time in `bits`; bits at or above `WIDTH` are ignored.
+    fn from_bits(bits: u64) -> PackedFlat<Self>;
+
+    /// Fills every lane with `x`.
+    fn splat(x: Flat<Self>) -> PackedFlat<Self>;
+
     /// Adds two flat elements (XOR).
     fn add_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self>;
 
@@ -175,4 +182,16 @@ impl<F: HardwareField> FlatPromote<F> for F {
     fn promote_flat(val: Flat<F>) -> Flat<Self> {
         val
     }
+}
+
+#[inline(always)]
+pub(crate) fn lanes_from_bits<F: TowerField, const N: usize>(bits: u64) -> [F; N] {
+    let bytes = bits.to_le_bytes();
+
+    let mut lanes = [F::ZERO; N];
+    for (i, lane) in lanes.iter_mut().enumerate() {
+        *lane = F::from((bytes[i / 8] >> (i % 8)) & 1);
+    }
+
+    lanes
 }
