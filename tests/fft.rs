@@ -420,6 +420,63 @@ fn lde_plan_lanes_eq_run<F: BinaryFieldExtras + HardwareField>(
     }
 }
 
+fn lde_plan_lanes_from_bits<F: BinaryFieldExtras + HardwareField>(seed: u64, max_log_n: u32) {
+    let width = <Flat<F> as PackableField>::WIDTH;
+    let zero = Flat::from_raw(F::ZERO);
+
+    let mut r = StdRng::seed_from_u64(seed);
+    let mut lanes = vec![zero; width];
+
+    for log_n in 1..=max_log_n {
+        let n = 1usize << log_n;
+        let fft = AdditiveFft::<F>::new(log_n).unwrap();
+
+        let data: Vec<PackedFlat<F>> = (0..n).map(|_| F::from_bits(r.random())).collect();
+
+        let mut columns = vec![zero; width * n];
+        for (u, &p) in data.iter().enumerate() {
+            <Flat<F> as PackableField>::unpack(p, &mut lanes);
+
+            for (c, &lane) in lanes.iter().enumerate() {
+                columns[c * n + u] = lane;
+            }
+        }
+
+        for column in columns.chunks_exact_mut(n) {
+            fft.inverse_scalar(column).unwrap();
+        }
+
+        let mut scratch = vec![PackedFlat::<F>::default(); 2 * n];
+        let mut want = vec![zero; n];
+
+        for cosets in [0usize, 1, 2, 5] {
+            let offsets: Vec<Flat<F>> = (0..cosets)
+                .map(|_| Flat::from_raw(F::from_uniform_bytes(&r.random())))
+                .collect();
+
+            let plan: LdePlan<F> = fft.lde_plan(&offsets).unwrap();
+
+            let mut out = vec![zero; width * cosets * n];
+            plan.run_lanes(&data, &mut scratch, &mut out).unwrap();
+
+            for (c, column) in columns.chunks_exact(n).enumerate() {
+                for (j, &offset) in offsets.iter().enumerate() {
+                    want.copy_from_slice(column);
+                    fft.forward_coset_scalar(&mut want, offset).unwrap();
+
+                    let at = (c * cosets + j) * n;
+                    assert_eq!(
+                        out[at..at + n],
+                        want[..],
+                        "{}-bit log_n={log_n} cosets={cosets} lane {c} coset {j}",
+                        F::BITS
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn lde_plan_eq_separate<F: BinaryFieldExtras + HardwareField>(
     seed: u64,
     max_log_n: u32,
@@ -1218,6 +1275,16 @@ fn lde_plan_run_lanes_eq_run() {
     lde_plan_lanes_eq_run::<Block64>(0x5eed_1a7e_0064, 11, |r| Block64(r.random()));
     lde_plan_lanes_eq_run::<Block128>(0x5eed_1a7e_0128, 9, |r| Block128(r.random()));
     lde_plan_lanes_eq_run::<Block256>(0x5eed_1a7e_0256, 8, |r| Block256([r.random(), r.random()]));
+}
+
+#[test]
+fn lde_plan_run_lanes_from_bits_eq_scalar() {
+    lde_plan_lanes_from_bits::<Block8>(0x5eed_b175_0008, 8);
+    lde_plan_lanes_from_bits::<Block16>(0x5eed_b175_0016, 12);
+    lde_plan_lanes_from_bits::<Block32>(0x5eed_b175_0032, 11);
+    lde_plan_lanes_from_bits::<Block64>(0x5eed_b175_0064, 11);
+    lde_plan_lanes_from_bits::<Block128>(0x5eed_b175_0128, 9);
+    lde_plan_lanes_from_bits::<Block256>(0x5eed_b175_0256, 8);
 }
 
 #[test]
