@@ -33,7 +33,7 @@ mod convert;
     clippy::ptr_arg,
     clippy::too_many_arguments
 )]
-#[path = "../fft.rs"]
+#[path = "../fft/mod.rs"]
 mod fft;
 #[cfg(pmull)]
 #[allow(dead_code)]

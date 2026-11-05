@@ -19,6 +19,7 @@
 //! modulo x^32 + x^7 + x^3 + x^2 + 1, and the aarch64 NEON kernels.
 
 use crate::algebra::impl_binary_field_extras;
+use crate::hardware::lanes_from_bits;
 use crate::towers::bit::Bit;
 use crate::towers::block8::Block8;
 use crate::towers::block16::Block16;
@@ -404,6 +405,16 @@ impl HardwareField for Block32 {
     }
 
     #[inline(always)]
+    fn from_bits(bits: u64) -> PackedFlat<Self> {
+        PackedFlat::from_raw(PackedBlock32(lanes_from_bits(bits)))
+    }
+
+    #[inline(always)]
+    fn splat(x: Flat<Self>) -> PackedFlat<Self> {
+        PackedFlat::from_raw(PackedBlock32([x.into_raw(); PACKED_WIDTH_32]))
+    }
+
+    #[inline(always)]
     fn add_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self> {
         Flat::from_raw(lhs.into_raw() + rhs.into_raw())
     }
@@ -472,8 +483,7 @@ impl HardwareField for Block32 {
 
     #[inline(always)]
     fn mul_hardware_scalar_packed(lhs: PackedFlat<Self>, rhs: Flat<Self>) -> PackedFlat<Self> {
-        let broadcasted = PackedBlock32([rhs.into_raw(); PACKED_WIDTH_32]);
-        Self::mul_hardware_packed(lhs, PackedFlat::from_raw(broadcasted))
+        Self::mul_hardware_packed(lhs, Self::splat(rhs))
     }
 
     #[inline(always)]

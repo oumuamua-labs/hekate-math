@@ -22,16 +22,16 @@ use super::convert::{
     map_ct_32_twin, map_ct_64_twin, map_ct_128_split_twin, tower_bit_8_twin, tower_bit_16_twin,
     tower_bit_32_twin, tower_bit_64_twin, tower_bit_128_twin,
 };
-use super::fft::{CantorTwin, FftTwin};
+use super::fft::{cantor::CantorTwin, lde::LdeTwin, twin::FftTwin};
 use hekate_math::{
     AdditiveFft, Block8, Block16, Block32, Block64, Block128, CantorBasis, Flat, FlatPromote,
-    HardwareField,
+    HardwareField, PackableField, PackedFlat,
 };
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
 const RANDOM: usize = 4096;
-
 const MAX_LOG_N: u32 = 10;
+const FFT_MAX_LOG_N: u32 = 12;
 
 macro_rules! conversion_case {
     (
@@ -245,7 +245,7 @@ fn lift_twins_match_promote_flat() {
 #[test]
 fn fft_twin_matches_scalar_transforms() {
     let mut rng = StdRng::seed_from_u64(0x6666_7474);
-    for log_n in 1..=MAX_LOG_N {
+    for log_n in 1..=FFT_MAX_LOG_N {
         let basis = CantorBasis::<Block128>::new(log_n as usize).expect("Cantor basis");
         let lift: Vec<u128> = basis.betas()[1..].iter().map(|b| b.into_raw().0).collect();
         let twin = FftTwin::new(log_n, lift);
@@ -286,6 +286,116 @@ fn fft_twin_matches_scalar_transforms() {
                 "inverse log_n {log_n} offset {offset:#x}"
             );
             assert_eq!(mine, input, "round trip log_n {log_n} offset {offset:#x}");
+        }
+    }
+}
+
+#[test]
+fn lde_twin_matches_run() {
+    let mut rng = StdRng::seed_from_u64(0x6c64_6520);
+    for log_n in 1..=FFT_MAX_LOG_N {
+        let n = 1usize << log_n;
+        let basis = CantorBasis::<Block128>::new(log_n as usize).expect("Cantor basis");
+        let lift: Vec<u128> = basis.betas()[1..].iter().map(|b| b.into_raw().0).collect();
+        let fft = AdditiveFft::<Block128>::new(log_n).expect("transform plan");
+
+        for cosets in [0usize, 1, 2, 5] {
+            let offsets: Vec<u128> = (0..cosets).map(|_| rng.random()).collect();
+            let flat: Vec<Flat<Block128>> = offsets.iter().map(|&o| flat128(o)).collect();
+            let plan = fft.lde_plan(&flat).expect("lde plan");
+            let twin: LdeTwin = FftTwin::new(log_n, lift.clone()).lde_plan(offsets.clone());
+
+            for stride in [4usize, 7] {
+                let need = match cosets {
+                    0 => 0,
+                    c => (c * n - 1) * stride + 4,
+                };
+
+                let lanes: Vec<Vec<u128>> = (0..4)
+                    .map(|_| (0..n).map(|_| rng.random()).collect())
+                    .collect();
+
+                let data: Vec<PackedFlat<Block128>> = (0..n)
+                    .map(|u| {
+                        let at: Vec<Flat<Block128>> = lanes.iter().map(|l| flat128(l[u])).collect();
+                        <Flat<Block128> as PackableField>::pack(&at)
+                    })
+                    .collect();
+
+                let mut scratch = vec![PackedFlat::<Block128>::default(); 2 * n];
+                let mut out = vec![Flat::<Block128>::default(); need + 3];
+
+                plan.run(&data, &mut scratch, &mut out, stride)
+                    .expect("run");
+
+                for (k, lane) in lanes.iter().enumerate() {
+                    let mut mine = vec![0u128; need + 3];
+                    twin.run(lane, &mut mine, k, stride);
+
+                    for j in 0..cosets {
+                        for u in 0..n {
+                            let at = k + (j * n + u) * stride;
+                            assert_eq!(
+                                mine[at],
+                                out[at].into_raw().0,
+                                "log_n {log_n} cosets {cosets} stride {stride} lane {k} coset {j} point {u}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn lde_twin_matches_run_lanes() {
+    let mut rng = StdRng::seed_from_u64(0x6c61_6e65);
+    for log_n in 1..=FFT_MAX_LOG_N {
+        let n = 1usize << log_n;
+        let basis = CantorBasis::<Block128>::new(log_n as usize).expect("Cantor basis");
+        let lift: Vec<u128> = basis.betas()[1..].iter().map(|b| b.into_raw().0).collect();
+        let fft = AdditiveFft::<Block128>::new(log_n).expect("transform plan");
+
+        for cosets in [0usize, 1, 2, 5] {
+            let offsets: Vec<u128> = (0..cosets).map(|_| rng.random()).collect();
+            let flat: Vec<Flat<Block128>> = offsets.iter().map(|&o| flat128(o)).collect();
+            let plan = fft.lde_plan(&flat).expect("lde plan");
+            let twin: LdeTwin = FftTwin::new(log_n, lift.clone()).lde_plan(offsets.clone());
+            let points = cosets * n;
+
+            let lanes: Vec<Vec<u128>> = (0..4)
+                .map(|_| (0..n).map(|_| rng.random()).collect())
+                .collect();
+
+            let data: Vec<PackedFlat<Block128>> = (0..n)
+                .map(|u| {
+                    let at: Vec<Flat<Block128>> = lanes.iter().map(|l| flat128(l[u])).collect();
+                    <Flat<Block128> as PackableField>::pack(&at)
+                })
+                .collect();
+
+            let mut scratch = vec![PackedFlat::<Block128>::default(); 2 * n];
+            let mut out = vec![Flat::<Block128>::default(); 4 * points + 3];
+
+            plan.run_lanes(&data, &mut scratch, &mut out)
+                .expect("run_lanes");
+
+            for (k, lane) in lanes.iter().enumerate() {
+                let mut mine = vec![0u128; 4 * points + 3];
+                twin.run(lane, &mut mine, k * points, 1);
+
+                for j in 0..cosets {
+                    for u in 0..n {
+                        let at = k * points + j * n + u;
+                        assert_eq!(
+                            mine[at],
+                            out[at].into_raw().0,
+                            "log_n {log_n} cosets {cosets} lane {k} coset {j} point {u}"
+                        );
+                    }
+                }
+            }
         }
     }
 }

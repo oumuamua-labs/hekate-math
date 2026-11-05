@@ -966,7 +966,7 @@ impl_write_nibble_promote_tables_to_128!(write_nibble_promote_32_to_128, u32, 8,
 impl_write_nibble_promote_tables_to_128!(write_nibble_promote_64_to_128, u64, 16, apply_64);
 
 // ==========================================
-// 9. ALGEBRAIC EXTRAS (Block16, GF(2^16))
+// 9. ALGEBRAIC EXTRAS (Block8 to Block128)
 // ==========================================
 //
 // Block16 = Block8[X]/(X^2 + X + 0x20) over the
@@ -996,6 +996,10 @@ fn gf8_mul(mut a: u8, mut b: u8) -> u8 {
     }
 
     res
+}
+
+fn sq8_tower(a: u8) -> u8 {
+    gf8_mul(a, a)
 }
 
 fn sq16_tower(a: u16) -> u16 {
@@ -1132,6 +1136,16 @@ impl_algebra_helpers!(
     u16,
     16,
     sq16_tower
+);
+
+impl_algebra_helpers!(
+    trace_of_8,
+    gf2_invert_8,
+    gf2_rank_8,
+    vanish_build_8,
+    u8,
+    8,
+    sq8_tower
 );
 
 // Flat reference product, per gf_model.rs:
@@ -1367,6 +1381,120 @@ impl_verify_iso!(
     TOWER_TO_FLAT_128,
     FLAT_TO_TOWER_128
 );
+
+fn write_algebra_extras_8(file: &mut File) {
+    let mut trace_mask = 0u8;
+    for k in 0..8 {
+        if trace_of_8(1 << k) == 1 {
+            trace_mask |= 1 << k;
+        }
+    }
+
+    assert_ne!(
+        trace_mask, 0,
+        "trace functional is identically zero: field is broken"
+    );
+
+    let d = 1u8 << trace_mask.trailing_zeros();
+
+    let mut l_tilde = [0u8; 8];
+    for (k, slot) in l_tilde.iter_mut().enumerate() {
+        let l_k = sq8_tower(1 << k) ^ (1u8 << k);
+        *slot = l_k ^ if k == 0 { d } else { 0 };
+    }
+
+    let solve_basis = gf2_invert_8(&l_tilde);
+
+    let mut trace_zero = 0u32;
+    for x in 0u8..=u8::MAX {
+        let t = trace_of_8(x);
+        assert!(t <= 1, "trace escaped GF(2)");
+
+        let parity = ((x & trace_mask).count_ones() & 1) as u8;
+        assert_eq!(parity, t, "TRACE_MASK_8 does not reproduce the trace");
+
+        let flat = apply_8(x, &TOWER_TO_FLAT_8);
+        let via_basis = apply_8(gf_mul_flat_8(flat, flat), &FLAT_TO_TOWER_8);
+
+        assert_eq!(
+            sq8_tower(x),
+            via_basis,
+            "tower squaring disagrees with the change-of-basis oracle at 8 bits"
+        );
+
+        if t == 0 {
+            trace_zero += 1;
+
+            let root = apply_8(x, &solve_basis);
+            assert_eq!(
+                sq8_tower(root) ^ root,
+                x,
+                "SOLVE_QUADRATIC_BASIS_8 fails the round-trip x^2 + x = c"
+            );
+            assert_eq!(root & 1, 0, "solve must return the root with bit 0 clear");
+        }
+    }
+
+    assert_eq!(trace_of_8(1), 0, "Tr(1) must vanish in GF(2^8)");
+    assert_eq!(trace_zero, 128, "trace functional is unbalanced");
+
+    writeln!(file, "pub const TRACE_MASK_8: u8 = 0x{trace_mask:02x};\n").unwrap();
+    write_raw_8(file, "SOLVE_QUADRATIC_BASIS_8", &solve_basis);
+
+    let mut cantor_tower = [0u8; 8];
+    cantor_tower[0] = 1;
+
+    for i in 1..8 {
+        cantor_tower[i] = apply_8(cantor_tower[i - 1], &solve_basis);
+    }
+
+    assert_eq!(
+        gf2_rank_8(&cantor_tower),
+        8,
+        "Cantor basis is GF(2)-dependent"
+    );
+
+    for (i, &beta) in cantor_tower.iter().enumerate() {
+        assert_eq!(vanish_build_8(i, beta), 1, "s_i(beta_i) != 1");
+
+        let tr = (beta & trace_mask).count_ones() & 1;
+        assert_eq!(tr == 1, i == 7, "Cantor chain trace pattern broken at {i}");
+
+        if i >= 1 {
+            assert_eq!(
+                sq8_tower(beta) ^ beta,
+                cantor_tower[i - 1],
+                "Cantor chain broken: sigma(beta_i) != beta_(i-1)"
+            );
+        }
+    }
+
+    for (i, (&beta, &pinned)) in cantor_tower
+        .iter()
+        .zip(&cantor_oracle::CANTOR_TOWER)
+        .enumerate()
+    {
+        assert_eq!(
+            beta as u64, pinned,
+            "Cantor chain drifted from build/cantor_oracle.rs at beta_{i}"
+        );
+    }
+
+    let mut prev_flat = apply_8(cantor_tower[0], &TOWER_TO_FLAT_8);
+    assert_eq!(prev_flat, 1, "flat Cantor basis must start at 1");
+
+    for &beta in cantor_tower.iter().skip(1) {
+        let bf = apply_8(beta, &TOWER_TO_FLAT_8);
+
+        assert_eq!(
+            gf_mul_flat_8(bf, bf) ^ bf,
+            prev_flat,
+            "flat Cantor chain broken: sigma_flat(beta_i) != beta_(i-1)"
+        );
+
+        prev_flat = bf;
+    }
+}
 
 fn write_algebra_extras_16(file: &mut File) {
     // FIPS-197 §4.2 worked example pins POLY_8.
@@ -1729,6 +1857,8 @@ fn main() {
     write_masks_8(&mut file, "FLAT_TO_TOWER_BIT_MASKS_8", &FLAT_TO_TOWER_8);
     write_raw_8(&mut file, "RAW_FLAT_TO_TOWER_8", &FLAT_TO_TOWER_8);
     write_raw_8(&mut file, "RAW_TOWER_TO_FLAT_8", &TOWER_TO_FLAT_8);
+
+    write_algebra_extras_8(&mut file);
 
     // 16 bit
     write_table_16(&mut file, "FLAT_TO_TOWER_16", &FLAT_TO_TOWER_16);

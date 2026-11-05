@@ -23,8 +23,8 @@
 //! products, nibble bases). Heavy cases are release-only.
 
 use hekate_math::{
-    Block8, Block16, Block32, Block64, Block128, Block256, Flat, FlatPromote, HardwareField,
-    PackableField,
+    Bit, Block8, Block16, Block32, Block64, Block128, Block256, Flat, FlatPromote, HardwareField,
+    PackableField, PackedFlat,
 };
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
@@ -141,6 +141,42 @@ fn par_differential(total: usize, seed: u64, body: impl Fn(&mut StdRng) + Sync) 
         for _ in 0..total {
             body(&mut r);
         }
+    }
+}
+
+fn from_bits_lanes<F: HardwareField>(seed: u64, label: &str) {
+    let width = <Flat<F> as PackableField>::WIDTH;
+    let one = F::ONE.to_hardware();
+    let zero = Flat::from_raw(F::ZERO);
+
+    let mut r = StdRng::seed_from_u64(seed);
+    let mut lanes = vec![zero; width];
+
+    let random: Vec<u64> = (0..1024).map(|_| r.random()).collect();
+    let single = (0..64).map(|i| 1u64 << i);
+
+    for bits in (0..=u16::MAX).map(u64::from).chain(single).chain(random) {
+        <Flat<F> as PackableField>::unpack(F::from_bits(bits), &mut lanes);
+
+        for (i, &lane) in lanes.iter().enumerate() {
+            let want = if (bits >> i) & 1 == 1 { one } else { zero };
+
+            assert_eq!(lane, want, "{label}: from_bits {bits:#018x} lane {i}");
+        }
+    }
+}
+
+fn splat_lanes<F: HardwareField>(seed: u64, mut mk: impl FnMut(&mut StdRng) -> F, label: &str) {
+    let width = <Flat<F> as PackableField>::WIDTH;
+
+    let mut r = StdRng::seed_from_u64(seed);
+    let mut lanes = vec![Flat::from_raw(F::ZERO); width];
+
+    for _ in 0..256 {
+        let x = Flat::from_raw(mk(&mut r));
+        <Flat<F> as PackableField>::unpack(F::splat(x), &mut lanes);
+
+        assert!(lanes.iter().all(|&lane| lane == x), "{label}: splat {x:?}");
     }
 }
 
@@ -678,4 +714,126 @@ fn promote_to_256_batch_vs_scalar() {
             );
         }
     }
+}
+
+// ============================================================
+// Lane-major unpack vs unpack, from_bits and splat
+// ============================================================
+
+fn unpack_transposed_vs_unpack<F: HardwareField>(
+    seed: u64,
+    mk: impl Fn(&mut StdRng) -> F,
+    label: &str,
+) {
+    let width = <Flat<F> as PackableField>::WIDTH;
+
+    let mut r = StdRng::seed_from_u64(seed);
+    let mut lanes = vec![Flat::<F>::default(); width];
+
+    for points in [0usize, 1, 5, 16, 37] {
+        for lane_stride in [points, points + 1, 3 * points + 5] {
+            let packed: Vec<PackedFlat<F>> = (0..points)
+                .map(|_| {
+                    for x in lanes.iter_mut() {
+                        *x = Flat::from_raw(mk(&mut r));
+                    }
+
+                    <Flat<F> as PackableField>::pack(&lanes)
+                })
+                .collect();
+
+            let len = (width - 1) * lane_stride + points + 3;
+
+            let mut out: Vec<Flat<F>> = (0..len).map(|_| Flat::from_raw(mk(&mut r))).collect();
+            let mut want = out.clone();
+
+            for (u, &p) in packed.iter().enumerate() {
+                <Flat<F> as PackableField>::unpack(p, &mut lanes);
+
+                for (c, &lane) in lanes.iter().enumerate() {
+                    want[c * lane_stride + u] = lane;
+                }
+            }
+
+            <Flat<F> as PackableField>::unpack_transposed(&packed, &mut out, lane_stride);
+
+            assert_eq!(
+                out, want,
+                "{label}: points={points} lane_stride={lane_stride}"
+            );
+        }
+    }
+}
+
+#[test]
+fn unpack_transposed_vs_unpack_all_widths() {
+    unpack_transposed_vs_unpack::<Bit>(0x7a01, |r| Bit::new(r.random::<u8>() & 1), "Bit");
+    unpack_transposed_vs_unpack::<Block8>(0x7a08, |r| Block8(r.random()), "Block8");
+    unpack_transposed_vs_unpack::<Block16>(0x7a16, |r| Block16(r.random()), "Block16");
+    unpack_transposed_vs_unpack::<Block32>(0x7a32, |r| Block32(r.random()), "Block32");
+    unpack_transposed_vs_unpack::<Block64>(0x7a64, |r| Block64(r.random()), "Block64");
+    unpack_transposed_vs_unpack::<Block128>(0x7a12, |r| Block128(r.random()), "Block128");
+    unpack_transposed_vs_unpack::<Block256>(
+        0x7a25,
+        |r| Block256([r.random(), r.random()]),
+        "Block256",
+    );
+}
+
+#[test]
+#[should_panic(expected = "lanes overlap")]
+fn unpack_transposed_overlap_panics_8() {
+    let packed = [PackedFlat::<Block8>::default(); 2];
+    let mut out = [Flat::<Block8>::default(); 32];
+
+    <Flat<Block8> as PackableField>::unpack_transposed(&packed, &mut out, 1);
+}
+
+#[test]
+#[should_panic]
+fn unpack_transposed_short_output_panics_8() {
+    let packed = [PackedFlat::<Block8>::default(); 16];
+    let mut out = [Flat::<Block8>::default(); 15 * 16 + 15];
+
+    <Flat<Block8> as PackableField>::unpack_transposed(&packed, &mut out, 16);
+}
+
+#[test]
+#[should_panic]
+fn unpack_transposed_short_output_panics_16() {
+    let packed = [PackedFlat::<Block16>::default(); 2];
+    let mut out = [Flat::<Block16>::default(); 7 * 2 + 1];
+
+    <Flat<Block16> as PackableField>::unpack_transposed(&packed, &mut out, 2);
+}
+
+#[test]
+#[should_panic(expected = "lanes overlap")]
+fn unpack_transposed_overlap_panics_16() {
+    let packed = [PackedFlat::<Block16>::default(); 2];
+    let mut out = [Flat::<Block16>::default(); 16];
+
+    <Flat<Block16> as PackableField>::unpack_transposed(&packed, &mut out, 1);
+}
+
+#[test]
+fn from_bits_all_widths() {
+    from_bits_lanes::<Bit>(0x7b01, "Bit");
+    from_bits_lanes::<Block8>(0x7b08, "Block8");
+    from_bits_lanes::<Block16>(0x7b16, "Block16");
+    from_bits_lanes::<Block32>(0x7b32, "Block32");
+    from_bits_lanes::<Block64>(0x7b64, "Block64");
+    from_bits_lanes::<Block128>(0x7b12, "Block128");
+    from_bits_lanes::<Block256>(0x7b25, "Block256");
+}
+
+#[test]
+fn splat_all_widths() {
+    splat_lanes::<Bit>(0x7c01, |r| Bit::new(r.random::<u8>() & 1), "Bit");
+    splat_lanes::<Block8>(0x7c08, |r| Block8(r.random()), "Block8");
+    splat_lanes::<Block16>(0x7c16, |r| Block16(r.random()), "Block16");
+    splat_lanes::<Block32>(0x7c32, |r| Block32(r.random()), "Block32");
+    splat_lanes::<Block64>(0x7c64, |r| Block64(r.random()), "Block64");
+    splat_lanes::<Block128>(0x7c12, |r| Block128(r.random()), "Block128");
+    splat_lanes::<Block256>(0x7c25, |r| Block256([r.random(), r.random()]), "Block256");
 }

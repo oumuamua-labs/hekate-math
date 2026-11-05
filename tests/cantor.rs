@@ -18,10 +18,10 @@
 mod common;
 
 use common::cantor_oracle::CANTOR_TOWER;
-use common::{eval_point, horner_eval};
+use common::{eval_point, horner_eval, reference_forward};
 use hekate_math::fft::vanish_eval;
 use hekate_math::{
-    AdditiveFft, BinaryFieldExtras, Bit, Block16, Block32, Block64, Block128, Block256,
+    AdditiveFft, BinaryFieldExtras, Bit, Block8, Block16, Block32, Block64, Block128, Block256,
     CantorBasis, CantorError, Flat, HardwareField, TowerField,
 };
 use rand::{RngExt, SeedableRng, rngs::StdRng};
@@ -95,7 +95,7 @@ fn evaluate_at_eq_forward<F: BinaryFieldExtras + HardwareField>(
 ) {
     let mut r = StdRng::seed_from_u64(seed);
     for log_k in [0u32, 1, 2, 5, 8] {
-        for m in log_k.max(1)..=log_k + 4 {
+        for m in log_k.max(1)..=(log_k + 4).min(F::BITS as u32 - 1) {
             let n = 1usize << m;
             let k = 1usize << log_k;
 
@@ -183,8 +183,78 @@ fn evaluate_at_eq_horner<F: BinaryFieldExtras + HardwareField>(
     }
 }
 
+fn evaluate_at_eq_reference<F: BinaryFieldExtras + HardwareField>(
+    seed: u64,
+    log_k: u32,
+    mut mk: impl FnMut(&mut StdRng) -> F,
+) {
+    let mut r = StdRng::seed_from_u64(seed);
+
+    let k = 1usize << log_k;
+    let dim = log_k as usize + 1;
+    let n = 1usize << dim;
+
+    let basis = CantorBasis::<F>::new(dim).unwrap();
+    let coeffs: Vec<Flat<F>> = (0..k).map(|_| Flat::from_raw(mk(&mut r))).collect();
+
+    let runs = |r: &mut StdRng, run_log: usize| -> Vec<usize> {
+        let mut starts: Vec<usize> = (0..241).map(|_| r.random_range(0..n >> run_log)).collect();
+        starts.sort_unstable();
+        starts.dedup();
+
+        starts
+            .iter()
+            .flat_map(|&j| (j << run_log)..((j + 1) << run_log))
+            .collect()
+    };
+
+    let mut uniform: Vec<usize> = (0..4096).map(|_| r.random_range(0..n)).collect();
+    uniform.sort_unstable();
+
+    let sets = [
+        Vec::new(),
+        (0..n).collect(),
+        runs(&mut r, 4),
+        runs(&mut r, 10),
+        uniform,
+        (k..n).step_by(7).collect(),
+        vec![k / 2 + 1, k / 2 + 3, 3 * k / 4, k - 1, k + 5],
+    ];
+
+    let shifts = [
+        Flat::from_raw(F::ZERO),
+        Flat::from_raw(mk(&mut r)),
+        basis.betas()[log_k as usize],
+    ];
+
+    let mut scratch = vec![Flat::from_raw(F::ZERO); k - 1];
+    for shift in shifts {
+        let mut full = vec![Flat::from_raw(F::ZERO); n];
+        full[..k].copy_from_slice(&coeffs);
+
+        reference_forward(&mut full, shift);
+
+        for indices in &sets {
+            let mut out = vec![Flat::from_raw(F::ZERO); indices.len()];
+
+            basis
+                .evaluate_at(&coeffs, shift, indices, &mut scratch, &mut out)
+                .unwrap();
+
+            assert_eq!(
+                indices.iter().zip(&out).position(|(&j, v)| *v != full[j]),
+                None,
+                "{}-bit log_k={log_k}, {} indices",
+                F::BITS,
+                indices.len()
+            );
+        }
+    }
+}
+
 #[test]
 fn cantor_basis_pinned() {
+    cantor_pinned::<Block8>();
     cantor_pinned::<Block16>();
     cantor_pinned::<Block32>();
     cantor_pinned::<Block64>();
@@ -194,6 +264,7 @@ fn cantor_basis_pinned() {
 
 #[test]
 fn cantor_basis_chain_laws() {
+    cantor_chain_laws::<Block8>();
     cantor_chain_laws::<Block16>();
     cantor_chain_laws::<Block32>();
     cantor_chain_laws::<Block64>();
@@ -203,6 +274,10 @@ fn cantor_basis_chain_laws() {
 
 #[test]
 fn cantor_basis_rejects_bad_dim() {
+    assert_eq!(
+        CantorBasis::<Block8>::new(9).err(),
+        Some(CantorError::BadDim { dim: 9, max: 8 })
+    );
     assert_eq!(
         CantorBasis::<Block16>::new(0).err(),
         Some(CantorError::BadDim { dim: 0, max: 16 })
@@ -220,6 +295,11 @@ fn cantor_basis_rejects_bad_dim() {
 #[test]
 fn cantor_point_is_forward_of_x_all_fields() {
     let mut r = StdRng::seed_from_u64(0x5eed_ca07_0001);
+    for log_n in [1u32, 8] {
+        cantor_point_is_forward_of_x::<Block8>(log_n, Flat::from_raw(Block8::ZERO));
+        cantor_point_is_forward_of_x::<Block8>(log_n, Block8(r.random()).to_hardware());
+    }
+
     for log_n in [1u32, 10] {
         cantor_point_is_forward_of_x::<Block16>(log_n, Flat::from_raw(Block16::ZERO));
         cantor_point_is_forward_of_x::<Block16>(log_n, Block16(r.random()).to_hardware());
@@ -257,6 +337,7 @@ fn cantor_point_rejects_out_of_range() {
 
 #[test]
 fn evaluate_at_eq_forward_all_fields() {
+    evaluate_at_eq_forward::<Block8>(0x5eed_ca07_0008, |r| Block8(r.random()));
     evaluate_at_eq_forward::<Block16>(0x5eed_ca07_0016, |r| Block16(r.random()));
     evaluate_at_eq_forward::<Block32>(0x5eed_ca07_0032, |r| Block32(r.random()));
     evaluate_at_eq_forward::<Block64>(0x5eed_ca07_0064, |r| Block64(r.random()));
@@ -269,6 +350,7 @@ fn evaluate_at_eq_horner_all_fields() {
     for log_k in [0u32, 1, 4, 8] {
         let s = u64::from(log_k);
 
+        evaluate_at_eq_horner::<Block8>(0x5eed_ca07_e008 + s, log_k, 16, |r| Block8(r.random()));
         evaluate_at_eq_horner::<Block16>(0x5eed_ca07_e016 + s, log_k, 16, |r| Block16(r.random()));
         evaluate_at_eq_horner::<Block32>(0x5eed_ca07_e032 + s, log_k, 16, |r| Block32(r.random()));
         evaluate_at_eq_horner::<Block64>(0x5eed_ca07_e064 + s, log_k, 16, |r| Block64(r.random()));
@@ -385,4 +467,47 @@ fn cantor_error_display_carries_values() {
 #[ignore = "release-scale: 2^12 Block128 coefficients at 3074 points"]
 fn evaluate_at_eq_horner_block128_volume() {
     evaluate_at_eq_horner::<Block128>(0x5eed_ca07_e1fe, 12, 1024, |r| Block128(r.random()));
+}
+
+#[test]
+#[cfg_attr(debug_assertions, ignore = "heavy; release only")]
+fn evaluate_at_eq_reference_above_parallel_threshold() {
+    evaluate_at_eq_reference::<Block32>(0x5eed_16f6_0032, 18, |r| Block32(r.random()));
+    evaluate_at_eq_reference::<Block64>(0x5eed_16f6_0064, 17, |r| Block64(r.random()));
+    evaluate_at_eq_reference::<Block64>(0x5eed_16f6_0164, 20, |r| Block64(r.random()));
+    evaluate_at_eq_reference::<Block128>(0x5eed_16f6_0128, 16, |r| Block128(r.random()));
+    evaluate_at_eq_reference::<Block256>(0x5eed_16f6_0256, 15, |r| {
+        Block256([r.random(), r.random()])
+    });
+}
+
+#[test]
+#[cfg(feature = "parallel")]
+#[cfg_attr(debug_assertions, ignore = "heavy; release only")]
+fn evaluate_at_pool_size_invariant() {
+    for threads in [1, 3, 16] {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap();
+
+        pool.install(|| {
+            evaluate_at_eq_reference::<Block64>(0x5eed_16f7_0064, 17, |r| Block64(r.random()))
+        });
+    }
+}
+
+#[test]
+#[cfg(feature = "parallel")]
+#[cfg_attr(debug_assertions, ignore = "heavy; release only")]
+fn evaluate_at_small_stack() {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .stack_size(256 << 10)
+        .build()
+        .unwrap();
+
+    pool.install(|| {
+        evaluate_at_eq_reference::<Block64>(0x5eed_16f8_0064, 20, |r| Block64(r.random()))
+    });
 }

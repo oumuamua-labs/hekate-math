@@ -20,7 +20,8 @@ use criterion::{
     BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main, measurement::WallTime,
 };
 use hekate_math::{
-    Bit, Block8, Block16, Block32, Block64, Block128, Block256, Flat, HardwareField, TowerField,
+    BinaryFieldExtras, Bit, Block8, Block16, Block32, Block64, Block128, Block256, Flat,
+    HardwareField, TowerField,
 };
 use rand::{RngExt, rng};
 
@@ -74,20 +75,20 @@ where
 fn bench_square_latency(c: &mut Criterion) {
     let mut group = c.benchmark_group("field_ops/square_latency");
 
-    run_square_bench::<Bit>(&mut group, "Bit");
-    run_square_bench::<Block8>(&mut group, "Block8");
-    run_square_bench::<Block16>(&mut group, "Block16");
-    run_square_bench::<Block32>(&mut group, "Block32");
-    run_square_bench::<Block64>(&mut group, "Block64");
-    run_square_bench::<Block128>(&mut group, "Block128");
-    run_square_bench::<Block256>(&mut group, "Block256");
+    run_square_bench(&mut group, "Block8", |x: &Block8| x.square());
+    run_square_bench(&mut group, "Block16", Block16::square);
+    run_square_bench(&mut group, "Block32", Block32::square);
+    run_square_bench(&mut group, "Block64", Block64::square);
+    run_square_bench(&mut group, "Block128", Block128::square);
+    run_square_bench(&mut group, "Block256", Block256::square);
 
     group.finish();
 }
 
-fn run_square_bench<F>(group: &mut BenchmarkGroup<WallTime>, name: &str)
+fn run_square_bench<F, S>(group: &mut BenchmarkGroup<WallTime>, name: &str, square: S)
 where
     F: HardwareField,
+    S: Fn(&F) -> F,
 {
     // Setup
     let mut rng = rng();
@@ -95,7 +96,7 @@ where
 
     // 1. Tower Basis Squaring
     group.bench_function(format!("{}/tower_basis", name), |bencher| {
-        bencher.iter(|| black_box(a) * black_box(a))
+        bencher.iter(|| square(&black_box(a)))
     });
 
     // 2. Hardware Basis Squaring

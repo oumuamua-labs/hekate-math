@@ -17,11 +17,12 @@
 
 mod common;
 
-use common::{eval_point, horner_eval};
+use common::{eval_point, horner_eval, reference_forward, reference_twiddles};
+use core::ops::RangeInclusive;
 use hekate_math::fft::vanish_eval;
 use hekate_math::{
-    AdditiveFft, BinaryFieldExtras, Block16, Block32, Block64, Block128, CantorBasis, FftError,
-    Flat, HardwareField, PackableField, PackedFlat, TowerField,
+    AdditiveFft, BinaryFieldExtras, Block8, Block16, Block32, Block64, Block128, Block256,
+    CantorBasis, FftError, Flat, HardwareField, LdePlan, PackableField, PackedFlat, TowerField,
 };
 use rand::{RngExt, SeedableRng, rng, rngs::StdRng};
 
@@ -119,6 +120,444 @@ fn horner_check<F: BinaryFieldExtras + HardwareField>(
             "{}-bit FFT != Horner at log_n={log_n}, j={j}",
             F::BITS
         );
+    }
+}
+
+fn reference_inverse<F: HardwareField>(data: &mut [Flat<F>], offset: Flat<F>) {
+    let log_n = data.len().trailing_zeros() as usize;
+    let tw = reference_twiddles::<F>(log_n);
+
+    let mut c = offset;
+    for l in 0..log_n {
+        let s = 1usize << l;
+
+        for (b, blk) in data.chunks_exact_mut(2 * s).enumerate() {
+            let t = c + tw[b];
+            let (lo, hi) = blk.split_at_mut(s);
+
+            for (p, q) in lo.iter_mut().zip(hi.iter_mut()) {
+                let qv = *p + *q;
+                *p += qv * t;
+                *q = qv;
+            }
+        }
+
+        c = c * c + c;
+    }
+}
+
+fn reference_horner<F: BinaryFieldExtras + HardwareField>(
+    seed: u64,
+    mut mk: impl FnMut(&mut StdRng) -> F,
+) {
+    let mut r = StdRng::seed_from_u64(seed);
+    for log_n in 1..=8u32 {
+        let n = 1usize << log_n;
+        let coeffs: Vec<F> = (0..n).map(|_| mk(&mut r)).collect();
+        let offset = mk(&mut r);
+        let orig: Vec<Flat<F>> = coeffs.iter().map(|c| c.to_hardware()).collect();
+
+        let mut data = orig.clone();
+        reference_forward(&mut data, offset.to_hardware());
+
+        for (j, v) in data.iter().enumerate() {
+            let expected = horner_eval(&coeffs, offset + eval_point(j), log_n);
+            assert_eq!(
+                v.to_tower(),
+                expected,
+                "{}-bit reference != Horner at log_n={log_n}, j={j}",
+                F::BITS
+            );
+        }
+
+        reference_inverse(&mut data, offset.to_hardware());
+
+        assert_eq!(
+            data,
+            orig,
+            "{}-bit reference inverse∘forward != id at log_n={log_n}",
+            F::BITS
+        );
+    }
+}
+
+fn parallel_differential<F: BinaryFieldExtras + HardwareField>(
+    seed: u64,
+    sizes: RangeInclusive<u32>,
+    mut mk: impl FnMut(&mut StdRng) -> F,
+) {
+    let mut r = StdRng::seed_from_u64(seed);
+    for log_n in sizes {
+        let n = 1usize << log_n;
+        let fft = AdditiveFft::<F>::new(log_n).unwrap();
+
+        let data: Vec<Flat<F>> = (0..n).map(|_| Flat::from_raw(mk(&mut r))).collect();
+        let offsets = [Flat::from_raw(F::ZERO), Flat::from_raw(mk(&mut r))];
+
+        for offset in offsets {
+            let mut want = data.clone();
+            reference_forward(&mut want, offset);
+
+            let mut got = data.clone();
+            fft.forward_coset_scalar(&mut got, offset).unwrap();
+
+            assert_eq!(
+                got.iter().zip(&want).position(|(a, b)| a != b),
+                None,
+                "{}-bit forward != reference at log_n={log_n}",
+                F::BITS
+            );
+
+            want.copy_from_slice(&data);
+            reference_inverse(&mut want, offset);
+
+            got.copy_from_slice(&data);
+            fft.inverse_coset_scalar(&mut got, offset).unwrap();
+
+            assert_eq!(
+                got.iter().zip(&want).position(|(a, b)| a != b),
+                None,
+                "{}-bit inverse != reference at log_n={log_n}",
+                F::BITS
+            );
+        }
+    }
+}
+
+fn packed_differential<F: BinaryFieldExtras + HardwareField>(
+    seed: u64,
+    sizes: RangeInclusive<u32>,
+    mut mk: impl FnMut(&mut StdRng) -> F,
+) {
+    let width = <Flat<F> as PackableField>::WIDTH;
+
+    let mut r = StdRng::seed_from_u64(seed);
+    for log_n in sizes {
+        let n = 1usize << log_n;
+        let fft = AdditiveFft::<F>::new(log_n).unwrap();
+        let offset = Flat::from_raw(mk(&mut r));
+
+        let cols: Vec<Vec<Flat<F>>> = (0..width)
+            .map(|_| (0..n).map(|_| Flat::from_raw(mk(&mut r))).collect())
+            .collect();
+
+        let packed: Vec<PackedFlat<F>> = (0..n)
+            .map(|k| {
+                let lanes: Vec<Flat<F>> = cols.iter().map(|col| col[k]).collect();
+                <Flat<F> as PackableField>::pack(&lanes)
+            })
+            .collect();
+
+        let mut fwd = packed.clone();
+        fft.forward_coset(&mut fwd, offset).unwrap();
+
+        let mut inv = packed;
+        fft.inverse_coset(&mut inv, offset).unwrap();
+
+        for (l, col) in cols.iter().enumerate() {
+            let mut want = col.clone();
+            reference_forward(&mut want, offset);
+
+            assert_eq!(
+                lane(&fwd, l).iter().zip(&want).position(|(a, b)| a != b),
+                None,
+                "{}-bit packed forward != reference at log_n={log_n}, lane={l}",
+                F::BITS
+            );
+
+            want.copy_from_slice(col);
+            reference_inverse(&mut want, offset);
+
+            assert_eq!(
+                lane(&inv, l).iter().zip(&want).position(|(a, b)| a != b),
+                None,
+                "{}-bit packed inverse != reference at log_n={log_n}, lane={l}",
+                F::BITS
+            );
+        }
+    }
+}
+
+fn lane<F: HardwareField>(packed: &[PackedFlat<F>], l: usize) -> Vec<Flat<F>> {
+    let mut lanes = vec![Flat::from_raw(F::ZERO); <Flat<F> as PackableField>::WIDTH];
+
+    packed
+        .iter()
+        .map(|&p| {
+            <Flat<F> as PackableField>::unpack(p, &mut lanes);
+            lanes[l]
+        })
+        .collect()
+}
+
+#[cfg(feature = "parallel")]
+fn pool_differential<F: BinaryFieldExtras + HardwareField>(seed: u64, log_n: u32) {
+    let mut r = StdRng::seed_from_u64(seed);
+
+    let n = 1usize << log_n;
+    let fft = AdditiveFft::<F>::new(log_n).unwrap();
+
+    let data: Vec<Flat<F>> = (0..n)
+        .map(|_| Flat::from_raw(F::from(r.random::<u128>())))
+        .collect();
+
+    let offset = Flat::from_raw(F::from(r.random::<u128>()));
+
+    let mut want = data.clone();
+    reference_forward(&mut want, offset);
+
+    let mut want_inv = data.clone();
+    reference_inverse(&mut want_inv, offset);
+
+    for threads in [1, 3, 16] {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap();
+
+        let mut got = data.clone();
+        pool.install(|| fft.forward_coset_scalar(&mut got, offset))
+            .unwrap();
+
+        assert_eq!(
+            got.iter().zip(&want).position(|(a, b)| a != b),
+            None,
+            "{}-bit forward in a {threads}-thread pool != reference at log_n={log_n}",
+            F::BITS
+        );
+
+        got.copy_from_slice(&data);
+        pool.install(|| fft.inverse_coset_scalar(&mut got, offset))
+            .unwrap();
+
+        assert_eq!(
+            got.iter().zip(&want_inv).position(|(a, b)| a != b),
+            None,
+            "{}-bit inverse in a {threads}-thread pool != reference at log_n={log_n}",
+            F::BITS
+        );
+    }
+}
+
+fn fill<F: HardwareField>(
+    r: &mut StdRng,
+    mk: &mut impl FnMut(&mut StdRng) -> F,
+    dst: &mut [Flat<F>],
+) {
+    for x in dst.iter_mut() {
+        *x = Flat::from_raw(mk(r));
+    }
+}
+
+fn lde_plan_lanes_eq_run<F: BinaryFieldExtras + HardwareField>(
+    seed: u64,
+    max_log_n: u32,
+    mut mk: impl FnMut(&mut StdRng) -> F,
+) {
+    let width = <Flat<F> as PackableField>::WIDTH;
+    let zero = Flat::from_raw(F::ZERO);
+
+    let mut r = StdRng::seed_from_u64(seed);
+    let mut lanes = vec![zero; width];
+
+    for log_n in 1..=max_log_n {
+        let n = 1usize << log_n;
+        let fft = AdditiveFft::<F>::new(log_n).unwrap();
+
+        let data: Vec<PackedFlat<F>> = (0..n)
+            .map(|_| {
+                fill(&mut r, &mut mk, &mut lanes);
+
+                <Flat<F> as PackableField>::pack(&lanes)
+            })
+            .collect();
+
+        let mut buf = data.clone();
+        fft.inverse(&mut buf).unwrap();
+
+        let mut scratch = vec![PackedFlat::<F>::default(); 2 * n];
+        for cosets in [0usize, 1, 2, 5] {
+            let offsets: Vec<Flat<F>> = (0..cosets).map(|_| Flat::from_raw(mk(&mut r))).collect();
+            let plan: LdePlan<F> = fft.lde_plan(&offsets).unwrap();
+            let points = cosets * n;
+
+            let mut rows = vec![zero; points * width];
+            plan.run(&data, &mut scratch, &mut rows, width).unwrap();
+
+            let mut out = vec![zero; points * width + 2];
+            fill(&mut r, &mut mk, &mut out);
+
+            let mut want = out.clone();
+            for (p, row) in rows.chunks_exact(width).enumerate() {
+                for (c, &lane) in row.iter().enumerate() {
+                    want[c * points + p] = lane;
+                }
+            }
+
+            for slot in scratch.iter_mut() {
+                fill(&mut r, &mut mk, &mut lanes);
+
+                *slot = <Flat<F> as PackableField>::pack(&lanes);
+            }
+
+            plan.run_lanes(&data, &mut scratch, &mut out).unwrap();
+
+            assert_eq!(out, want, "{}-bit log_n={log_n} cosets={cosets}", F::BITS);
+
+            let mut got = vec![zero; width];
+            for (u, (&p, &q)) in scratch[..n].iter().zip(&buf).enumerate() {
+                <Flat<F> as PackableField>::unpack(p, &mut got);
+                <Flat<F> as PackableField>::unpack(q, &mut lanes);
+
+                assert_eq!(
+                    got,
+                    lanes,
+                    "{}-bit log_n={log_n} cosets={cosets} point {u}: inverse in scratch",
+                    F::BITS
+                );
+            }
+        }
+    }
+}
+
+fn lde_plan_lanes_from_bits<F: BinaryFieldExtras + HardwareField>(seed: u64, max_log_n: u32) {
+    let width = <Flat<F> as PackableField>::WIDTH;
+    let zero = Flat::from_raw(F::ZERO);
+
+    let mut r = StdRng::seed_from_u64(seed);
+    let mut lanes = vec![zero; width];
+
+    for log_n in 1..=max_log_n {
+        let n = 1usize << log_n;
+        let fft = AdditiveFft::<F>::new(log_n).unwrap();
+
+        let data: Vec<PackedFlat<F>> = (0..n).map(|_| F::from_bits(r.random())).collect();
+
+        let mut columns = vec![zero; width * n];
+        for (u, &p) in data.iter().enumerate() {
+            <Flat<F> as PackableField>::unpack(p, &mut lanes);
+
+            for (c, &lane) in lanes.iter().enumerate() {
+                columns[c * n + u] = lane;
+            }
+        }
+
+        for column in columns.chunks_exact_mut(n) {
+            fft.inverse_scalar(column).unwrap();
+        }
+
+        let mut scratch = vec![PackedFlat::<F>::default(); 2 * n];
+        let mut want = vec![zero; n];
+
+        for cosets in [0usize, 1, 2, 5] {
+            let offsets: Vec<Flat<F>> = (0..cosets)
+                .map(|_| Flat::from_raw(F::from_uniform_bytes(&r.random())))
+                .collect();
+
+            let plan: LdePlan<F> = fft.lde_plan(&offsets).unwrap();
+
+            let mut out = vec![zero; width * cosets * n];
+            plan.run_lanes(&data, &mut scratch, &mut out).unwrap();
+
+            for (c, column) in columns.chunks_exact(n).enumerate() {
+                for (j, &offset) in offsets.iter().enumerate() {
+                    want.copy_from_slice(column);
+                    fft.forward_coset_scalar(&mut want, offset).unwrap();
+
+                    let at = (c * cosets + j) * n;
+                    assert_eq!(
+                        out[at..at + n],
+                        want[..],
+                        "{}-bit log_n={log_n} cosets={cosets} lane {c} coset {j}",
+                        F::BITS
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn lde_plan_eq_separate<F: BinaryFieldExtras + HardwareField>(
+    seed: u64,
+    max_log_n: u32,
+    mut mk: impl FnMut(&mut StdRng) -> F,
+) {
+    let width = <Flat<F> as PackableField>::WIDTH;
+    let zero = Flat::from_raw(F::ZERO);
+
+    let mut r = StdRng::seed_from_u64(seed);
+    let mut lanes = vec![zero; width];
+
+    for log_n in 1..=max_log_n {
+        let n = 1usize << log_n;
+        let fft = AdditiveFft::<F>::new(log_n).unwrap();
+
+        let data: Vec<PackedFlat<F>> = (0..n)
+            .map(|_| {
+                fill(&mut r, &mut mk, &mut lanes);
+
+                <Flat<F> as PackableField>::pack(&lanes)
+            })
+            .collect();
+
+        let mut buf = data.clone();
+        fft.inverse(&mut buf).unwrap();
+
+        for cosets in [0usize, 1, 2, 5] {
+            let offsets: Vec<Flat<F>> = (0..cosets).map(|_| Flat::from_raw(mk(&mut r))).collect();
+            let plan: LdePlan<F> = fft.lde_plan(&offsets).unwrap();
+
+            for stride in [width, width + 3] {
+                let need = match cosets {
+                    0 => 0,
+                    c => (c * n - 1) * stride + width,
+                };
+
+                let mut out = vec![zero; need + 2];
+                fill(&mut r, &mut mk, &mut out);
+
+                let mut scratch: Vec<PackedFlat<F>> = (0..2 * n + 1)
+                    .map(|_| {
+                        fill(&mut r, &mut mk, &mut lanes);
+
+                        <Flat<F> as PackableField>::pack(&lanes)
+                    })
+                    .collect();
+
+                let mut want = out.clone();
+                plan.run(&data, &mut scratch, &mut out, stride).unwrap();
+
+                for (j, &offset) in offsets.iter().enumerate() {
+                    let mut tmp = buf.clone();
+                    fft.forward_coset(&mut tmp, offset).unwrap();
+
+                    for (u, &p) in tmp.iter().enumerate() {
+                        let at = (j * n + u) * stride;
+                        <Flat<F> as PackableField>::unpack(p, &mut want[at..at + width]);
+                    }
+                }
+
+                assert_eq!(
+                    out,
+                    want,
+                    "{}-bit log_n={log_n} cosets={cosets} stride={stride}",
+                    F::BITS
+                );
+
+                let mut got = vec![zero; width];
+                for (u, (&p, &q)) in scratch[..n].iter().zip(&buf).enumerate() {
+                    <Flat<F> as PackableField>::unpack(p, &mut got);
+                    <Flat<F> as PackableField>::unpack(q, &mut lanes);
+
+                    assert_eq!(
+                        got,
+                        lanes,
+                        "{}-bit log_n={log_n} cosets={cosets} stride={stride}: scratch[{u}] != inverse",
+                        F::BITS
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -311,6 +750,11 @@ fn additive_fft_coset_eq_horner() {
 fn additive_fft_eq_horner_wide_fields() {
     let mut r = StdRng::seed_from_u64(0x5eed_ff70_4e00);
     for log_n in [1u32, 3, 7] {
+        horner_check(log_n, Block8::ZERO, || Block8(r.random()));
+
+        let offset = Block8(r.random());
+        horner_check(log_n, offset, || Block8(r.random()));
+
         horner_check(log_n, Block32::ZERO, || Block32(r.random()));
 
         let offset = Block32(r.random());
@@ -325,6 +769,11 @@ fn additive_fft_eq_horner_wide_fields() {
 
         let offset = Block128(r.random());
         horner_check(log_n, offset, || Block128(r.random()));
+
+        horner_check(log_n, Block256::ZERO, || Block256([r.random(), r.random()]));
+
+        let offset = Block256([r.random(), r.random()]);
+        horner_check(log_n, offset, || Block256([r.random(), r.random()]));
     }
 }
 
@@ -517,6 +966,10 @@ fn additive_fft_new_rejects_zero() {
 #[test]
 fn additive_fft_new_rejects_above_field_bits() {
     assert_eq!(
+        AdditiveFft::<Block8>::new(9).err(),
+        Some(FftError::BadLogN { log_n: 9, max: 8 })
+    );
+    assert_eq!(
         AdditiveFft::<Block16>::new(Block16::BITS as u32 + 1).err(),
         Some(FftError::BadLogN { log_n: 17, max: 16 })
     );
@@ -527,17 +980,9 @@ fn additive_fft_new_rejects_above_field_bits() {
 }
 
 #[test]
-fn additive_fft_new_reports_twiddle_alloc() {
-    // First sizes past isize::MAX bytes:
-    // no allocation is attempted.
-    assert_eq!(
-        AdditiveFft::<Block128>::new(60).err(),
-        Some(FftError::TwiddleAlloc { log_n: 60 })
-    );
-    assert_eq!(
-        AdditiveFft::<Block64>::new(61).err(),
-        Some(FftError::TwiddleAlloc { log_n: 61 })
-    );
+fn additive_fft_new_accepts_max_log_n() {
+    assert!(AdditiveFft::<Block64>::new(63).is_ok());
+    assert!(AdditiveFft::<Block128>::new(63).is_ok());
 }
 
 #[test]
@@ -615,6 +1060,12 @@ fn fft_error_display_carries_lengths() {
 }
 
 #[test]
+fn additive_fft_roundtrip_block8() {
+    let mut r = StdRng::seed_from_u64(0x5eed_ff70_0008);
+    roundtrip_scalar(8, || Block8(r.random()));
+}
+
+#[test]
 fn additive_fft_roundtrip_block32() {
     let mut r = StdRng::seed_from_u64(0x5eed_ff70_0032);
     roundtrip_scalar(8, || Block32(r.random()));
@@ -630,6 +1081,12 @@ fn additive_fft_roundtrip_block64() {
 fn additive_fft_roundtrip_block128() {
     let mut r = StdRng::seed_from_u64(0x5eed_ff70_0128);
     roundtrip_scalar(10, || Block128(r.random()));
+}
+
+#[test]
+fn additive_fft_roundtrip_block256() {
+    let mut r = StdRng::seed_from_u64(0x5eed_ff70_0256);
+    roundtrip_scalar(10, || Block256([r.random(), r.random()]));
 }
 
 #[test]
@@ -730,4 +1187,186 @@ fn additive_fft_parallel_eq_evaluate_at_block128() {
 
         assert_eq!(inside, data, "in-pool forward != out-of-pool forward");
     }
+}
+
+#[test]
+fn reference_transform_eq_horner() {
+    reference_horner::<Block8>(0x5eed_16f0_0008, |r| Block8(r.random()));
+    reference_horner::<Block16>(0x5eed_16f0_0016, |r| Block16(r.random()));
+    reference_horner::<Block32>(0x5eed_16f0_0032, |r| Block32(r.random()));
+    reference_horner::<Block64>(0x5eed_16f0_0064, |r| Block64(r.random()));
+    reference_horner::<Block128>(0x5eed_16f0_0128, |r| Block128(r.random()));
+    reference_horner::<Block256>(0x5eed_16f0_0256, |r| Block256([r.random(), r.random()]));
+}
+
+#[test]
+#[cfg_attr(debug_assertions, ignore = "heavy; release only")]
+fn additive_fft_parallel_eq_reference() {
+    parallel_differential::<Block32>(0x5eed_16f1_0032, 18..=22, |r| Block32(r.random()));
+    parallel_differential::<Block64>(0x5eed_16f1_0064, 17..=21, |r| Block64(r.random()));
+    parallel_differential::<Block128>(0x5eed_16f1_0128, 16..=20, |r| Block128(r.random()));
+    parallel_differential::<Block256>(0x5eed_16f1_0256, 15..=17, |r| {
+        Block256([r.random(), r.random()])
+    });
+}
+
+#[test]
+#[cfg_attr(debug_assertions, ignore = "heavy; release only")]
+fn additive_fft_packed_parallel_eq_reference() {
+    packed_differential::<Block32>(0x5eed_16f2_0032, 16..=20, |r| Block32(r.random()));
+    packed_differential::<Block64>(0x5eed_16f2_0064, 16..=20, |r| Block64(r.random()));
+    packed_differential::<Block128>(0x5eed_16f2_0128, 14..=18, |r| Block128(r.random()));
+    packed_differential::<Block256>(0x5eed_16f2_0256, 14..=16, |r| {
+        Block256([r.random(), r.random()])
+    });
+}
+
+#[test]
+fn additive_fft_packed_block8() {
+    packed_differential::<Block8>(0x5eed_16f2_0008, 1..=8, |r| Block8(r.random()));
+}
+
+#[test]
+#[cfg(feature = "parallel")]
+#[cfg_attr(debug_assertions, ignore = "heavy; release only")]
+fn additive_fft_pool_size_invariant() {
+    pool_differential::<Block64>(0x5eed_16f3_0064, 18);
+    pool_differential::<Block128>(0x5eed_16f3_0128, 18);
+}
+
+#[test]
+#[cfg(feature = "parallel")]
+#[cfg_attr(debug_assertions, ignore = "heavy; release only")]
+fn additive_fft_packed_small_stack() {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .stack_size(256 << 10)
+        .build()
+        .unwrap();
+
+    pool.install(|| {
+        packed_differential::<Block128>(0x5eed_16f4_0128, 14..=15, |r| Block128(r.random()))
+    });
+}
+
+#[test]
+#[ignore = "release-scale: 2^27 elements, 13 GiB peak RSS"]
+fn additive_fft_parallel_eq_reference_2p27() {
+    parallel_differential::<Block32>(0x5eed_16f5_0032, 27..=27, |r| Block32(r.random()));
+    parallel_differential::<Block64>(0x5eed_16f5_0064, 27..=27, |r| Block64(r.random()));
+    parallel_differential::<Block128>(0x5eed_16f5_0128, 27..=27, |r| Block128(r.random()));
+}
+
+#[test]
+fn lde_plan_eq_inverse_then_forward_cosets() {
+    lde_plan_eq_separate::<Block8>(0x5eed_1de0_0008, 8, |r| Block8(r.random()));
+    lde_plan_eq_separate::<Block16>(0x5eed_1de0_0016, 12, |r| Block16(r.random()));
+    lde_plan_eq_separate::<Block32>(0x5eed_1de0_0032, 11, |r| Block32(r.random()));
+    lde_plan_eq_separate::<Block64>(0x5eed_1de0_0064, 11, |r| Block64(r.random()));
+    lde_plan_eq_separate::<Block128>(0x5eed_1de0_0128, 9, |r| Block128(r.random()));
+    lde_plan_eq_separate::<Block256>(0x5eed_1de0_0256, 8, |r| Block256([r.random(), r.random()]));
+}
+
+#[test]
+fn lde_plan_run_lanes_eq_run() {
+    lde_plan_lanes_eq_run::<Block8>(0x5eed_1a7e_0008, 8, |r| Block8(r.random()));
+    lde_plan_lanes_eq_run::<Block16>(0x5eed_1a7e_0016, 12, |r| Block16(r.random()));
+    lde_plan_lanes_eq_run::<Block32>(0x5eed_1a7e_0032, 11, |r| Block32(r.random()));
+    lde_plan_lanes_eq_run::<Block64>(0x5eed_1a7e_0064, 11, |r| Block64(r.random()));
+    lde_plan_lanes_eq_run::<Block128>(0x5eed_1a7e_0128, 9, |r| Block128(r.random()));
+    lde_plan_lanes_eq_run::<Block256>(0x5eed_1a7e_0256, 8, |r| Block256([r.random(), r.random()]));
+}
+
+#[test]
+fn lde_plan_run_lanes_from_bits_eq_scalar() {
+    lde_plan_lanes_from_bits::<Block8>(0x5eed_b175_0008, 8);
+    lde_plan_lanes_from_bits::<Block16>(0x5eed_b175_0016, 12);
+    lde_plan_lanes_from_bits::<Block32>(0x5eed_b175_0032, 11);
+    lde_plan_lanes_from_bits::<Block64>(0x5eed_b175_0064, 11);
+    lde_plan_lanes_from_bits::<Block128>(0x5eed_b175_0128, 9);
+    lde_plan_lanes_from_bits::<Block256>(0x5eed_b175_0256, 8);
+}
+
+#[test]
+fn lde_plan_run_lanes_rejects_bad_slices() {
+    let fft = AdditiveFft::<Block16>::new(3).unwrap();
+    let offsets = [Flat::from_raw(Block16(5)), Flat::from_raw(Block16(9))];
+    let plan = fft.lde_plan(&offsets).unwrap();
+
+    let data = vec![PackedFlat::<Block16>::default(); 8];
+
+    let mut scratch = vec![PackedFlat::<Block16>::default(); 16];
+    let mut out = vec![Flat::from_raw(Block16::ZERO); 8 * 2 * 8];
+
+    assert_eq!(
+        plan.run_lanes(&data[..7], &mut scratch, &mut out).err(),
+        Some(FftError::BadLength {
+            expected: 8,
+            got: 7
+        })
+    );
+    assert_eq!(
+        plan.run_lanes(&data, &mut scratch[..15], &mut out).err(),
+        Some(FftError::ShortScratch { need: 16, got: 15 })
+    );
+    assert_eq!(
+        plan.run_lanes(&data, &mut scratch, &mut out[..127]).err(),
+        Some(FftError::ShortOut {
+            need: 128,
+            got: 127
+        })
+    );
+    assert!(plan.run_lanes(&data, &mut scratch, &mut out).is_ok());
+
+    let empty = fft.lde_plan(&[]).unwrap();
+    assert!(empty.run_lanes(&data, &mut scratch, &mut []).is_ok());
+}
+
+#[test]
+fn lde_plan_run_rejects_bad_slices() {
+    let fft = AdditiveFft::<Block16>::new(3).unwrap();
+    let offsets = [Flat::from_raw(Block16(5)), Flat::from_raw(Block16(9))];
+    let plan = fft.lde_plan(&offsets).unwrap();
+
+    let data = vec![PackedFlat::<Block16>::default(); 8];
+
+    let mut scratch = vec![PackedFlat::<Block16>::default(); 16];
+    let mut out = vec![Flat::from_raw(Block16::ZERO); 15 * 8 + 8];
+
+    assert_eq!(
+        plan.run(&data[..7], &mut scratch, &mut out, 8).err(),
+        Some(FftError::BadLength {
+            expected: 8,
+            got: 7
+        })
+    );
+    assert_eq!(
+        plan.run(&data, &mut scratch[..15], &mut out, 8).err(),
+        Some(FftError::ShortScratch { need: 16, got: 15 })
+    );
+    assert_eq!(
+        plan.run(&data, &mut scratch, &mut out, 7).err(),
+        Some(FftError::BadStride { width: 8, got: 7 })
+    );
+    assert_eq!(
+        plan.run(&data, &mut scratch, &mut out[..127], 8).err(),
+        Some(FftError::ShortOut {
+            need: 128,
+            got: 127
+        })
+    );
+
+    let wrap = usize::MAX / 15 + 1;
+    assert_eq!(
+        plan.run(&data, &mut scratch, &mut out, wrap).err(),
+        Some(FftError::ShortOut {
+            need: usize::MAX,
+            got: 128
+        }),
+        "15 * stride wraps to 14"
+    );
+    assert!(plan.run(&data, &mut scratch, &mut out, 8).is_ok());
+
+    let empty = fft.lde_plan(&[]).unwrap();
+    assert!(empty.run(&data, &mut scratch, &mut [], 8).is_ok());
 }

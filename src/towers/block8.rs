@@ -19,10 +19,13 @@
 //! in both bases, and the aarch64 NEON kernels.
 
 use crate::constants::FLAT_TO_TOWER_BIT_MASKS_8;
+use crate::hardware::lanes_from_bits;
+#[cfg(target_arch = "aarch64")]
+use crate::packable::scatter_lanes;
 use crate::towers::bit::Bit;
 use crate::{
-    CanonicalDeserialize, CanonicalSerialize, Flat, HardwareField, PackableField, PackedFlat,
-    TowerField, constants,
+    BinaryFieldExtras, CanonicalDeserialize, CanonicalSerialize, Flat, HardwareField,
+    PackableField, PackedFlat, TowerField, constants,
 };
 use core::ops::{Add, AddAssign, BitXor, Mul, MulAssign, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
@@ -377,6 +380,27 @@ impl PackableField for Block8 {
 
         output[..PACKED_WIDTH_8].copy_from_slice(&packed.0);
     }
+
+    #[cfg(target_arch = "aarch64")]
+    #[inline(always)]
+    fn unpack_transposed(packed: &[Self::Packed], output: &mut [Self], lane_stride: usize) {
+        assert!(
+            lane_stride >= packed.len(),
+            "PackableField::unpack_transposed: lanes overlap"
+        );
+
+        let (tiles, rest) = packed.as_chunks::<PACKED_WIDTH_8>();
+
+        for (k, tile) in tiles.iter().enumerate() {
+            neon::store_transposed_8(tile, &mut output[k * PACKED_WIDTH_8..], lane_stride);
+        }
+
+        scatter_lanes::<Self, PACKED_WIDTH_8>(
+            rest,
+            &mut output[tiles.len() * PACKED_WIDTH_8..],
+            lane_stride,
+        );
+    }
 }
 
 impl Add for PackedBlock8 {
@@ -499,6 +523,16 @@ impl HardwareField for Block8 {
     }
 
     #[inline(always)]
+    fn from_bits(bits: u64) -> PackedFlat<Self> {
+        PackedFlat::from_raw(PackedBlock8(lanes_from_bits(bits)))
+    }
+
+    #[inline(always)]
+    fn splat(x: Flat<Self>) -> PackedFlat<Self> {
+        PackedFlat::from_raw(PackedBlock8([x.into_raw(); PACKED_WIDTH_8]))
+    }
+
+    #[inline(always)]
     fn add_hardware(lhs: Flat<Self>, rhs: Flat<Self>) -> Flat<Self> {
         Flat::from_raw(lhs.into_raw() + rhs.into_raw())
     }
@@ -565,8 +599,7 @@ impl HardwareField for Block8 {
 
     #[inline(always)]
     fn mul_hardware_scalar_packed(lhs: PackedFlat<Self>, rhs: Flat<Self>) -> PackedFlat<Self> {
-        let broadcasted = PackedBlock8([rhs.into_raw(); PACKED_WIDTH_8]);
-        Self::mul_hardware_packed(lhs, PackedFlat::from_raw(broadcasted))
+        Self::mul_hardware_packed(lhs, Self::splat(rhs))
     }
 
     #[inline(always)]
@@ -580,6 +613,31 @@ impl HardwareField for Block8 {
         v ^= v >> 1;
 
         v & 1
+    }
+}
+
+// ===================================
+// Binary Field Extras
+// ===================================
+
+impl BinaryFieldExtras for Block8 {
+    #[inline(always)]
+    fn square(&self) -> Self {
+        Block8::square(*self)
+    }
+
+    #[inline(always)]
+    fn trace(&self) -> Bit {
+        Bit::new(((self.0 & constants::TRACE_MASK_8).count_ones() & 1) as u8)
+    }
+
+    #[inline(always)]
+    fn solve_quadratic(c: Self) -> Option<Self> {
+        if c.trace() != Bit::ZERO {
+            return None;
+        }
+
+        Some(Block8(map_ct_8(c.0, &constants::SOLVE_QUADRATIC_BASIS_8)))
     }
 }
 
@@ -607,7 +665,6 @@ fn apply_matrix_8(val: Block8, table: &[u8; 256]) -> Block8 {
     Block8(unsafe { *table.get_unchecked(idx) })
 }
 
-#[cfg(not(feature = "table-math"))]
 #[inline(always)]
 fn map_ct_8(x: u8, basis: &[u8; 8]) -> u8 {
     let mut acc = 0u8;
@@ -784,6 +841,7 @@ const _: () = {
 #[cfg(target_arch = "aarch64")]
 mod neon {
     use super::*;
+    use crate::aarch64::transpose::transpose_16x16;
     use core::arch::aarch64::*;
     use core::mem::transmute;
 
@@ -791,6 +849,27 @@ mod neon {
         constants::POLY_8 == 0x1b,
         "reduction tables and verus twins hardcode R = 0x1b"
     );
+
+    #[inline(always)]
+    pub fn store_transposed_8(
+        tile: &[PackedBlock8; PACKED_WIDTH_8],
+        output: &mut [Block8],
+        lane_stride: usize,
+    ) {
+        // SAFETY:
+        // PackedBlock8 is repr(C) over [Block8; 16] and Block8 repr(transparent)
+        // over u8: both transmutes reinterpret 16-byte values, every pattern valid.
+        unsafe {
+            let rows: [uint8x16_t; PACKED_WIDTH_8] = transmute(*tile);
+            let lanes = transpose_16x16(&rows);
+
+            for (c, lane) in lanes.iter().enumerate() {
+                let at = c * lane_stride;
+                output[at..at + PACKED_WIDTH_8]
+                    .copy_from_slice(&transmute::<uint8x16_t, [Block8; PACKED_WIDTH_8]>(*lane));
+            }
+        }
+    }
 
     #[inline(always)]
     pub fn add_packed_8(lhs: PackedBlock8, rhs: PackedBlock8) -> PackedBlock8 {

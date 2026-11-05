@@ -7,11 +7,11 @@
 
 *Copyright (c) Andrei Kochergin and Oumuamua Labs.*
 
-Formally verified, hardware-accelerated binary tower fields for zero-knowledge proofs.
+Hardware-accelerated binary tower fields for zero-knowledge proof systems, with machine-checked Verus proofs.
 
 `hekate-math` runs the tower to 𝔽(2^256) for Sumcheck, GKR-based provers, and Binius
-protocols. A basis isomorphism maps tower elements onto CPU carry-less multiply
-instructions: PMULL (ARMv8 NEON) and PCLMULQDQ (x86_64 AVX2).
+protocols. A basis isomorphism maps tower elements onto PMULL, the ARMv8 NEON carry-less
+multiply; x86_64 takes the software path, with PCLMULQDQ on the roadmap.
 
 `no-std` compatible. Default execution paths are constant-time (unproved) against side-channel
 attacks. The type system separates canonical (tower) from polynomial (flat/hardware) representations.
@@ -61,8 +61,8 @@ Efficiency of polynomial operations in 𝔽(2^128).
 | **Dense Eval (Tower)**    | 2²⁰ coeffs      | 23.7 ms  | 675 MiB/s    |
 | **Dense Eval (Hardware)** | 2²⁰ coeffs      | 8.37 ms  | 1.87 GiB/s   |
 | **Batch Eval (SIMD)**     | 256 × 16384     | 4.44 ms  | 945 Melem/s  |
-| **Additive FFT (scalar)** | 2¹⁶ · Block16   | 477.7 µs | 137 Melem/s  |
-| **Additive FFT (packed)** | 2¹⁶ · ×8 lanes  | 386.6 µs | 1.36 Gelem/s |
+| **Additive FFT (scalar)** | 2¹⁶ · Block16   | 483.7 µs | 136 Melem/s  |
+| **Additive FFT (packed)** | 2¹⁶ · ×8 lanes  | 260.5 µs | 2.01 Gelem/s |
 | **Interpolate MSM**       | 65536 points    | 106.5 µs | 616 Melem/s  |
 | **MLE Evaluation**        | 20 variables    | 1.00 ms  | 1.04 Gelem/s |
 
@@ -72,7 +72,7 @@ Reproduce with `cargo bench --features table-math`, or `cargo bench` for the def
 
 ```toml
 [dependencies]
-hekate-math = "0.12"
+hekate-math = "0.13"
 ```
 
 ## Examples
@@ -155,10 +155,12 @@ fn example_simd() {
 ### Additive FFT (Gao–Mateer, Cantor Basis)
 
 In-place transforms over the 2^log_n-point subspace W_log_n,
-`F: BinaryFieldExtras + HardwareField` (Block16 through Block128): forward evaluates
+`F: BinaryFieldExtras + HardwareField` (Block8 through Block256): forward evaluates
 novel-basis coefficients, inverse interpolates. Scalar and packed (`F::WIDTH` lanes)
 variants, each with a coset form. Buffers of 1 MiB and up run on Rayon (`parallel`
-feature), bit-identical to serial.
+feature), bit-identical to serial. `lde_plan` fixes a block schedule, one inverse and the
+forward transforms on given cosets, that `LdePlan::run` applies to each packed block into a
+point-major output and `run_lanes` into a lane-major one, with no allocation per block.
 
 `ReedSolomon<F>` builds systematic RS[n, k, n−k+1] on these transforms:
 `encode(msg)[..k] == msg`.
@@ -231,7 +233,7 @@ Timing behaviour is a build-time choice. Pick per deployment.
 ## Formal Verification
 
 [`verus/`](verus/README.md) holds standalone [Verus](https://github.com/verus-lang/verus) proofs,
-outside the crate build: 3050 function verifications over 839 distinct functions in 18 units, 0 errors.
+outside the crate build: 3133 function verifications over 871 distinct functions in 18 units, 0 errors.
 Tower `mul` and `invert`, the NEON kernels, the constant-time conversions and batch promotes, and the
 additive FFT are proven against the GF(2^k) model, relative to two build-discharged axioms and the
 transcription seams registered in [`verus/TRUSTED_AXIOMS.md`](verus/TRUSTED_AXIOMS.md).

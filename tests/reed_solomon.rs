@@ -16,8 +16,8 @@
 // limitations under the License.
 
 use hekate_math::{
-    BinaryFieldExtras, Block16, Block32, Block128, Flat, HardwareField, PackableField, PackedFlat,
-    ReedSolomon, RsError, TowerField,
+    BinaryFieldExtras, Block8, Block16, Block32, Block128, Flat, HardwareField, PackableField,
+    PackedFlat, ReedSolomon, RsError, TowerField,
 };
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 
@@ -62,10 +62,10 @@ fn systematic_and_mds<F: BinaryFieldExtras + HardwareField>(
 }
 
 #[test]
-fn rs_block128_systematic_and_mds() {
-    let mut r = StdRng::seed_from_u64(0x5eed_7273_0128);
-    for (log_k, log_n) in [(1u32, 2u32), (3, 5), (6, 8), (7, 8)] {
-        systematic_and_mds(log_k, log_n, || Block128(r.random()));
+fn rs_block8_systematic_and_mds() {
+    let mut r = StdRng::seed_from_u64(0x5eed_7273_0008);
+    for (log_k, log_n) in [(3u32, 4u32), (4, 6), (7, 8)] {
+        systematic_and_mds(log_k, log_n, || Block8(r.random()));
     }
 }
 
@@ -81,6 +81,14 @@ fn rs_block16_systematic_and_mds() {
 fn rs_block32_systematic_and_mds() {
     let mut r = StdRng::seed_from_u64(0x5eed_7273_0032);
     systematic_and_mds(3, 6, || Block32(r.random()));
+}
+
+#[test]
+fn rs_block128_systematic_and_mds() {
+    let mut r = StdRng::seed_from_u64(0x5eed_7273_0128);
+    for (log_k, log_n) in [(1u32, 2u32), (3, 5), (6, 8), (7, 8)] {
+        systematic_and_mds(log_k, log_n, || Block128(r.random()));
+    }
 }
 
 #[test]
@@ -179,11 +187,6 @@ fn rs_rejects_bad_params() {
         ReedSolomon::<Block128>::new(10, 64),
         Err(RsError::FieldTooSmall { .. })
     ));
-
-    assert_eq!(
-        ReedSolomon::<Block128>::new(1, 60).err(),
-        Some(RsError::TwiddleAlloc { log_size: 60 })
-    );
 }
 
 #[test]

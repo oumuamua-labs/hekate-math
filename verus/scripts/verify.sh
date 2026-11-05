@@ -41,7 +41,7 @@ fi
 
 # Silent-shrink guard: bump with TRUSTED_AXIOMS.md.
 EXPECTED_EXTERNAL_BODY=2
-EXPECTED_VERIFIED=3050
+EXPECTED_VERIFIED=3133
 
 # The whole verifier::external* family is trusted;
 # only external_body, only in axioms_t.rs, only on its own line.
@@ -67,9 +67,28 @@ if [ -n "$FORBIDDEN" ]; then
   exit 2
 fi
 
+# axioms_t.rs is a #[path] child of gf_model.rs;
+# fft/*.rs are modules of the fft/mod.rs unit.
+unit_of() {
+  case "$1" in
+    verus/axioms_t.rs) echo verus/gf_model.rs ;;
+    verus/fft/*.rs) echo verus/fft/mod.rs ;;
+    *) echo "$1" ;;
+  esac
+}
+
 FULL=0
 
 if [ "$#" -gt 0 ]; then
+  for f in "$@"; do
+    UNIT=$(unit_of "$f")
+
+    if [ "$UNIT" != "$f" ]; then
+      echo "error: $f is not a unit; run $UNIT" >&2
+      exit 2
+    fi
+  done
+
   FILES="$*"
 else
   FULL=1
@@ -78,14 +97,16 @@ else
 
   # Silent-shrink guard:
   # bump when adding or removing a proof file.
-  if [ "$N" -ne 19 ]; then
-    echo "error: expected 19 verus files, found $N" >&2
+  if [ "$N" -ne 24 ]; then
+    echo "error: expected 24 verus files, found $N" >&2
     exit 2
   fi
 
-  # axioms_t.rs is a #[path] child of gf_model.rs,
-  # verified through every unit including it, not a root.
-  FILES=$(echo "$FILES" | grep -v '/axioms_t\.rs$')
+  FILES=$(
+    for f in $FILES; do
+      [ "$(unit_of "$f")" = "$f" ] && echo "$f"
+    done
+  )
 fi
 
 GHA="${GITHUB_ACTIONS:-}"
@@ -116,19 +137,25 @@ for f in $FILES; do
     echo "${BLD}${CYN}━━ ${f}${RST}"
   fi
 
+  # A mod.rs unit is named for its directory, not "mod"
+  CRATE_ARGS=""
+
+  case "$f" in
+    */mod.rs) CRATE_ARGS="--crate-name $(basename "$(dirname "$f")")" ;;
+  esac
+
   # shellcheck disable=SC2086
-  JSON=$("$VERUS_BIN" "$f" $SEED_ARGS --time-expanded --output-json 2> "$STDERR_LOG")
+  JSON=$("$VERUS_BIN" "$f" $CRATE_ARGS $SEED_ARGS --time-expanded --output-json 2> "$STDERR_LOG")
 
   OK=$(echo "$JSON" | jq -r '."verification-results".success // false')
   VERIFIED=$(echo "$JSON" | jq -r '."verification-results".verified // 0')
-  ERRORS=$(echo "$JSON" | jq -r '."verification-results".errors // 999')
+  ERRORS=$(echo "$JSON" | jq -r '."verification-results".errors // empty')
 
   [ -n "$OK" ] || OK=false
   [ -n "$VERIFIED" ] || VERIFIED=0
-  [ -n "$ERRORS" ] || ERRORS=0
 
   echo "$JSON" | jq -r '
-    ."times-ms".smt."smt-run-module-times"[]
+    ."times-ms".smt."smt-run-module-times"[]?
     | ."function-breakdown"[]
     | [(if .success then "PASS" else "FAIL" end),
        ((.["time-micros"] / 100 | round) / 10),
@@ -150,7 +177,15 @@ for f in $FILES; do
     printf "  %s-> %s verified, %s errors%s\n" "$DIM" "$VERIFIED" "$ERRORS" "$RST"
   else
     UNIT_OK=0
-    printf "  %s-> %s verified, %s errors%s\n" "$RED" "$VERIFIED" "$ERRORS" "$RST"
+
+    # Verus counts failed proofs only; a rustc or VIR
+    # error (by (compute) refutations too) stops it first.
+    if [ "${ERRORS:-0}" -eq 0 ]; then
+      printf "  %s-> no verification result%s\n" "$RED" "$RST"
+    else
+      printf "  %s-> %s verified, %s errors%s\n" "$RED" "$VERIFIED" "$ERRORS" "$RST"
+    fi
+
     sed 's/^/  /' "$STDERR_LOG"
   fi
 
