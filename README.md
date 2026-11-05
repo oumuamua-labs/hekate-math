@@ -7,11 +7,11 @@
 
 *Copyright (c) Andrei Kochergin and Oumuamua Labs.*
 
-Formally verified, hardware-accelerated binary tower fields for zero-knowledge proofs.
+Hardware-accelerated binary tower fields for zero-knowledge proof systems, with machine-checked Verus proofs.
 
 `hekate-math` runs the tower to 𝔽(2^256) for Sumcheck, GKR-based provers, and Binius
-protocols. A basis isomorphism maps tower elements onto CPU carry-less multiply
-instructions: PMULL (ARMv8 NEON) and PCLMULQDQ (x86_64 AVX2).
+protocols. A basis isomorphism maps tower elements onto PMULL, the ARMv8 NEON carry-less
+multiply; x86_64 takes the software path, with PCLMULQDQ on the roadmap.
 
 `no-std` compatible. Default execution paths are constant-time (unproved) against side-channel
 attacks. The type system separates canonical (tower) from polynomial (flat/hardware) representations.
@@ -72,7 +72,7 @@ Reproduce with `cargo bench --features table-math`, or `cargo bench` for the def
 
 ```toml
 [dependencies]
-hekate-math = "0.12"
+hekate-math = "0.13"
 ```
 
 ## Examples
