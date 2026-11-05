@@ -22,7 +22,7 @@ use super::convert::{
     map_ct_32_twin, map_ct_64_twin, map_ct_128_split_twin, tower_bit_8_twin, tower_bit_16_twin,
     tower_bit_32_twin, tower_bit_64_twin, tower_bit_128_twin,
 };
-use super::fft::{CantorTwin, FftTwin, LdeTwin};
+use super::fft::{cantor::CantorTwin, lde::LdeTwin, twin::FftTwin};
 use hekate_math::{
     AdditiveFft, Block8, Block16, Block32, Block64, Block128, CantorBasis, Flat, FlatPromote,
     HardwareField, PackableField, PackedFlat,
