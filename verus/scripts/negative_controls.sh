@@ -34,10 +34,21 @@ CONTROLS=0
 
 # -1: no verification result (compile error).
 # A by (compute) refutation has no JSON count; stderr names it.
+# $2 names a child module, which --verify-root skips.
 errors_of() {
   local json count refuted
+  local args=("$1" --verify-root)
 
-  json=$("$VERUS_BIN" "$1" --verify-root --output-json 2> "$TMP/stderr")
+  if [ -n "${2:-}" ]; then
+    args=("$1" --verify-module "$2")
+  fi
+
+  # verify.sh's crate name: it is part of every SMT symbol
+  case "$1" in
+    */mod.rs) args+=(--crate-name "$(basename "$(dirname "$1")")") ;;
+  esac
+
+  json=$("$VERUS_BIN" "${args[@]}" --output-json 2> "$TMP/stderr")
   count=$(echo "$json" | jq -r '
     ."verification-results"
     | if .errors > 0 then .errors
@@ -57,16 +68,16 @@ errors_of() {
 baseline() {
   local errors
 
-  errors=$(errors_of "verus/$1")
+  errors=$(errors_of "verus/$1" "${2:-}")
 
   if [ "$errors" != "0" ]; then
-    echo "error: baseline $1 is not green ($errors); run verus/scripts/verify.sh first" >&2
+    echo "error: baseline $* is not green ($errors); run verus/scripts/verify.sh first" >&2
     exit 2
   fi
 }
 
 control() {
-  local name=$1 file=$2 item=$3 from=$4 to=$5 unit=${6:-$2}
+  local name=$1 file=$2 item=$3 from=$4 to=$5 unit=${6:-$2} module=${7:-}
   local hits errors
 
   CONTROLS=$((CONTROLS + 1))
@@ -93,7 +104,7 @@ control() {
   fi
 
   cp "$TMP/mutant" "$TMP/verus/$file"
-  errors=$(errors_of "$TMP/verus/$unit")
+  errors=$(errors_of "$TMP/verus/$unit" "$module")
 
   case "$errors" in
     -1)
@@ -114,7 +125,10 @@ control() {
 baseline flat/mul.rs
 baseline flat/packed.rs
 baseline flat/convert.rs
-baseline fft.rs
+baseline fft/mod.rs twiddles
+baseline fft/mod.rs twin
+baseline fft/mod.rs lde
+baseline fft/mod.rs cantor
 baseline inverse.rs
 baseline flat/promote.rs
 baseline flat/bridge.rs
@@ -175,53 +189,65 @@ control parity_6996 flat/convert.rs 'pub fn tower_bit_64_twin(' \
   '((0x6996u16 >> idx) & 1) as u8' \
   '((0x6996u16 >> idx) & 1) as u8 ^ 1'
 
-control fft_fold_0x86 fft.rs 'fn mul_flat(a: u128, b: u128)' \
+control fft_fold_0x86 fft/twiddles.rs 'pub fn mul_flat(a: u128, b: u128)' \
   'x = rr ^ 0x87;' \
-  'x = rr ^ 0x86;'
+  'x = rr ^ 0x86;' \
+  fft/mod.rs twiddles
 
-control double_noxor fft.rs '    pub fn new(log_n: u32, lift: Vec<u128>)' \
+control double_noxor fft/twin.rs '    pub fn new(log_n: u32, lift: Vec<u128>)' \
   'low.push(tw ^ l);' \
-  'low.push(tw);'
+  'low.push(tw);' \
+  fft/mod.rs twin
 
-control chunk_base fft.rs '    fn sum_lift(' \
+control chunk_base fft/twin.rs '    pub fn sum_lift(' \
   'let l = self.lift[base + j];' \
-  'let l = self.lift[j];'
+  'let l = self.lift[j];' \
+  fft/mod.rs twin
 
-control chunk_sum fft.rs '    fn pass_inv_exec(' \
+control chunk_sum fft/twin.rs '    pub fn pass_inv_exec(' \
   'let ch = add_flat(coset, high);' \
-  'let ch = coset;'
+  'let ch = coset;' \
+  fft/mod.rs twin
 
-control lde_top_noxor fft.rs '    fn fwd_top_into_exec(' \
+control lde_top_noxor fft/lde.rs '    fn fwd_top_into_exec(' \
   'dst.set(s + r, add_flat(v, q));' \
-  'dst.set(s + r, v);'
+  'dst.set(s + r, v);' \
+  fft/mod.rs lde
 
-control lde_inv_pair fft.rs '    fn inv_bottom_into_exec(' \
+control lde_inv_pair fft/lde.rs '    fn inv_bottom_into_exec(' \
   'let v = add_flat(p, mul_flat(qv, tw));' \
-  'let v = add_flat(p, mul_flat(q, tw));'
+  'let v = add_flat(p, mul_flat(q, tw));' \
+  fft/mod.rs lde
 
-control lde_bottom_hi fft.rs '    fn fwd_bottom_into_exec(' \
+control lde_bottom_hi fft/lde.rs '    fn fwd_bottom_into_exec(' \
   'out.set(at + stride, add_flat(v, q));' \
-  'out.set(at + stride, v);'
+  'out.set(at + stride, v);' \
+  fft/mod.rs lde
 
-control lde_run_chain fft.rs '    pub fn run(' \
+control lde_run_chain fft/lde.rs '    pub fn run(' \
   'self.chains[base + levels - 1]);' \
-  'self.chains[base]);'
+  'self.chains[base]);' \
+  fft/mod.rs lde
 
-control lde_run_lane0 fft.rs '    pub fn run(' \
+control lde_run_lane0 fft/lde.rs '    pub fn run(' \
   'let row0 = lane0 + j * n * stride;' \
-  'let row0 = j * n * stride;'
+  'let row0 = j * n * stride;' \
+  fft/mod.rs lde
 
-control lde_tile_flush fft.rs '    fn fwd_bottom_lanes_into_exec(' \
+control lde_tile_flush fft/lde.rs '    fn fwd_bottom_lanes_into_exec(' \
   'flush_tile_exec(&points, LANE_TILE, out, row0 + u0);' \
-  'flush_tile_exec(&points, LANE_TILE, out, row0);'
+  'flush_tile_exec(&points, LANE_TILE, out, row0);' \
+  fft/mod.rs lde
 
-control halve_swapped fft.rs 'fn halve(' \
+control halve_swapped fft/cantor.rs 'fn halve(' \
   'add_flat(p, mul_flat(q, tw))' \
-  'add_flat(q, mul_flat(p, tw))'
+  'add_flat(q, mul_flat(p, tw))' \
+  fft/mod.rs cantor
 
-control fold_right_tw fft.rs '    fn fold(' \
+control fold_right_tw fft/cantor.rs '    fn fold(' \
   'tw = add_flat(tw0, self.betas[0]);' \
-  'tw = tw0;'
+  'tw = tw0;' \
+  fft/mod.rs cantor
 
 control inv8_chain inverse.rs 'pub open spec fn inv8_twin(' \
   '        x2,' \

@@ -115,37 +115,37 @@ src/towers/block256.rs | impl HardwareField for Block256::mul_hardware | verus/f
 
 src/aarch64/transpose.rs | transpose_16x16 | verus/flat/promote.rs::transpose_16x16_twin | caf78a0b23e86c76
 
-src/fft/additive.rs | impl AdditiveFft<F>::new | verus/fft.rs::FftTwin::new | a98adc702753861b
-src/fft/additive.rs | impl AdditiveFft<F>::forward_scalar | verus/fft.rs::FftTwin::forward_coset | 7948bd9922722a30
-src/fft/additive.rs | impl AdditiveFft<F>::inverse_scalar | verus/fft.rs::FftTwin::inverse_coset | 8082cb49cf1065f6
-src/fft/additive.rs | impl AdditiveFft<F>::forward_coset_scalar | verus/fft.rs::FftTwin::forward_coset | c014b6c50e26930b
-src/fft/additive.rs | impl AdditiveFft<F>::inverse_coset_scalar | verus/fft.rs::FftTwin::inverse_coset | 0eb8d9ed82754844
-src/fft/additive.rs | impl AdditiveFft<F>::lde_plan | verus/fft.rs::FftTwin::lde_plan | 5e588e9d0b2a333b
-src/fft/additive.rs | impl AdditiveFft<F>::check_len | verus/fft.rs::FftTwin::forward_coset | 1ba279efb90da9d2
-src/fft/additive.rs | impl LdePlan<F>::run | verus/fft.rs::LdeTwin::run | 5df1d96964b28023
-src/fft/additive.rs | impl AdditiveFft<F>::fwd_levels | verus/fft.rs::fwd_levels_exec | e25ca6b846a8a83d
-src/fft/additive.rs | impl AdditiveFft<F>::inv_levels | verus/fft.rs::inv_levels_exec | eca28695800fe4ed
-src/fft/additive.rs | coset_chain | verus/fft.rs::fwd_levels_exec | bab3dd342d6151c8
+src/fft/additive.rs | impl AdditiveFft<F>::new | verus/fft/twin.rs::FftTwin::new | a98adc702753861b
+src/fft/additive.rs | impl AdditiveFft<F>::forward_scalar | verus/fft/twin.rs::FftTwin::forward_coset | 7948bd9922722a30
+src/fft/additive.rs | impl AdditiveFft<F>::inverse_scalar | verus/fft/twin.rs::FftTwin::inverse_coset | 8082cb49cf1065f6
+src/fft/additive.rs | impl AdditiveFft<F>::forward_coset_scalar | verus/fft/twin.rs::FftTwin::forward_coset | c014b6c50e26930b
+src/fft/additive.rs | impl AdditiveFft<F>::inverse_coset_scalar | verus/fft/twin.rs::FftTwin::inverse_coset | 0eb8d9ed82754844
+src/fft/additive.rs | impl AdditiveFft<F>::lde_plan | verus/fft/lde.rs::FftTwin::lde_plan | 5e588e9d0b2a333b
+src/fft/additive.rs | impl AdditiveFft<F>::check_len | verus/fft/twin.rs::FftTwin::forward_coset | 1ba279efb90da9d2
+src/fft/additive.rs | impl LdePlan<F>::run | verus/fft/lde.rs::LdeTwin::run | 5df1d96964b28023
+src/fft/additive.rs | impl AdditiveFft<F>::fwd_levels | verus/fft/twin.rs::fwd_levels_exec | e25ca6b846a8a83d
+src/fft/additive.rs | impl AdditiveFft<F>::inv_levels | verus/fft/twin.rs::inv_levels_exec | eca28695800fe4ed
+src/fft/additive.rs | coset_chain | verus/fft/twin.rs::fwd_levels_exec | bab3dd342d6151c8
 src/fft/additive.rs | impl Twiddles<F>::at | verus/TRUSTED_AXIOMS.md::additive.rs::fwd_parallel | 3b879487608f86d4
-src/fft/additive.rs | impl Twiddles<F>::blocks | verus/fft.rs::pass_fwd_exec | 14527abed9d843d8
-src/fft/additive.rs | impl Twiddles<F>::blocks | verus/fft.rs::pass_inv_exec | 14527abed9d843d8
-src/fft/additive.rs | impl Twiddles<F>::for_each_block | verus/fft.rs::FftTwin::inv_bottom_into_exec | 9c673ff32cc961ea
-src/fft/additive.rs | impl Twiddles<F>::for_each_block | verus/fft.rs::FftTwin::fwd_bottom_into_exec | 9c673ff32cc961ea
-src/fft/additive.rs | impl Twiddles<F>::for_each_block | verus/fft.rs::FftTwin::fwd_bottom_lanes_into_exec | 9c673ff32cc961ea
+src/fft/additive.rs | impl Twiddles<F>::blocks | verus/fft/twin.rs::pass_fwd_exec | 14527abed9d843d8
+src/fft/additive.rs | impl Twiddles<F>::blocks | verus/fft/twin.rs::pass_inv_exec | 14527abed9d843d8
+src/fft/additive.rs | impl Twiddles<F>::for_each_block | verus/fft/lde.rs::FftTwin::inv_bottom_into_exec | 9c673ff32cc961ea
+src/fft/additive.rs | impl Twiddles<F>::for_each_block | verus/fft/lde.rs::FftTwin::fwd_bottom_into_exec | 9c673ff32cc961ea
+src/fft/additive.rs | impl Twiddles<F>::for_each_block | verus/fft/lde.rs::FftTwin::fwd_bottom_lanes_into_exec | 9c673ff32cc961ea
 src/fft/additive.rs | parallel_eligible | verus/TRUSTED_AXIOMS.md::additive.rs::fwd_parallel | ae2a223e2d07b988
-src/fft/additive.rs | fwd_parallel | verus/fft.rs::pass_fwd_exec | a2651fb56345f9d3
-src/fft/additive.rs | inv_parallel | verus/fft.rs::pass_inv_exec | 1e204a926b5b03fc
+src/fft/additive.rs | fwd_parallel | verus/fft/twin.rs::pass_fwd_exec | a2651fb56345f9d3
+src/fft/additive.rs | inv_parallel | verus/fft/twin.rs::pass_inv_exec | 1e204a926b5b03fc
 src/fft/additive.rs | tile_log | verus/TRUSTED_AXIOMS.md::additive.rs::fwd_parallel | 8e3381ec2f792ead
-src/fft/additive.rs | blocks_serial | verus/fft.rs::pass_fwd_exec | 9b6d9152122ed5fb
-src/fft/additive.rs | fwd_butterflies | verus/fft.rs::fwd_bfly_block | ef6f1268c6612ac2
-src/fft/additive.rs | inv_butterflies | verus/fft.rs::inv_bfly_block | f0d5a6972e735229
-src/fft/additive.rs | inv_bottom_into | verus/fft.rs::FftTwin::inv_bottom_into_exec | ac1d62138f30bd64
-src/fft/additive.rs | fwd_top_into | verus/fft.rs::FftTwin::fwd_top_into_exec | e7b4e4242b143dd4
-src/fft/additive.rs | fwd_bottom_into | verus/fft.rs::FftTwin::fwd_bottom_into_exec | df7c0836f2f2eb4b
-src/fft/additive.rs | fwd_bottom_lanes_into | verus/fft.rs::FftTwin::fwd_bottom_lanes_into_exec | ec353c40cdc6ca9f
-src/fft/additive.rs | impl LdePlan<F>::run_lanes | verus/fft.rs::LdeTwin::run | 4f1c0922e648bf3c
-src/fft/additive.rs | impl LdePlan<F>::check_block | verus/fft.rs::LdeTwin::run | 23fd648fba0b547d
-src/fft/additive.rs | impl LdePlan<F>::transforms | verus/fft.rs::LdeTwin::run | f61cd24399f32f08
+src/fft/additive.rs | blocks_serial | verus/fft/twin.rs::pass_fwd_exec | 9b6d9152122ed5fb
+src/fft/additive.rs | fwd_butterflies | verus/fft/twin.rs::fwd_bfly_block | ef6f1268c6612ac2
+src/fft/additive.rs | inv_butterflies | verus/fft/twin.rs::inv_bfly_block | f0d5a6972e735229
+src/fft/additive.rs | inv_bottom_into | verus/fft/lde.rs::FftTwin::inv_bottom_into_exec | ac1d62138f30bd64
+src/fft/additive.rs | fwd_top_into | verus/fft/lde.rs::FftTwin::fwd_top_into_exec | e7b4e4242b143dd4
+src/fft/additive.rs | fwd_bottom_into | verus/fft/lde.rs::FftTwin::fwd_bottom_into_exec | df7c0836f2f2eb4b
+src/fft/additive.rs | fwd_bottom_lanes_into | verus/fft/lde.rs::FftTwin::fwd_bottom_lanes_into_exec | ec353c40cdc6ca9f
+src/fft/additive.rs | impl LdePlan<F>::run_lanes | verus/fft/lde.rs::LdeTwin::run | 4f1c0922e648bf3c
+src/fft/additive.rs | impl LdePlan<F>::check_block | verus/fft/lde.rs::LdeTwin::run | 23fd648fba0b547d
+src/fft/additive.rs | impl LdePlan<F>::transforms | verus/fft/lde.rs::LdeTwin::run | f61cd24399f32f08
 
 src/fft/blocked.rs | impl Group<'_, K>::spans | verus/TRUSTED_AXIOMS.md::blocked.rs::Group | 25a6c424f88f9b1b
 src/fft/blocked.rs | impl Group<'_, K>::span | verus/TRUSTED_AXIOMS.md::blocked.rs::Group | fa933668876de313
@@ -155,12 +155,12 @@ src/fft/blocked.rs | impl Group<'_, K>::levels | verus/TRUSTED_AXIOMS.md::blocke
 src/fft/blocked.rs | gather_len | verus/TRUSTED_AXIOMS.md::blocked.rs::Group | 5c62aa697d3fbf1c
 
 src/fft/cantor.rs | impl CantorBasis<F>::new | verus/TRUSTED_AXIOMS.md::CantorBasis::new | 7545fc6d104e6976
-src/fft/cantor.rs | impl CantorBasis<F>::point | verus/fft.rs::CantorTwin::point | a0ea26f810339a6d
-src/fft/cantor.rs | impl CantorBasis<F>::evaluate_at | verus/fft.rs::CantorTwin::evaluate_at | 601835d3a2385281
-src/fft/cantor.rs | impl CantorBasis<F>::check_index | verus/fft.rs::CantorTwin::index_ok | 0f7d3d94fa7273d3
-src/fft/cantor.rs | impl CantorBasis<F>::beta_sum | verus/fft.rs::CantorTwin::beta_sum | d472a59ddf7406ce
-src/fft/cantor.rs | impl CantorBasis<F>::beta_sum | verus/fft.rs::FftTwin::sum_lift | d472a59ddf7406ce
-src/fft/cantor.rs | impl CantorBasis<F>::fold | verus/fft.rs::CantorTwin::fold | f605ade74f377f99
+src/fft/cantor.rs | impl CantorBasis<F>::point | verus/fft/cantor.rs::CantorTwin::point | a0ea26f810339a6d
+src/fft/cantor.rs | impl CantorBasis<F>::evaluate_at | verus/fft/cantor.rs::CantorTwin::evaluate_at | 601835d3a2385281
+src/fft/cantor.rs | impl CantorBasis<F>::check_index | verus/fft/cantor.rs::CantorTwin::index_ok | 0f7d3d94fa7273d3
+src/fft/cantor.rs | impl CantorBasis<F>::beta_sum | verus/fft/cantor.rs::CantorTwin::beta_sum | d472a59ddf7406ce
+src/fft/cantor.rs | impl CantorBasis<F>::beta_sum | verus/fft/twin.rs::FftTwin::sum_lift | d472a59ddf7406ce
+src/fft/cantor.rs | impl CantorBasis<F>::fold | verus/fft/cantor.rs::CantorTwin::fold | f605ade74f377f99
 src/fft/cantor.rs | impl CantorBasis<F>::evaluate_parallel | verus/TRUSTED_AXIOMS.md::cantor.rs::evaluate_parallel | 6a90b61310cb75d3
 src/fft/cantor.rs | impl CantorBasis<F>::root | verus/TRUSTED_AXIOMS.md::cantor.rs::evaluate_parallel | b2ef75a4f8a300ea
 src/fft/cantor.rs | impl CantorBasis<F>::node | verus/TRUSTED_AXIOMS.md::cantor.rs::evaluate_parallel | c39ff1730416ef52
@@ -175,9 +175,9 @@ src/algebra.rs | trait BinaryFieldExtras::frobenius | verus/algebra.rs::frobeniu
 src/algebra.rs | trait BinaryFieldExtras::trace | verus/algebra.rs::trace_iter16 | 614f08b66d9e36fb
 src/algebra.rs | macro_rules! impl_binary_field_extras | verus/algebra.rs::square16_twin | 09f6c84c25115270
 
-src/packable.rs | trait PackableField::unpack_transposed | verus/fft.rs::flush_tile_exec | 787b4936e87e88cb
-src/packable.rs | impl PackableField for Flat<F>::unpack_transposed | verus/fft.rs::flush_tile_exec | 2b16567ad6070fec
-src/packable.rs | scatter_lanes | verus/fft.rs::flush_tile_exec | 70db666e79db9cb8
+src/packable.rs | trait PackableField::unpack_transposed | verus/fft/lde.rs::flush_tile_exec | 787b4936e87e88cb
+src/packable.rs | impl PackableField for Flat<F>::unpack_transposed | verus/fft/lde.rs::flush_tile_exec | 2b16567ad6070fec
+src/packable.rs | scatter_lanes | verus/fft/lde.rs::flush_tile_exec | 70db666e79db9cb8
 
 build/gf_oracle.rs | sb8 | verus/tower/block8.rs::schoolbook8 | 8038e757cb94ea6b
 build/gf_oracle.rs | clmul8 | verus/tower/block8.rs::clmul8 | d063f3f4e7d36944
